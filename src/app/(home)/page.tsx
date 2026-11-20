@@ -38,25 +38,30 @@ export default function HomePage() {
       {/* Two cards per row; one per row on phones. */}
       <section className="mx-auto mt-16 grid max-w-4xl gap-4 md:grid-cols-2">
         {TRACK_CARDS.map(({ track, title, icon: Icon, iconClass }) => (
-          <Link
+          // The whole card opens the track (the title link stretches over it).
+          // The reset button sits above that link, so it can be clicked on its own.
+          <div
             key={track}
-            href={`/learn/${track}`}
-            className="group block rounded-2xl border bg-fd-card p-6 shadow-sm transition hover:border-fd-primary/40 hover:shadow-md"
+            className="group relative rounded-2xl border bg-fd-card p-6 shadow-sm transition hover:border-fd-primary/40 hover:shadow-md"
           >
             <div className="flex items-center gap-3">
               <span className={`rounded-xl p-2.5 ${iconClass}`}>
                 <Icon className="size-5" />
               </span>
-              <h2 className="text-lg font-semibold transition-colors group-hover:text-fd-primary">{title}</h2>
+              <h2 className="text-lg font-semibold transition-colors group-hover:text-fd-primary">
+                <Link href={`/learn/${track}`} className="after:absolute after:inset-0 after:rounded-2xl">
+                  {title}
+                </Link>
+              </h2>
               <ArrowRight className="ml-auto size-5 shrink-0 text-fd-muted-foreground transition group-hover:translate-x-1 group-hover:text-fd-primary" />
             </div>
             <TrackProgress pageUrls={pageUrlsOf(track)} />
-          </Link>
+            <div className="relative z-10 mt-3 flex justify-end">
+              {/* Resets only this track's done marks. */}
+              <ResetProgressButton pageUrls={pageUrlsOf(track)} trackName={title} />
+            </div>
+          </div>
         ))}
-        <div className="flex justify-end md:col-span-2">
-          {/* Resets the done marks of every track. */}
-          <ResetProgressButton pageUrls={pages.map((page) => page.url)} />
-        </div>
       </section>
     </main>
   );
