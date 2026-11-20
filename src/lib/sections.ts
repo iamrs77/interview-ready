@@ -1,19 +1,31 @@
 import {
   Activity,
+  Binary,
   Box,
+  Brackets,
+  Coins,
   Compass,
   Database,
   Dumbbell,
+  FileCode,
   Layers,
+  Layers2,
   LayoutGrid,
+  Link,
   MessageSquare,
+  MoveHorizontal,
   PenTool,
   Puzzle,
   Ruler,
+  Search,
   Send,
   Shapes,
   Share2,
   ShieldCheck,
+  Table,
+  TreeDeciduous,
+  Triangle,
+  Undo2,
   Workflow,
   Zap,
   type LucideIcon,
@@ -58,9 +70,34 @@ export const lldSections = {
   problems: { label: 'Practice Problems', icon: Dumbbell, className: 'bg-rose-500/10 text-rose-700' },
 } satisfies Record<string, Section>;
 
+/** The same for DSA (folders in content/dsa). */
+export const dsaSections = {
+  guide: { label: 'Guide', icon: Compass, className: 'bg-violet-500/10 text-violet-700' },
+  foundations: { label: 'Foundations', icon: Layers, className: 'bg-teal-500/10 text-teal-700' },
+  'js-toolkit': { label: 'JavaScript Toolkit', icon: FileCode, className: 'bg-pink-500/10 text-pink-700' },
+  'arrays-hashing': { label: 'Arrays and Hashing', icon: Brackets, className: 'bg-sky-500/10 text-sky-700' },
+  'two-pointers': { label: 'Two Pointers and Sliding Window', icon: MoveHorizontal, className: 'bg-indigo-500/10 text-indigo-700' },
+  'searching-sorting': { label: 'Binary Search and Sorting', icon: Search, className: 'bg-amber-500/10 text-amber-700' },
+  'stacks-queues': { label: 'Stacks and Queues', icon: Layers2, className: 'bg-orange-500/10 text-orange-700' },
+  'linked-lists': { label: 'Linked Lists', icon: Link, className: 'bg-lime-500/10 text-lime-700' },
+  trees: { label: 'Trees', icon: TreeDeciduous, className: 'bg-emerald-500/10 text-emerald-700' },
+  heaps: { label: 'Heaps', icon: Triangle, className: 'bg-rose-500/10 text-rose-700' },
+  graphs: { label: 'Graphs', icon: Share2, className: 'bg-fuchsia-500/10 text-fuchsia-700' },
+  backtracking: { label: 'Backtracking', icon: Undo2, className: 'bg-cyan-500/10 text-cyan-700' },
+  'dynamic-programming': { label: 'Dynamic Programming', icon: Table, className: 'bg-red-500/10 text-red-700' },
+  'greedy-intervals': { label: 'Greedy and Intervals', icon: Coins, className: 'bg-yellow-500/10 text-yellow-700' },
+  'math-bits': { label: 'Math and Bits', icon: Binary, className: 'bg-slate-500/10 text-slate-700' },
+} satisfies Record<string, Section>;
+
+/** Each track's sections, by track folder name. System Design is the default. */
+const sectionsByTrack: Record<string, Record<string, Section>> = {
+  'low-level-design': lldSections,
+  dsa: dsaSections,
+};
+
 /** Finds the section from a page's slugs, e.g. ['system-design', 'caching', 'redis']. */
 export function getSection(slugs: string[]): Section {
-  const list: Record<string, Section> = slugs[0] === 'low-level-design' ? lldSections : sections;
+  const list: Record<string, Section> = sectionsByTrack[slugs[0]] ?? sections;
   const key = slugs[1];
   return key && key in list ? list[key] : list.guide;
 }
