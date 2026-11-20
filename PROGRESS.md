@@ -7,7 +7,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 
 ## System Design
 
-**Written: 126 of 126**
+**Written: 133 of 133**
 
 ### Guide
 - ✅ Start Here
@@ -56,6 +56,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ Consistent Hashing
 - ✅ Connection Pooling
 - ✅ PostgreSQL vs MySQL
+- ✅ Cassandra and DynamoDB
 - ✅ How a Query Runs
 - ✅ SQL Fundamentals
 
@@ -115,6 +116,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 ### 8. Advanced Components
 - ✅ Object, Block and File Storage
 - ✅ Search and Inverted Indexes
+- ✅ Elasticsearch
 - ✅ Geospatial Indexing
 - ✅ Bloom Filter, HyperLogLog, Count-Min Sketch
 - ✅ Batch vs Stream Processing
@@ -153,6 +155,11 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ Design an E-commerce Platform
 - ✅ Design a Ticket Booking System
 - ✅ Design Google Drive
+- ✅ Design Yelp (Nearby Places)
+- ✅ Design Instagram
+- ✅ Design Live Comments (Facebook Live)
+- ✅ Design LeetCode (Online Judge)
+- ✅ Design Tinder
 
 **Hard**
 
@@ -168,7 +175,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 
 ## Low-Level Design
 
-**Written: 55 of 55**
+**Written: 59 of 59**
 
 ### Guide
 - ✅ Start Here
@@ -248,6 +255,10 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ Design Snake and Ladder
 - ✅ Design an ATM
 - ✅ Design Splitwise
+- ✅ Design a Rate Limiter
+- ✅ Design an In-Memory Key-Value Store
+- ✅ Design a Pub-Sub System
+- ✅ Design a Task Scheduler
 
 **Hard**
 
@@ -259,9 +270,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 
 ## To do
 - [x] **System Design Cheat Sheet:** written last, from all the finished lessons.
-- [x] **System Design Flashcards:** 774 cards in 11 decks, one per module. Check them with `npm run check:flashcards`.
 - [x] **Low-Level Design:** all lessons, practice problems and the Cheat Sheet.
-- [ ] **Low-Level Design Flashcards:** not started (at most 6 per lesson).
 
 ## Later: separate tracks
 - **OS and Concurrency (slim):** processes vs threads, concurrency vs parallelism, race conditions and mutexes,
