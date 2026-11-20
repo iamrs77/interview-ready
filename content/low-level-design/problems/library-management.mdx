@@ -159,229 +159,474 @@ sequenceDiagram
 
 ## Step 5: Code
 
-**Part 1: the enum, the clock and small classes.** `FakeClock` only moves when a test tells it to.
+The code is split into small parts. Paste them together in order and they run.
+
+### Part 1: The enum and the clock
+
+`CopyStatus` is a plain object used as an enum. `DAY` helps with date maths.
 
 ```js
-const CopyStatus = Object.freeze({ AVAILABLE: 'AVAILABLE', LOANED: 'LOANED', ON_HOLD: 'ON_HOLD' });
-const DAY = 24 * 60 * 60 * 1000; // one day in milliseconds
+// The status of one copy.
+// ON_HOLD means it is kept for the member who reserved it.
+const CopyStatus = {
+    AVAILABLE: "AVAILABLE",
+    LOANED: "LOANED",
+    ON_HOLD: "ON_HOLD",
+};
 
-class Clock { // interface
-  now() { throw new Error('not implemented'); }
-}
-class SystemClock extends Clock { // for real use
-  now() { return new Date(); }
-}
-class FakeClock extends Clock { // for tests: time moves only when we say so
-  #time;
-  constructor(start) {
-    super();
-    this.#time = start.getTime();
-  }
-  now() { return new Date(this.#time); }
-  advanceDays(days) { this.#time += days * DAY; }
-}
+// One day in milliseconds.
+const DAY = 24 * 60 * 60 * 1000;
+```
 
-class Book { // a title in the catalog
-  constructor(isbn, title, author) {
-    this.isbn = isbn;
-    this.title = title;
-    this.author = author;
-    this.copies = [];
-  }
+`Clock` is an interface with two versions. `FakeClock` only moves when a test tells it to.
+
+```js
+// The Clock "interface": anything that can tell the time.
+class Clock {
+    now() {
+        throw new Error("not implemented");
+    }
 }
 
-class BookCopy { // one physical copy, with its own barcode
-  constructor(id, book) {
-    this.id = id;
-    this.book = book;
-    this.status = CopyStatus.AVAILABLE;
-    this.heldFor = null; // the member it is kept for, when ON_HOLD
-  }
+// For real use: the real time.
+class SystemClock extends Clock {
+    now() {
+        return new Date();
+    }
 }
 
+// For tests: time moves only when we say so.
+class FakeClock extends Clock {
+    constructor(start) {
+        super();
+        // The current time, in milliseconds.
+        this.time = start.getTime();
+    }
+
+    now() {
+        return new Date(this.time);
+    }
+
+    advanceDays(days) {
+        this.time += days * DAY;
+    }
+}
+```
+
+### Part 2: Books, copies, loans and fines
+
+`Book` is the title. `BookCopy` is the real object on the shelf.
+
+```js
+// A title in the catalog, like "Clean Code".
+class Book {
+    constructor(isbn, title, author) {
+        this.isbn = isbn;
+        this.title = title;
+        this.author = author;
+        this.copies = [];
+    }
+}
+
+// One physical copy, with its own barcode.
+class BookCopy {
+    constructor(id, book) {
+        this.id = id;
+        this.book = book;
+        this.status = CopyStatus.AVAILABLE;
+
+        // The member it is kept for, when it is ON_HOLD.
+        this.heldFor = null;
+    }
+}
+```
+
+A loan knows how late it is.
+
+```js
+// "This member has this copy until this date."
 class Loan {
-  constructor(copy, member, borrowedAt, dueAt) {
-    this.copy = copy;
-    this.member = member;
-    this.borrowedAt = borrowedAt;
-    this.dueAt = dueAt;
-    this.returnedAt = null;
-  }
-  daysLate(now) { return Math.max(0, Math.ceil((now - this.dueAt) / DAY)); }
-}
+    constructor(copy, member, borrowedAt, dueAt) {
+        this.copy = copy;
+        this.member = member;
+        this.borrowedAt = borrowedAt;
+        this.dueAt = dueAt;
+        this.returnedAt = null;
+    }
 
+    // How many started days past the due date. 0 if on time or early.
+    daysLate(now) {
+        // Subtracting two dates gives milliseconds.
+        const lateMs = now - this.dueAt;
+
+        // A started day counts as a full day, so round up.
+        const days = Math.ceil(lateMs / DAY);
+        if (days <= 0) {
+            return 0;
+        }
+        return days;
+    }
+}
+```
+
+A fine and a reservation only hold data.
+
+```js
+// Money owed for a late return, in whole rupees.
 class Fine {
-  constructor(loan, amount) {
-    this.loan = loan;
-    this.amount = amount; // whole rupees
-    this.paid = false;
-  }
+    constructor(loan, amount) {
+        this.loan = loan;
+        this.amount = amount;
+        this.paid = false;
+    }
 }
 
+// A place in the waiting line for a title.
 class Reservation {
-  constructor(member, book, createdAt) {
-    this.member = member;
-    this.book = book;
-    this.createdAt = createdAt;
-  }
+    constructor(member, book, createdAt) {
+        this.member = member;
+        this.book = book;
+        this.createdAt = createdAt;
+    }
 }
 ```
 
-**Part 2: the member.** A member knows its own limits, and listens for "your book is ready".
+### Part 3: The member
+
+A member knows its own limits, and listens for "your book is ready". The listener is the [Observer](../design-patterns/observer.mdx) interface.
 
 ```js
-class ReservationListener { // interface (Observer)
-  onBookReady(book, copy) { throw new Error('not implemented'); }
+// The ReservationListener "interface" (Observer):
+// anyone who wants to hear "your book is ready".
+class ReservationListener {
+    onBookReady(book, copy) {
+        throw new Error("not implemented");
+    }
 }
 
+// A person who can borrow books.
 class Member extends ReservationListener {
-  static MAX_LOANS = 3;
-  constructor(id, name) {
-    super();
-    this.id = id;
-    this.name = name;
-    this.loans = [];
-    this.fines = [];
-    this.inbox = [];
-  }
-  get unpaidFines() {
-    return this.fines.filter((f) => !f.paid).reduce((sum, f) => sum + f.amount, 0);
-  }
-  checkCanBorrow() {
-    if (this.loans.length >= Member.MAX_LOANS) throw new Error(`${this.name} already has ${Member.MAX_LOANS} books`);
-    if (this.unpaidFines > 0) throw new Error(`${this.name} must first pay fines of ₹${this.unpaidFines}`);
-  }
-  payFines() { for (const fine of this.fines) fine.paid = true; }
-  onBookReady(book, copy) { this.inbox.push(`"${book.title}" is ready for you (copy ${copy.id})`); }
+    // "static" means one value for the whole class: Member.MAX_LOANS.
+    static MAX_LOANS = 3;
+
+    constructor(id, name) {
+        super();
+        this.id = id;
+        this.name = name;
+        this.loans = [];
+        this.fines = [];
+
+        // Messages for the member, like "your book is ready".
+        this.inbox = [];
+    }
+```
+
+Next, the member checks its own limits: at most 3 books, and no unpaid fines.
+
+```js
+    // The total of all fines not paid yet.
+    getUnpaidFines() {
+        let total = 0;
+        for (const fine of this.fines) {
+            if (!fine.paid) {
+                total += fine.amount;
+            }
+        }
+        return total;
+    }
+
+    // Throws if the member can't borrow right now.
+    checkCanBorrow() {
+        if (this.loans.length >= Member.MAX_LOANS) {
+            throw new Error(`${this.name} already has ${Member.MAX_LOANS} books`);
+        }
+
+        const unpaid = this.getUnpaidFines();
+        if (unpaid > 0) {
+            throw new Error(`${this.name} must first pay fines of ₹${unpaid}`);
+        }
+    }
+```
+
+The rest of `Member`: paying fines, and hearing that a book is ready.
+
+```js
+    payFines() {
+        for (const fine of this.fines) {
+            fine.paid = true;
+        }
+    }
+
+    // The library calls this when a reserved book comes back.
+    onBookReady(book, copy) {
+        const message = `"${book.title}" is ready for you (copy ${copy.id})`;
+        this.inbox.push(message);
+    }
 }
 ```
 
-**Part 3: the main service.** `Library` gets the clock from outside, so tests decide what "now" is.
+### Part 4: The library
+
+`Library` gets the clock from outside, so tests decide what "now" is. It keeps everything in Maps, so lookups are fast.
 
 ```js
+// The main service. The front desk calls it.
 class Library {
-  static LOAN_DAYS = 14;
-  static FINE_PER_DAY = 10; // ₹10 for each late day
-  #books = new Map(); // isbn -> Book
-  #copies = new Map(); // copy id -> BookCopy
-  #members = new Map(); // member id -> Member
-  #loans = new Map(); // copy id -> the open Loan
-  #waitingLines = new Map(); // isbn -> Reservation[], first come, first served
+    static LOAN_DAYS = 14;
+    // ₹10 for each late day.
+    static FINE_PER_DAY = 10;
 
-  constructor(clock) { this.clock = clock; }
+    constructor(clock) {
+        this.clock = clock;
 
-  addBook(book, copyIds) {
-    this.#books.set(book.isbn, book);
-    for (const id of copyIds) {
-      const copy = new BookCopy(id, book);
-      book.copies.push(copy);
-      this.#copies.set(id, copy);
+        // isbn -> Book
+        this.books = new Map();
+        // copy id -> BookCopy
+        this.copies = new Map();
+        // member id -> Member
+        this.members = new Map();
+        // copy id -> the open Loan for that copy
+        this.loans = new Map();
+        // isbn -> list of Reservations, first come, first served
+        this.waitingLines = new Map();
     }
-    return book;
-  }
-  addMember(member) {
-    this.#members.set(member.id, member);
-    return member;
-  }
-  copy(id) { return this.#copies.get(id); }
+```
 
-  // Check and take the copy with no `await` in between, so no one else can take it.
-  borrow(memberId, isbn) {
-    const member = this.#find(this.#members, memberId, 'member');
-    const book = this.#find(this.#books, isbn, 'book');
-    member.checkCanBorrow();
-    const copy = book.copies.find((c) => c.status === CopyStatus.ON_HOLD && c.heldFor === member)
-      ?? book.copies.find((c) => c.status === CopyStatus.AVAILABLE);
-    if (!copy) throw new Error(`No copy of "${book.title}" is free. Reserve it instead.`);
-    copy.status = CopyStatus.LOANED;
-    copy.heldFor = null;
-    const now = this.clock.now();
-    const loan = new Loan(copy, member, now, new Date(now.getTime() + Library.LOAN_DAYS * DAY));
-    member.loans.push(loan);
-    this.#loans.set(copy.id, loan);
-    return loan;
-  }
+Setting up: adding books with their copies, and adding members.
 
-  returnCopy(copyId) {
-    const loan = this.#loans.get(copyId);
-    if (!loan) throw new Error(`Copy ${copyId} is not on loan`);
-    const now = this.clock.now();
-    loan.returnedAt = now;
-    this.#loans.delete(copyId);
-    loan.member.loans = loan.member.loans.filter((l) => l !== loan);
-    let fine = null;
-    const late = loan.daysLate(now);
-    if (late > 0) {
-      fine = new Fine(loan, late * Library.FINE_PER_DAY);
-      loan.member.fines.push(fine);
+```js
+    // Add a title and make one BookCopy per barcode.
+    addBook(book, copyIds) {
+        this.books.set(book.isbn, book);
+
+        for (const id of copyIds) {
+            const copy = new BookCopy(id, book);
+            book.copies.push(copy);
+            this.copies.set(id, copy);
+        }
+
+        return book;
     }
-    this.#giveToNextInLine(loan.copy);
-    return fine;
-  }
 
-  reserve(memberId, isbn) {
-    const member = this.#find(this.#members, memberId, 'member');
-    const book = this.#find(this.#books, isbn, 'book');
-    if (book.copies.some((c) => c.status === CopyStatus.AVAILABLE)) {
-      throw new Error(`"${book.title}" is on the shelf. Borrow it instead.`);
+    addMember(member) {
+        this.members.set(member.id, member);
+        return member;
     }
-    const line = this.#waitingLines.get(isbn) ?? [];
-    if (line.some((r) => r.member === member)) throw new Error(`${member.name} already reserved "${book.title}"`);
-    const reservation = new Reservation(member, book, this.clock.now());
-    line.push(reservation);
-    this.#waitingLines.set(isbn, line);
-    return reservation;
-  }
 
-  #giveToNextInLine(copy) {
-    const next = this.#waitingLines.get(copy.book.isbn)?.shift();
-    if (!next) {
-      copy.status = CopyStatus.AVAILABLE;
-      return;
+    // Look up one copy by its barcode.
+    copy(id) {
+        return this.copies.get(id);
     }
-    copy.status = CopyStatus.ON_HOLD;
-    copy.heldFor = next.member;
-    next.member.onBookReady(copy.book, copy); // Observer: tell the member who waited
-  }
+```
 
-  #find(map, id, what) {
-    const item = map.get(id);
-    if (!item) throw new Error(`Unknown ${what}: ${id}`);
-    return item;
-  }
+`borrow` checks the member, picks a copy and makes the loan. It checks and takes the copy with no `await` in between, so no one else can take it.
+
+```js
+    borrow(memberId, isbn) {
+        const member = this.findOrThrow(this.members, memberId, "member");
+        const book = this.findOrThrow(this.books, isbn, "book");
+        member.checkCanBorrow();
+
+        const copy = this.pickCopyFor(member, book);
+        if (copy === null) {
+            throw new Error(`No copy of "${book.title}" is free. Reserve it instead.`);
+        }
+
+        copy.status = CopyStatus.LOANED;
+        copy.heldFor = null;
+
+        // The loan is due LOAN_DAYS from now.
+        const now = this.clock.now();
+        const dueTime = now.getTime() + Library.LOAN_DAYS * DAY;
+        const loan = new Loan(copy, member, now, new Date(dueTime));
+
+        member.loans.push(loan);
+        this.loans.set(copy.id, loan);
+        return loan;
+    }
+```
+
+`borrow` uses two small helpers:
+
+```js
+    // Find an item in a map, or throw a clear error.
+    // "what" is a word for the message, like "member" or "book".
+    findOrThrow(map, id, what) {
+        const item = map.get(id);
+        if (!item) {
+            throw new Error(`Unknown ${what}: ${id}`);
+        }
+        return item;
+    }
+
+    // A copy held for this member comes first. Otherwise, any free copy.
+    // Returns null if there is none.
+    pickCopyFor(member, book) {
+        for (const copy of book.copies) {
+            if (copy.status === CopyStatus.ON_HOLD && copy.heldFor === member) {
+                return copy;
+            }
+        }
+
+        for (const copy of book.copies) {
+            if (copy.status === CopyStatus.AVAILABLE) {
+                return copy;
+            }
+        }
+
+        return null;
+    }
+```
+
+`returnCopy` closes the loan, adds a fine if the copy is late, and gives the copy to the next person in line.
+
+```js
+    returnCopy(copyId) {
+        const loan = this.loans.get(copyId);
+        if (!loan) {
+            throw new Error(`Copy ${copyId} is not on loan`);
+        }
+
+        const now = this.clock.now();
+        loan.returnedAt = now;
+        this.loans.delete(copyId);
+
+        // Take this loan off the member's list.
+        const member = loan.member;
+        member.loans = member.loans.filter((other) => other !== loan);
+
+        // Late? Add a fine to the member.
+        let fine = null;
+        const daysLate = loan.daysLate(now);
+        if (daysLate > 0) {
+            fine = new Fine(loan, daysLate * Library.FINE_PER_DAY);
+            member.fines.push(fine);
+        }
+
+        this.giveToNextInLine(loan.copy);
+        return fine;
+    }
+```
+
+`reserve` adds the member to the waiting line. It is only allowed when no copy is free.
+
+```js
+    reserve(memberId, isbn) {
+        const member = this.findOrThrow(this.members, memberId, "member");
+        const book = this.findOrThrow(this.books, isbn, "book");
+
+        const hasFreeCopy = book.copies.some((copy) => copy.status === CopyStatus.AVAILABLE);
+        if (hasFreeCopy) {
+            throw new Error(`"${book.title}" is on the shelf. Borrow it instead.`);
+        }
+
+        // The waiting line for this title, or a new empty one.
+        let line = this.waitingLines.get(isbn);
+        if (line === undefined) {
+            line = [];
+        }
+
+        // One place in line per member.
+        const alreadyInLine = line.some((reservation) => reservation.member === member);
+        if (alreadyInLine) {
+            throw new Error(`${member.name} already reserved "${book.title}"`);
+        }
+
+        const reservation = new Reservation(member, book, this.clock.now());
+        line.push(reservation);
+        this.waitingLines.set(isbn, line);
+        return reservation;
+    }
+```
+
+Last, what happens to a returned copy. This is where the Observer pattern tells the member.
+
+```js
+    // Keep the copy for the first person in line, if anyone is waiting.
+    giveToNextInLine(copy) {
+        const line = this.waitingLines.get(copy.book.isbn);
+
+        // Nobody is waiting: the copy goes back on the shelf.
+        if (line === undefined || line.length === 0) {
+            copy.status = CopyStatus.AVAILABLE;
+            return;
+        }
+
+        // First come, first served: take the first reservation off the line.
+        const next = line.shift();
+        copy.status = CopyStatus.ON_HOLD;
+        copy.heldFor = next.member;
+
+        // Observer: tell the member who waited.
+        next.member.onBookReady(copy.book, copy);
+    }
 }
 ```
 
-**Part 4: try it.** One copy of "Clean Code", four copies of "Refactoring", and a fake clock.
+### Part 5: Try it
+
+One copy of "Clean Code", four copies of "Refactoring", and a fake clock. `show` runs an action and prints the error message if it throws, so the program keeps going.
 
 ```js
-const show = (fn) => { try { return fn(); } catch (e) { console.log(e.message); } };
+// "action" is a small function, like () => library.borrow("M2", "BK-1").
+function show(action) {
+    try {
+        return action();
+    } catch (error) {
+        console.log(error.message);
+    }
+}
 
-const clock = new FakeClock(new Date('2026-01-01T00:00:00Z')); // real use: new SystemClock()
+// For real use: new SystemClock()
+const clock = new FakeClock(new Date("2026-01-01T00:00:00Z"));
 const library = new Library(clock);
-library.addBook(new Book('BK-1', 'Clean Code', 'Robert C. Martin'), ['CC-1']);
-library.addBook(new Book('BK-2', 'Refactoring', 'Martin Fowler'), ['RF-1', 'RF-2', 'RF-3', 'RF-4']);
-const asha = library.addMember(new Member('M1', 'Asha'));
-const ravi = library.addMember(new Member('M2', 'Ravi'));
 
-const loan = library.borrow('M1', 'BK-1');
-console.log(loan.copy.id, loan.dueAt.toISOString().slice(0, 10)); // CC-1 2026-01-15
+const cleanCode = new Book("BK-1", "Clean Code", "Robert C. Martin");
+const refactoring = new Book("BK-2", "Refactoring", "Martin Fowler");
+library.addBook(cleanCode, ["CC-1"]);
+library.addBook(refactoring, ["RF-1", "RF-2", "RF-3", "RF-4"]);
 
-show(() => library.borrow('M2', 'BK-1')); // No copy of "Clean Code" is free. Reserve it instead.
-library.reserve('M2', 'BK-1');
+const asha = library.addMember(new Member("M1", "Asha"));
+const ravi = library.addMember(new Member("M2", "Ravi"));
+```
 
-clock.advanceDays(17); // Asha brings it back 3 days late
-const fine = library.returnCopy('CC-1');
+Asha borrows the only copy of "Clean Code". Ravi can't, so he reserves it.
+
+```js
+const loan = library.borrow("M1", "BK-1");
+
+// toISOString() gives "2026-01-15T00:00:00.000Z". The first 10 characters are the date.
+const dueDate = loan.dueAt.toISOString().slice(0, 10);
+console.log(loan.copy.id, dueDate); // CC-1 2026-01-15
+
+show(() => library.borrow("M2", "BK-1")); // No copy of "Clean Code" is free. Reserve it instead.
+library.reserve("M2", "BK-1");
+```
+
+17 days later, Asha brings it back 3 days late. The copy is now held for Ravi, and he is told.
+
+```js
+clock.advanceDays(17);
+const fine = library.returnCopy("CC-1");
 console.log(fine.amount); // 30
+
 console.log(ravi.inbox[0]); // "Clean Code" is ready for you (copy CC-1)
-console.log(library.copy('CC-1').status); // ON_HOLD
+console.log(library.copy("CC-1").status); // ON_HOLD
+```
 
-show(() => library.borrow('M1', 'BK-2')); // Asha must first pay fines of ₹30
+Asha can't borrow until she pays. Then she hits the 3-book limit. Ravi picks up the copy held for him.
+
+```js
+show(() => library.borrow("M1", "BK-2")); // Asha must first pay fines of ₹30
+
 asha.payFines();
-for (let i = 0; i < 3; i++) library.borrow('M1', 'BK-2');
-show(() => library.borrow('M1', 'BK-2')); // Asha already has 3 books
+for (let i = 0; i < 3; i++) {
+    library.borrow("M1", "BK-2");
+}
+show(() => library.borrow("M1", "BK-2")); // Asha already has 3 books
 
-console.log(library.borrow('M2', 'BK-1').copy.id); // CC-1
+const raviLoan = library.borrow("M2", "BK-1");
+console.log(raviLoan.copy.id); // CC-1
 ```
 
 ## Step 6: Edge cases and extensions
@@ -410,8 +655,11 @@ In the code above, `borrow` finds the copy and marks it `LOANED` with no `await`
 ```js
 // NOT SAFE. A fragment, not runnable on its own.
 async borrow(memberId, isbn) {
-  const copy = await db.findFreeCopy(isbn); // Asha's call and Ravi's call both find CC-1
-  await db.saveLoan(copy.id, memberId);     // both save a loan for the same copy
+    // Asha's call and Ravi's call both find CC-1.
+    const copy = await db.findFreeCopy(isbn);
+
+    // Both save a loan for the same copy.
+    await db.saveLoan(copy.id, memberId);
 }
 ```
 

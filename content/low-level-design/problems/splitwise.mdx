@@ -142,200 +142,425 @@ sequenceDiagram
 
 ## Step 5: Code
 
-**Part 1: the enum, money and small classes.** Money is always whole paise, never a decimal number. ₹1,000.00 is written `1000_00`.
+The code comes in small parts. Paste them together in order, and they run as one file.
+
+Money is always whole paise, never a decimal number. ₹1,000.00 is written `1000_00` (the `_` is only there to make the number easy to read).
+
+### Part 1: The enum and two helpers
+
+`sum` adds up a list of numbers. `money` turns paise into text like `₹333.34`, only for showing it.
 
 ```js
-const SplitType = Object.freeze({ EQUAL: 'EQUAL', EXACT: 'EXACT', PERCENT: 'PERCENT' });
+const SplitType = {
+    EQUAL: "EQUAL",
+    EXACT: "EXACT",
+    PERCENT: "PERCENT",
+};
 
-const sum = (numbers) => numbers.reduce((a, b) => a + b, 0);
+function sum(numbers) {
+    let total = 0;
+    for (const number of numbers) {
+        total += number;
+    }
+    return total;
+}
+
 // Only for showing money. All maths uses whole paise.
-const money = (paise) => `₹${Math.floor(paise / 100)}.${String(paise % 100).padStart(2, '0')}`;
-
-class User {
-  constructor(id, name) {
-    this.id = id;
-    this.name = name;
-  }
-}
-
-class Split { // one person's share of an expense
-  constructor(user, amount) {
-    this.user = user;
-    this.amount = amount; // paise
-  }
-}
-
-class Expense {
-  static #nextId = 1;
-  constructor(description, paidBy, amount, splitType, splits) {
-    this.id = `E${Expense.#nextId++}`;
-    this.description = description;
-    this.paidBy = paidBy;
-    this.amount = amount;
-    this.splitType = splitType;
-    this.splits = splits;
-  }
+function money(paise) {
+    const rupees = Math.floor(paise / 100);
+    // Always show two digits for the paise: 5 becomes "05".
+    const paiseText = String(paise % 100).padStart(2, "0");
+    return `₹${rupees}.${paiseText}`;
 }
 ```
 
-**Part 2: the split strategies.** Each one returns shares that add up to the amount exactly. Left-over paise go to the first people, one each.
+### Part 2: Users and shares
+
+A `Split` is one person's share of an expense.
 
 ```js
-class SplitStrategy { // interface
-  split(amount, users, values) { throw new Error('not implemented'); }
+class User {
+    constructor(id, name) {
+        this.id = id;
+        this.name = name;
+    }
+}
+
+// One person's share of an expense.
+class Split {
+    constructor(user, amount) {
+        this.user = user;
+        // In paise.
+        this.amount = amount;
+    }
+}
+```
+
+### Part 3: An expense
+
+An expense remembers who paid, how much, and the list of shares. Each new expense gets the next id: E1, E2, E3.
+
+```js
+// The number for the next expense id.
+let nextExpenseNumber = 1;
+
+class Expense {
+    constructor(description, paidBy, amount, splitType, splits) {
+        this.id = `E${nextExpenseNumber}`;
+        nextExpenseNumber += 1;
+
+        this.description = description;
+        this.paidBy = paidBy;
+        this.amount = amount;
+        this.splitType = splitType;
+        this.splits = splits;
+    }
+}
+```
+
+### Part 4: The equal split
+
+`SplitStrategy` is the "interface": a base class whose method only throws. Each way to split fills it in. The shares must always add up to the amount, so left-over paise go to the first people, one each.
+
+```js
+// Interface: every split rule has a split() method that returns one Split per person.
+class SplitStrategy {
+    split(amount, users, values) {
+        throw new Error("not implemented");
+    }
 }
 
 class EqualSplit extends SplitStrategy {
-  split(amount, users) {
-    const base = Math.floor(amount / users.length);
-    const extra = amount % users.length; // the paise that don't divide evenly
-    return users.map((user, i) => new Split(user, base + (i < extra ? 1 : 0)));
-  }
-}
+    split(amount, users) {
+        const baseShare = Math.floor(amount / users.length);
+        // The paise that don't divide evenly.
+        const extraPaise = amount % users.length;
 
+        const splits = [];
+        for (let i = 0; i < users.length; i++) {
+            let share = baseShare;
+            // The first people pay one more paisa each.
+            if (i < extraPaise) {
+                share += 1;
+            }
+            splits.push(new Split(users[i], share));
+        }
+        return splits;
+    }
+}
+```
+
+### Part 5: The exact split
+
+Each person's amount is given. The amounts must add up to the total.
+
+```js
 class ExactSplit extends SplitStrategy {
-  split(amount, users, amounts) {
-    if (amounts.length !== users.length) throw new Error('Give one amount per person');
-    if (sum(amounts) !== amount) throw new Error(`Amounts add up to ${money(sum(amounts))}, not ${money(amount)}`);
-    return users.map((user, i) => new Split(user, amounts[i]));
-  }
-}
+    // amounts: one amount in paise for each person
+    split(amount, users, amounts) {
+        if (amounts.length !== users.length) {
+            throw new Error("Give one amount per person");
+        }
 
+        const total = sum(amounts);
+        if (total !== amount) {
+            throw new Error(`Amounts add up to ${money(total)}, not ${money(amount)}`);
+        }
+
+        const splits = [];
+        for (let i = 0; i < users.length; i++) {
+            splits.push(new Split(users[i], amounts[i]));
+        }
+        return splits;
+    }
+}
+```
+
+### Part 6: The percent split
+
+Each person pays a percent. Rounding down can lose a few paise, so they go to the first people.
+
+```js
 class PercentSplit extends SplitStrategy {
-  split(amount, users, percents) {
-    if (percents.length !== users.length) throw new Error('Give one percent per person');
-    if (sum(percents) !== 100) throw new Error(`Percents add up to ${sum(percents)}, not 100`);
-    const shares = percents.map((p) => Math.floor((amount * p) / 100));
-    const extra = amount - sum(shares); // paise lost when rounding down
-    return users.map((user, i) => new Split(user, shares[i] + (i < extra ? 1 : 0)));
-  }
-}
+    // percents: one whole-number percent for each person
+    split(amount, users, percents) {
+        if (percents.length !== users.length) {
+            throw new Error("Give one percent per person");
+        }
 
-const splitStrategies = { // a small factory: split type -> strategy
-  [SplitType.EQUAL]: new EqualSplit(),
-  [SplitType.EXACT]: new ExactSplit(),
-  [SplitType.PERCENT]: new PercentSplit(),
+        const totalPercent = sum(percents);
+        if (totalPercent !== 100) {
+            throw new Error(`Percents add up to ${totalPercent}, not 100`);
+        }
+
+        // Each share, rounded down to whole paise.
+        const shares = [];
+        for (const percent of percents) {
+            shares.push(Math.floor((amount * percent) / 100));
+        }
+
+        // The paise lost when rounding down.
+        const extraPaise = amount - sum(shares);
+
+        const splits = [];
+        for (let i = 0; i < users.length; i++) {
+            let share = shares[i];
+            if (i < extraPaise) {
+                share += 1;
+            }
+            splits.push(new Split(users[i], share));
+        }
+        return splits;
+    }
+}
+```
+
+### Part 7: Pick a strategy by type
+
+A small factory: each split type points to its strategy. The keys match the `SplitType` values.
+
+```js
+const splitStrategies = {
+    EQUAL: new EqualSplit(),
+    EXACT: new ExactSplit(),
+    PERCENT: new PercentSplit(),
 };
 ```
 
-**Part 3: the balance sheet.** One number per person: above 0 means "gets money back", below 0 means "owes money".
+### Part 8: The balance sheet
+
+The balance sheet keeps one number per person: above 0 means "gets money back", below 0 means "owes money". The class goes on over the next three blocks.
 
 ```js
 class BalanceSheet {
-  #net = new Map(); // user -> paise
-
-  addExpense(expense) {
-    this.#change(expense.paidBy, expense.amount);
-    for (const split of expense.splits) this.#change(split.user, -split.amount);
-  }
-  addPayment(from, to, amount) { // `from` paid `to` back
-    this.#change(from, amount);
-    this.#change(to, -amount);
-  }
-  balanceOf(user) { return this.#net.get(user) ?? 0; }
-
-  describe(user) {
-    const balance = this.balanceOf(user);
-    if (balance > 0) return `${user.name} gets back ${money(balance)}`;
-    if (balance < 0) return `${user.name} owes ${money(-balance)}`;
-    return `${user.name} is settled up`;
-  }
-
-  // Greedy: the biggest debtor pays the biggest creditor, until everyone is at 0.
-  simplify() {
-    const creditors = [];
-    const debtors = [];
-    for (const [user, balance] of this.#net) {
-      if (balance > 0) creditors.push({ user, amount: balance });
-      if (balance < 0) debtors.push({ user, amount: -balance });
+    constructor() {
+        // user -> balance in paise
+        this.net = new Map();
     }
-    const payments = [];
-    while (creditors.length > 0 && debtors.length > 0) {
-      creditors.sort((x, y) => y.amount - x.amount);
-      debtors.sort((x, y) => y.amount - x.amount);
-      const [creditor, debtor] = [creditors[0], debtors[0]];
-      const amount = Math.min(creditor.amount, debtor.amount);
-      payments.push({ from: debtor.user, to: creditor.user, amount });
-      creditor.amount -= amount;
-      debtor.amount -= amount;
-      if (creditor.amount === 0) creditors.shift();
-      if (debtor.amount === 0) debtors.shift();
-    }
-    return payments;
-  }
 
-  #change(user, delta) { this.#net.set(user, this.balanceOf(user) + delta); }
+    balanceOf(user) {
+        // Someone with no balance yet is at 0.
+        if (!this.net.has(user)) {
+            return 0;
+        }
+        return this.net.get(user);
+    }
+
+    changeBalance(user, change) {
+        const newBalance = this.balanceOf(user) + change;
+        this.net.set(user, newBalance);
+    }
+```
+
+**Recording money.** The payer of an expense goes up by the whole amount, and each sharer goes down by their share. A payment back moves money the other way.
+
+```js
+    addExpense(expense) {
+        this.changeBalance(expense.paidBy, expense.amount);
+
+        for (const split of expense.splits) {
+            this.changeBalance(split.user, -split.amount);
+        }
+    }
+
+    // `from` paid `to` back.
+    addPayment(from, to, amount) {
+        this.changeBalance(from, amount);
+        this.changeBalance(to, -amount);
+    }
+
+    describe(user) {
+        const balance = this.balanceOf(user);
+
+        if (balance > 0) {
+            return `${user.name} gets back ${money(balance)}`;
+        }
+
+        if (balance < 0) {
+            return `${user.name} owes ${money(-balance)}`;
+        }
+
+        return `${user.name} is settled up`;
+    }
+```
+
+**Who gets money, and who owes it.** Before simplifying, we put people in two lists.
+
+```js
+    findCreditorsAndDebtors() {
+        // Creditors get money back. Debtors owe money.
+        const creditors = [];
+        const debtors = [];
+
+        // Each entry in a Map is a [key, value] pair.
+        for (const [user, balance] of this.net) {
+            if (balance > 0) {
+                creditors.push({ user: user, amount: balance });
+            }
+            if (balance < 0) {
+                debtors.push({ user: user, amount: -balance });
+            }
+        }
+
+        return { creditors: creditors, debtors: debtors };
+    }
+```
+
+**Simplify.** The greedy method: the biggest debtor pays the biggest creditor, again and again, until everyone is at 0.
+
+```js
+    simplify() {
+        const lists = this.findCreditorsAndDebtors();
+        const creditors = lists.creditors;
+        const debtors = lists.debtors;
+        const payments = [];
+
+        while (creditors.length > 0 && debtors.length > 0) {
+            // Put the biggest amount first in each list.
+            creditors.sort((first, second) => second.amount - first.amount);
+            debtors.sort((first, second) => second.amount - first.amount);
+
+            const creditor = creditors[0];
+            const debtor = debtors[0];
+
+            // The debtor pays as much as both of them allow.
+            const amount = Math.min(creditor.amount, debtor.amount);
+            payments.push({ from: debtor.user, to: creditor.user, amount: amount });
+            creditor.amount -= amount;
+            debtor.amount -= amount;
+
+            // Anyone who reaches 0 is done.
+            if (creditor.amount === 0) {
+                creditors.shift();
+            }
+            if (debtor.amount === 0) {
+                debtors.shift();
+            }
+        }
+
+        return payments;
+    }
 }
 ```
 
-**Part 4: the main service.** `Group` checks the input, picks the strategy, and keeps the history.
+### Part 9: The group
+
+`Group` is the main service. It checks the input, picks the strategy, and keeps the history. The class goes on in the next block.
 
 ```js
-const checkAmount = (amount) => {
-  if (!Number.isInteger(amount) || amount <= 0) throw new Error('Amount must be whole paise, above 0');
-};
+// Money must be whole paise, above 0.
+function checkAmount(amount) {
+    if (!Number.isInteger(amount) || amount <= 0) {
+        throw new Error("Amount must be whole paise, above 0");
+    }
+}
 
 class Group {
-  #members;
-  #expenses = [];
-  constructor(name, members) {
-    this.name = name;
-    this.#members = new Set(members);
-    this.balances = new BalanceSheet();
-  }
-  get members() { return [...this.#members]; }
-  get expenses() { return [...this.#expenses]; }
-
-  addExpense(description, paidBy, amount, splitType, users, values = []) {
-    checkAmount(amount);
-    for (const user of [paidBy, ...users]) {
-      if (!this.#members.has(user)) throw new Error(`${user.name} is not in ${this.name}`);
+    constructor(name, members) {
+        this.name = name;
+        this.members = members;
+        this.expenses = [];
+        this.balances = new BalanceSheet();
     }
-    const strategy = splitStrategies[splitType];
-    if (!strategy) throw new Error(`Unknown split type: ${splitType}`);
-    const expense = new Expense(description, paidBy, amount, splitType, strategy.split(amount, users, values));
-    this.#expenses.push(expense);
-    this.balances.addExpense(expense); // no `await` between the check and the update
-    return expense;
-  }
 
-  settle(from, to, amount) {
-    checkAmount(amount);
-    this.balances.addPayment(from, to, amount);
-  }
+    checkMember(user) {
+        if (!this.members.includes(user)) {
+            throw new Error(`${user.name} is not in ${this.name}`);
+        }
+    }
+```
+
+**Adding an expense, and settling up.** `addExpense` does everything in one go: check, split, save, update the balances.
+
+```js
+    addExpense(description, paidBy, amount, splitType, users, values = []) {
+        // 1. Check the input.
+        checkAmount(amount);
+        this.checkMember(paidBy);
+        for (const user of users) {
+            this.checkMember(user);
+        }
+
+        const strategy = splitStrategies[splitType];
+        if (!strategy) {
+            throw new Error(`Unknown split type: ${splitType}`);
+        }
+
+        // 2. Split the amount into shares.
+        const splits = strategy.split(amount, users, values);
+        const expense = new Expense(description, paidBy, amount, splitType, splits);
+
+        // 3. Save it and update the balances, with no `await` in between.
+        this.expenses.push(expense);
+        this.balances.addExpense(expense);
+        return expense;
+    }
+
+    settle(from, to, amount) {
+        checkAmount(amount);
+        this.balances.addPayment(from, to, amount);
+    }
 }
 ```
 
-**Part 5: try it.** The Goa trip: dinner split equally, a taxi by exact amounts, and the hotel by percent.
+### Part 10: Try it
+
+The Goa trip: dinner split equally, a taxi by exact amounts, and the hotel by percent.
 
 ```js
-const show = (fn) => { try { return fn(); } catch (e) { console.log(e.message); } };
+const asha = new User("u1", "Asha");
+const ravi = new User("u2", "Ravi");
+const meera = new User("u3", "Meera");
+const trip = new Group("Goa trip", [asha, ravi, meera]);
 
-const asha = new User('u1', 'Asha');
-const ravi = new User('u2', 'Ravi');
-const meera = new User('u3', 'Meera');
-const trip = new Group('Goa trip', [asha, ravi, meera]);
+// ₹1,000 split by 3. Asha pays the left-over paisa.
+const dinner = trip.addExpense("Dinner", asha, 1000_00, SplitType.EQUAL, [asha, ravi, meera]);
+const dinnerShares = dinner.splits.map((split) => money(split.amount));
+console.log(dinnerShares.join(", ")); // ₹333.34, ₹333.33, ₹333.33
 
-const dinner = trip.addExpense('Dinner', asha, 1000_00, SplitType.EQUAL, [asha, ravi, meera]);
-console.log(dinner.splits.map((s) => money(s.amount)).join(', ')); // ₹333.34, ₹333.33, ₹333.33
-trip.addExpense('Taxi', ravi, 500_00, SplitType.EXACT, [ravi, meera], [100_00, 400_00]);
-trip.addExpense('Hotel', meera, 1200_00, SplitType.PERCENT, [asha, ravi, meera], [50, 25, 25]);
+// The taxi was only for Ravi and Meera.
+trip.addExpense("Taxi", ravi, 500_00, SplitType.EXACT, [ravi, meera], [100_00, 400_00]);
 
-for (const user of trip.members) console.log(trip.balances.describe(user));
+trip.addExpense("Hotel", meera, 1200_00, SplitType.PERCENT, [asha, ravi, meera], [50, 25, 25]);
+```
+
+Each person's balance, then the fewest payments, then one payment back.
+
+```js
+for (const user of trip.members) {
+    console.log(trip.balances.describe(user));
+}
 // Asha gets back ₹66.66
 // Ravi owes ₹233.33
 // Meera gets back ₹166.67
 
-for (const p of trip.balances.simplify()) console.log(`${p.from.name} pays ${p.to.name} ${money(p.amount)}`);
+const payments = trip.balances.simplify();
+for (const payment of payments) {
+    console.log(`${payment.from.name} pays ${payment.to.name} ${money(payment.amount)}`);
+}
 // Ravi pays Meera ₹166.67
 // Ravi pays Asha ₹66.66
 
 trip.settle(ravi, meera, 166_67);
 console.log(trip.balances.describe(meera)); // Meera is settled up
 console.log(trip.balances.describe(ravi)); // Ravi owes ₹66.66
+```
 
-show(() => trip.addExpense('Snacks', asha, 300_00, SplitType.PERCENT, [asha, ravi], [50, 40])); // Percents add up to 90, not 100
-show(() => trip.addExpense('Fuel', ravi, 900_00, SplitType.EXACT, [ravi, meera], [400_00, 400_00])); // Amounts add up to ₹800.00, not ₹900.00
+Bad input is refused.
+
+```js
+try {
+    trip.addExpense("Snacks", asha, 300_00, SplitType.PERCENT, [asha, ravi], [50, 40]);
+} catch (error) {
+    console.log(error.message); // Percents add up to 90, not 100
+}
+
+try {
+    trip.addExpense("Fuel", ravi, 900_00, SplitType.EXACT, [ravi, meera], [400_00, 400_00]);
+} catch (error) {
+    console.log(error.message); // Amounts add up to ₹800.00, not ₹900.00
+}
+
 console.log(0.1 + 0.2); // 0.30000000000000004
 ```
 
@@ -385,8 +610,11 @@ In the code above, `addExpense` checks the input and updates every balance with 
 ```js
 // NOT SAFE. A fragment, not runnable on its own.
 async addShare(groupId, userId, share) {
-  const balance = await db.getBalance(groupId, userId);  // both phones read -₹100.00
-  await db.setBalance(groupId, userId, balance - share); // the second write wipes out the first
+    // Both phones read -₹100.00.
+    const balance = await db.getBalance(groupId, userId);
+
+    // The second write wipes out the first.
+    await db.setBalance(groupId, userId, balance - share);
 }
 ```
 
@@ -409,16 +637,40 @@ Even safer: save only the expenses (each one is a new row, never changed), and w
 ```js
 // Add to the code above. Split by shares: [2, 1, 1] means 2/4, 1/4 and 1/4.
 class ShareSplit extends SplitStrategy {
-  split(amount, users, shares) {
-    const total = sum(shares);
-    const parts = shares.map((s) => Math.floor((amount * s) / total));
-    const extra = amount - sum(parts);
-    return users.map((user, i) => new Split(user, parts[i] + (i < extra ? 1 : 0)));
-  }
+    split(amount, users, shares) {
+        const totalShares = sum(shares);
+
+        // Each person's part, rounded down to whole paise.
+        const parts = [];
+        for (const share of shares) {
+            parts.push(Math.floor((amount * share) / totalShares));
+        }
+
+        // The paise lost when rounding down go to the first people, one each.
+        const extraPaise = amount - sum(parts);
+
+        const splits = [];
+        for (let i = 0; i < users.length; i++) {
+            let part = parts[i];
+            if (i < extraPaise) {
+                part += 1;
+            }
+            splits.push(new Split(users[i], part));
+        }
+        return splits;
+    }
 }
-splitStrategies.SHARES = new ShareSplit(); // also add SHARES to the SplitType enum
-const fuel = trip.addExpense('Fuel', ravi, 900_00, 'SHARES', [asha, ravi, meera], [2, 1, 1]);
-console.log(fuel.splits.map((s) => money(s.amount)).join(', ')); // ₹450.00, ₹225.00, ₹225.00
+```
+
+Then add it to the factory and use it:
+
+```js
+// Also add SHARES to the SplitType enum.
+splitStrategies.SHARES = new ShareSplit();
+
+const fuel = trip.addExpense("Fuel", ravi, 900_00, "SHARES", [asha, ravi, meera], [2, 1, 1]);
+const fuelShares = fuel.splits.map((split) => money(split.amount));
+console.log(fuelShares.join(", ")); // ₹450.00, ₹225.00, ₹225.00
 ```
 
 - **Edit or delete an expense:** apply the same expense again with every sign flipped, then apply the new version. Each change is an object that can be undone. This is [Command](../design-patterns/command.mdx).

@@ -80,17 +80,21 @@ Services also need to prove who they are to each other: "is this really the paym
 ```js
 // BAD: any logged-in user can read any order by changing the number
 app.get("/orders/:id", requireLogin, async (req, res) => {
-  const order = await db.orders.findById(req.params.id);
-  res.json(order);
+    const order = await db.orders.findById(req.params.id);
+    res.json(order);
 });
 
 // GOOD: check that the order belongs to this user
 app.get("/orders/:id", requireLogin, async (req, res) => {
-  const order = await db.orders.findById(req.params.id);
-  if (!order || order.userId !== req.user.id) {
-    return res.status(404).json({ error: "Order not found" });
-  }
-  res.json(order);
+    const order = await db.orders.findById(req.params.id);
+
+    // No such order, or it is someone else's: answer 404 for both,
+    // so a stranger can't even learn that the order exists
+    if (!order || order.userId !== req.user.id) {
+        return res.status(404).json({ error: "Order not found" });
+    }
+
+    res.json(order);
 });
 ```
 

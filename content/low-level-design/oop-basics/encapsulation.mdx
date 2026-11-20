@@ -16,21 +16,27 @@ In JavaScript, a field whose name starts with `#` is **private**. Only code writ
 
 ```js
 class SecretToy {
-  #secretCode; // private field: hidden inside the class
+    // The # makes this field private: it is hidden inside the class
+    #secretCode;
 
-  constructor(code) {
-    this.#secretCode = code;
-  }
+    constructor(code) {
+        this.#secretCode = code;
+    }
 
-  showSecret() {
-    console.log(`The secret code is ${this.#secretCode}`);
-  }
+    showSecret() {
+        console.log(`The secret code is ${this.#secretCode}`);
+    }
 }
 
-const toy = new SecretToy('12345');
+const toy = new SecretToy("12345");
 toy.showSecret(); // The secret code is 12345
-console.log(toy.secretCode); // undefined (there is no public field with that name)
-// console.log(toy.#secretCode); // SyntaxError: the whole file won't run
+
+// There is no public field with this name
+console.log(toy.secretCode); // undefined
+
+// Reading the private field from outside is a SyntaxError.
+// The whole file would not run, so this line stays a comment:
+// console.log(toy.#secretCode);
 ```
 
 Methods can be private too: `#checkCode() { ... }` can only be called from inside the class.
@@ -47,50 +53,72 @@ Here is a bank account with a **public** balance. Any code can set it to anythin
 
 ```js
 class BankAccount {
-  constructor() {
-    this.balance = 0;
-  }
+    constructor() {
+        this.balance = 0;
+    }
 }
 
 const account = new BankAccount();
-account.balance = -500; // nothing stops this!
+
+// Nothing stops this!
+account.balance = -500;
 console.log(account.balance); // -500
 ```
 
-Now the same account, encapsulated. The balance is private, and the only ways to change it are `deposit()` and `withdraw()`, which check the rules:
+Now the same account, encapsulated. The balance is private, and the only ways to change it are `deposit()` and `withdraw()`, which check the rules.
+
+**Step 1: The class.** Each method checks the rules before it changes the balance:
 
 ```js
 class BankAccount {
-  #balance = 0; // private: only code in this class can touch it
+    // Private: only code in this class can touch it
+    #balance = 0;
 
-  deposit(amount) {
-    if (amount <= 0) throw new Error('Deposit must be positive');
-    this.#balance += amount;
-  }
+    deposit(amount) {
+        if (amount <= 0) {
+            throw new Error("Deposit must be positive");
+        }
 
-  withdraw(amount) {
-    if (amount <= 0) throw new Error('Amount must be positive');
-    if (amount > this.#balance) throw new Error('Not enough money');
-    this.#balance -= amount;
-  }
+        this.#balance += amount;
+    }
 
-  getBalance() {
-    return this.#balance;
-  }
+    withdraw(amount) {
+        if (amount <= 0) {
+            throw new Error("Amount must be positive");
+        }
+
+        if (amount > this.#balance) {
+            throw new Error("Not enough money");
+        }
+
+        this.#balance -= amount;
+    }
+
+    getBalance() {
+        return this.#balance;
+    }
 }
+```
 
+**Step 2: Use it.** Every change goes through a method, so the rules always run:
+
+```js
 const account = new BankAccount();
+
 account.deposit(100);
 account.withdraw(30);
 console.log(account.getBalance()); // 70
 
+// Taking out more than we have breaks a rule, so withdraw() throws
 try {
-  account.withdraw(500);
-} catch (err) {
-  console.log(err.message); // Not enough money
+    account.withdraw(500);
+} catch (error) {
+    console.log(error.message); // Not enough money
 }
 
-account.balance = -500; // only adds a new, unrelated public field
+// This does NOT touch the private #balance.
+// It only adds a new, unrelated public field called balance.
+account.balance = -500;
 console.log(account.getBalance()); // 70 (the real balance is safe)
 ```
 
@@ -127,65 +155,93 @@ What happens to private fields in a child class? Be precise here:
 - The child **object** does carry the parent's `#` fields, and the parent's own methods can still use them.
 - But code **written in the child class** can't read them. Use a method from the parent instead.
 
+**Step 1: The parent class.** `Person` keeps `age` private and offers a method to read it:
+
 ```js
 class Person {
-  name; // public (the default)
-  #age; // private
+    // Public (the default)
+    name;
 
-  constructor(name, age) {
-    this.name = name;
-    this.#age = age;
-  }
+    // Private
+    #age;
 
-  getAge() {
-    return this.#age;
-  }
+    constructor(name, age) {
+        this.name = name;
+        this.#age = age;
+    }
+
+    getAge() {
+        return this.#age;
+    }
 }
+```
 
+**Step 2: The child class.** `Employee` can't touch `#age`, so it asks the parent's method:
+
+```js
 class Employee extends Person {
-  describe() {
-    // return this.#age; // SyntaxError: #age belongs to Person, not Employee
-    return `${this.name} is ${this.getAge()}`; // ask the parent's method
-  }
-}
+    describe() {
+        // Writing this.#age here would be a SyntaxError,
+        // because #age belongs to Person, not Employee.
+        const age = this.getAge();
 
-const p = new Person('Rohit', 27);
-console.log(p.name); // Rohit
-console.log(p.getAge()); // 27
-console.log(new Employee('Asha', 31).describe()); // Asha is 31
+        return `${this.name} is ${age}`;
+    }
+}
+```
+
+**Step 3: Use them.** Make a person and an employee:
+
+```js
+const person = new Person("Rohit", 27);
+console.log(person.name); // Rohit
+console.log(person.getAge()); // 27
+
+const employee = new Employee("Asha", 31);
+console.log(employee.describe()); // Asha is 31
 ```
 
 ## Getters and setters
 
-A **getter** controls how a property is **read**. A **setter** controls how it is **changed**. From the outside, they look like a normal property: `p.name` and `p.name = 'Alex'`.
+A **getter** controls how a property is **read**. A **setter** controls how it is **changed**. From the outside, they look like a normal property: `person.name` and `person.name = "Alex"`.
+
+**Step 1: The class.** The words `get` and `set` turn a method into a getter or a setter:
 
 ```js
 class Person {
-  #name; // private
+    // Private
+    #name;
 
-  constructor(name) {
-    this.#name = name;
-  }
-
-  get name() { // runs when you read p.name
-    return this.#name.toUpperCase();
-  }
-
-  set name(newName) { // runs when you write p.name = ...
-    if (newName.length > 2) {
-      this.#name = newName;
-    } else {
-      console.log('Name too short');
+    constructor(name) {
+        this.#name = name;
     }
-  }
+
+    // The getter: runs when you read person.name
+    get name() {
+        return this.#name.toUpperCase();
+    }
+
+    // The setter: runs when you write person.name = "..."
+    set name(newName) {
+        if (newName.length > 2) {
+            this.#name = newName;
+        } else {
+            console.log("Name too short");
+        }
+    }
 }
+```
 
-const p = new Person('Rohit');
-console.log(p.name); // ROHIT
+**Step 2: Use it.** It looks like a plain property, but the getter and setter run each time:
 
-p.name = 'Al'; // Name too short
-p.name = 'Alex'; // valid
-console.log(p.name); // ALEX
+```js
+const person = new Person("Rohit");
+console.log(person.name); // ROHIT
+
+// Writing to person.name runs the setter
+person.name = "Al"; // Name too short
+person.name = "Alex";
+console.log(person.name); // ALEX
 ```
 
 A getter with no setter makes a **read-only** property. `BankAccount` could use `get balance()` instead of `getBalance()` in the same way.

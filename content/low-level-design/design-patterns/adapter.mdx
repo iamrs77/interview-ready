@@ -17,26 +17,39 @@ An **Adapter** does that for code. It wraps a class whose methods don't fit, and
 
 Your checkout works with any `PaymentMethod` that has `pay(amount)`. Now the business wants a new provider, QuickPay. Its library, from npm, looks different: `makeCharge({ cents, currency })`, and it returns a status object. You can't change their code.
 
-The quick fix puts their API right inside your checkout:
-
 ```js
 class Card {
-  pay(amount) { return `Paid ${amount} by card`; }
+    pay(amount) {
+        return `Paid ${amount} by card`;
+    }
 }
 
 // From an npm package. We can't change it.
 class QuickPayClient {
-  makeCharge({ cents, currency }) {
-    return { status: 'ok', ref: `QP-${cents}-${currency}` };
-  }
-}
+    makeCharge(options) {
+        const ref = `QP-${options.cents}-${options.currency}`;
 
+        return { status: "ok", ref: ref };
+    }
+}
+```
+
+The quick fix puts their API right inside your checkout:
+
+```js
 function checkout(method, amount) {
-  if (method instanceof QuickPayClient) { // special case
-    const res = method.makeCharge({ cents: amount * 100, currency: 'USD' });
-    return res.status === 'ok' ? `Paid ${amount} by QuickPay` : 'Payment failed';
-  }
-  return method.pay(amount);
+    // Special case: QuickPay has a different method, and it counts in cents.
+    if (method instanceof QuickPayClient) {
+        const result = method.makeCharge({ cents: amount * 100, currency: "USD" });
+
+        if (result.status === "ok") {
+            return `Paid ${amount} by QuickPay`;
+        }
+
+        return "Payment failed";
+    }
+
+    return method.pay(amount);
 }
 
 console.log(checkout(new QuickPayClient(), 25)); // Paid 25 by QuickPay
@@ -81,42 +94,75 @@ classDiagram
   QuickPayAdapter --> QuickPayClient : wraps
 ```
 
+### Step 1: Your interface, and the class that doesn't fit
+
+`Card` already has `pay(amount)`. `QuickPayClient` is the same outside class as above.
+
 ```js
-class PaymentMethod { // interface
-  pay(amount) { throw new Error('not implemented'); }
+// Your interface. Every payment method must have pay(amount).
+class PaymentMethod {
+    pay(amount) {
+        throw new Error("not implemented");
+    }
 }
 
 class Card extends PaymentMethod {
-  pay(amount) { return `Paid ${amount} by card`; }
+    pay(amount) {
+        return `Paid ${amount} by card`;
+    }
 }
 
 // From an npm package. We can't change it.
 class QuickPayClient {
-  makeCharge({ cents, currency }) {
-    return { status: 'ok', ref: `QP-${cents}-${currency}` };
-  }
-}
+    makeCharge(options) {
+        const ref = `QP-${options.cents}-${options.currency}`;
 
+        return { status: "ok", ref: ref };
+    }
+}
+```
+
+### Step 2: The adapter
+
+The adapter has `pay(amount)` on the outside. Inside, it calls QuickPay.
+
+```js
 class QuickPayAdapter extends PaymentMethod {
-  #client;
-  constructor(client) {
-    super();
-    this.#client = client;
-  }
-  pay(amount) { // translate our call into theirs
-    const res = this.#client.makeCharge({ cents: Math.round(amount * 100), currency: 'USD' });
-    if (res.status !== 'ok') throw new Error('QuickPay payment failed');
-    return `Paid ${amount} by QuickPay (${res.ref})`;
-  }
+    constructor(client) {
+        // A subclass must call super() before it can use "this".
+        super();
+        this.client = client;
+    }
+
+    // Translate our call into theirs.
+    pay(amount) {
+        // QuickPay wants whole cents, so 19.99 becomes 1999.
+        const cents = Math.round(amount * 100);
+        const result = this.client.makeCharge({ cents: cents, currency: "USD" });
+
+        if (result.status !== "ok") {
+            throw new Error("QuickPay payment failed");
+        }
+
+        // Return our own text, not QuickPay's raw result.
+        return `Paid ${amount} by QuickPay (${result.ref})`;
+    }
+}
+```
+
+### Step 3: Checkout knows only the interface
+
+`checkout` calls `pay()` and never asks which class it has.
+
+```js
+function checkout(method, amount) {
+    return method.pay(amount);
 }
 
-function checkout(method, amount) {
-  return method.pay(amount); // knows only the interface
-}
+const quickPay = new QuickPayAdapter(new QuickPayClient());
 
 console.log(checkout(new Card(), 40)); // Paid 40 by card
-console.log(checkout(new QuickPayAdapter(new QuickPayClient()), 25));
-// Paid 25 by QuickPay (QP-2500-USD)
+console.log(checkout(quickPay, 25)); // Paid 25 by QuickPay (QP-2500-USD)
 ```
 
 Checkout is back to one line. Everything about QuickPay lives in one small class. This is [Dependency Inversion](../design-principles/dependency-inversion.mdx) in practice: your code depends on your own interface, and the adapter bridges to the outside code.
@@ -128,14 +174,21 @@ The textbook also shows a **class adapter**, which inherits from the target and 
 An adapter doesn't have to be a class. Node's `util.promisify` is an adapter for functions: it takes an old **callback-style** function and returns one that gives back a **promise**.
 
 ```js
-import { promisify } from 'node:util';
+import { promisify } from "node:util";
 
-// An old API in callback style: callback(error, result)
+// An old API in callback style. When it is done, it calls callback(error, result).
 function findUser(id, callback) {
-  setTimeout(() => callback(null, { id, name: 'Asha' }), 10);
+    const foundUser = { id: id, name: "Asha" };
+
+    // Pretend the lookup takes 10 ms. There is no error, so the first argument is null.
+    setTimeout(() => {
+        callback(null, foundUser);
+    }, 10);
 }
 
-const findUserAsync = promisify(findUser); // the adapter
+// The adapter: the same job, but it gives back a promise.
+const findUserAsync = promisify(findUser);
+
 const user = await findUserAsync(7);
 console.log(user.name); // Asha
 ```

@@ -43,12 +43,15 @@ Clocks can also **jump**. When a clock is corrected, it can suddenly move forwar
 | **Monotonic clock** | A counter that only moves forward | Measuring how long something took, and timeouts |
 
 ```js
-// Measuring how long a call took
-const start = performance.now();   // monotonic: never goes backward
-await callPaymentService();
-const tookMs = performance.now() - start;
+// Measure how long a call took.
+// performance.now() is a monotonic clock: it never goes backward.
+// Avoid Date.now() for this: it can jump when the clock is corrected.
+const start = performance.now();
 
-// Avoid Date.now() for this: it can jump when the clock is corrected
+await callPaymentService();
+
+const end = performance.now();
+const tookMs = end - start;
 ```
 
 ## NTP
@@ -96,19 +99,48 @@ sequenceDiagram
   Note over A: Another event: 1 + 1. A = 2
 ```
 
-```ts
+**Step 1: The clock.** Each server keeps one of these.
+
+```js
 class LamportClock {
-  private time = 0;
+    constructor() {
+        this.time = 0;
+    }
 
-  tick() {                       // a local event, or sending a message
-    return ++this.time;
-  }
+    // Call this for a local event, or to send a message
+    tick() {
+        this.time = this.time + 1;
+        return this.time;
+    }
 
-  receive(remoteTime: number) {  // a message arrived
-    this.time = Math.max(this.time, remoteTime) + 1;
-    return this.time;
-  }
+    // Call this when a message arrives, with the number stamped on it
+    receive(remoteTime) {
+        const biggerTime = Math.max(this.time, remoteTime);
+        this.time = biggerTime + 1;
+        return this.time;
+    }
 }
+```
+
+**Step 2: Use it.** It follows the diagram above.
+
+```js
+const serverA = new LamportClock();
+const serverB = new LamportClock();
+const serverC = new LamportClock();
+
+// A sends a message to B
+const stampFromA = serverA.tick();
+console.log(stampFromA); // 1
+console.log(serverB.receive(stampFromA)); // 2
+
+// B sends a message to C
+const stampFromB = serverB.tick();
+console.log(stampFromB); // 3
+console.log(serverC.receive(stampFromB)); // 4
+
+// Another event on A
+console.log(serverA.tick()); // 2
 ```
 
 **The promise:** if event X **caused** event Y (directly or through a chain of messages), X's number is smaller than Y's.

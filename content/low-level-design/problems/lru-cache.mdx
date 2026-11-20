@@ -64,7 +64,7 @@ classDiagram
     <<interface>>
     +get(key) value
     +put(key, value)
-    +size int
+    +size() int
   }
   class LRUCache:::concrete {
     -capacity int
@@ -141,169 +141,327 @@ sequenceDiagram
 
 ## Step 5: Code
 
-**Part 1: the interface and the list node.**
+The code is split into small parts. Paste them together in order and they run.
+
+### Part 1: The interface and the list node
+
+`Cache` is the interface both caches follow. `ListNode` is one item in the list.
 
 ```js
-class Cache { // interface
-  get(key) { throw new Error('not implemented'); }
-  put(key, value) { throw new Error('not implemented'); }
-  get size() { throw new Error('not implemented'); }
+// The Cache "interface": what every cache can do.
+// Each method throws here. A real cache class fills them in.
+class Cache {
+    get(key) {
+        throw new Error("not implemented");
+    }
+
+    put(key, value) {
+        throw new Error("not implemented");
+    }
+
+    size() {
+        throw new Error("not implemented");
+    }
 }
 
 class ListNode {
-  constructor(key, value) {
-    this.key = key; // kept so that, when this node is removed, we know which Map entry to delete
-    this.value = value;
-    this.prev = null;
-    this.next = null;
-  }
+    constructor(key, value) {
+        // The node keeps its key, so when it is removed
+        // we know which Map entry to delete.
+        this.key = key;
+        this.value = value;
+
+        // The neighbours: the node before and the node after.
+        this.prev = null;
+        this.next = null;
+    }
 }
 ```
 
-**Part 2: the doubly linked list, written by hand.** Four pointer changes to add, two to remove.
+### Part 2: The doubly linked list
+
+The list is written by hand. It starts with two fake end nodes, `head` and `tail`. Adding a node to the front takes four pointer changes.
 
 ```js
-// Most recently used at the front (after head). Least recently used at the back (before tail).
+// Items in order of use.
+// Most recently used at the front (just after head).
+// Least recently used at the back (just before tail).
 class DoublyLinkedList {
-  #head = new ListNode(null, null); // sentinel: a fake first node, so we never check for null
-  #tail = new ListNode(null, null); // sentinel: a fake last node
-  constructor() {
-    this.#head.next = this.#tail;
-    this.#tail.prev = this.#head;
-  }
-  addToFront(node) {
-    node.prev = this.#head;
-    node.next = this.#head.next;
-    this.#head.next.prev = node;
-    this.#head.next = node;
-  }
-  remove(node) {
-    node.prev.next = node.next;
-    node.next.prev = node.prev;
-    node.prev = null;
-    node.next = null;
-  }
-  moveToFront(node) {
-    this.remove(node);
-    this.addToFront(node);
-  }
-  removeLast() {
-    const last = this.#tail.prev;
-    if (last === this.#head) return null; // empty
-    this.remove(last);
-    return last;
-  }
-  keys() { // front to back, for printing
-    const keys = [];
-    for (let node = this.#head.next; node !== this.#tail; node = node.next) keys.push(node.key);
-    return keys;
-  }
+    constructor() {
+        // Sentinels: a fake first node and a fake last node.
+        // Every real node always has a neighbour on both sides,
+        // so we never check for null.
+        this.head = new ListNode(null, null);
+        this.tail = new ListNode(null, null);
+
+        // An empty list: head and tail point at each other.
+        this.head.next = this.tail;
+        this.tail.prev = this.head;
+    }
+
+    // Put a node right after head.
+    addToFront(node) {
+        const oldFirst = this.head.next;
+
+        node.prev = this.head;
+        node.next = oldFirst;
+        oldFirst.prev = node;
+        this.head.next = node;
+    }
+```
+
+Removing a node takes two pointer changes: its two neighbours now point at each other. Moving a node to the front is remove, then add.
+
+```js
+    remove(node) {
+        const before = node.prev;
+        const after = node.next;
+
+        before.next = after;
+        after.prev = before;
+
+        // Clear the node's own links, so it is fully out of the list.
+        node.prev = null;
+        node.next = null;
+    }
+
+    moveToFront(node) {
+        this.remove(node);
+        this.addToFront(node);
+    }
+```
+
+The rest of the list: taking out the last node, and listing the keys for printing.
+
+```js
+    // Take out the least recently used node (just before tail).
+    removeLast() {
+        const last = this.tail.prev;
+
+        // Only head is before tail: the list is empty.
+        if (last === this.head) {
+            return null;
+        }
+
+        this.remove(last);
+        return last;
+    }
+
+    // The keys from front to back.
+    keys() {
+        const keys = [];
+        let node = this.head.next;
+
+        while (node !== this.tail) {
+            keys.push(node.key);
+            node = node.next;
+        }
+
+        return keys;
+    }
 }
 ```
 
-**Part 3: the two caches.** `LRUCache` is the classic answer. `MapLRUCache` uses a JavaScript trick: a `Map` remembers the order in which keys were added, and deleting then setting a key moves it to the end.
+### Part 3: The classic cache
+
+`LRUCache` is the classic answer. The Map finds a node at once, and the list keeps the order of use. Both caches check the capacity the same way, so that check is a small function.
 
 ```js
 function checkCapacity(capacity) {
-  if (!Number.isInteger(capacity) || capacity < 0) throw new Error('Capacity must be a whole number, 0 or more');
+    if (!Number.isInteger(capacity) || capacity < 0) {
+        throw new Error("Capacity must be a whole number, 0 or more");
+    }
 }
 
-class LRUCache extends Cache { // the classic way: Map + doubly linked list
-  #capacity;
-  #map = new Map(); // key -> ListNode, to find a node in O(1)
-  #list = new DoublyLinkedList(); // the order of use, to move and remove nodes in O(1)
-  constructor(capacity) {
-    super();
-    checkCapacity(capacity);
-    this.#capacity = capacity;
-  }
-  get(key) {
-    const node = this.#map.get(key);
-    if (!node) return undefined;
-    this.#list.moveToFront(node); // just used
-    return node.value;
-  }
-  put(key, value) {
-    if (this.#capacity === 0) return; // a cache with no room keeps nothing
-    const node = this.#map.get(key);
-    if (node) { // update: no eviction needed
-      node.value = value;
-      this.#list.moveToFront(node);
-      return;
-    }
-    if (this.#map.size === this.#capacity) {
-      const oldest = this.#list.removeLast();
-      this.#map.delete(oldest.key);
-    }
-    const fresh = new ListNode(key, value);
-    this.#list.addToFront(fresh);
-    this.#map.set(key, fresh);
-  }
-  get size() { return this.#map.size; }
-  keys() { return this.#list.keys(); } // most recent first
-}
+// The classic way: a Map plus a doubly linked list.
+class LRUCache extends Cache {
+    constructor(capacity) {
+        super();
+        checkCapacity(capacity);
+        this.capacity = capacity;
 
-class MapLRUCache extends Cache { // the shortcut: a Map keeps keys in insertion order
-  #capacity;
-  #map = new Map();
-  constructor(capacity) {
-    super();
-    checkCapacity(capacity);
-    this.#capacity = capacity;
-  }
-  get(key) {
-    if (!this.#map.has(key)) return undefined;
-    const value = this.#map.get(key);
-    this.#map.delete(key); // delete, then set: the key moves to the end (the newest)
-    this.#map.set(key, value);
-    return value;
-  }
-  put(key, value) {
-    if (this.#capacity === 0) return;
-    this.#map.delete(key); // set alone would keep an old key in its old place
-    this.#map.set(key, value);
-    if (this.#map.size > this.#capacity) {
-      const oldest = this.#map.keys().next().value; // the first key is the least recently used
-      this.#map.delete(oldest);
+        // key -> ListNode, to find a node in O(1).
+        this.map = new Map();
+
+        // The order of use, to move and remove nodes in O(1).
+        this.list = new DoublyLinkedList();
     }
-  }
-  get size() { return this.#map.size; }
-  keys() { return [...this.#map.keys()].reverse(); } // most recent first, like LRUCache
+
+    get(key) {
+        const node = this.map.get(key);
+        if (node === undefined) {
+            return undefined;
+        }
+
+        // It was just used, so it moves to the front.
+        this.list.moveToFront(node);
+        return node.value;
+    }
+```
+
+`put` either updates a key that is already there, or adds a new one. It evicts only when a new key comes into a full cache.
+
+```js
+    put(key, value) {
+        // A cache with no room keeps nothing.
+        if (this.capacity === 0) {
+            return;
+        }
+
+        // The key is already here: update it. No eviction is needed.
+        const existing = this.map.get(key);
+        if (existing !== undefined) {
+            existing.value = value;
+            this.list.moveToFront(existing);
+            return;
+        }
+
+        // A new key and the cache is full: evict the least recently used.
+        if (this.map.size === this.capacity) {
+            const oldest = this.list.removeLast();
+            this.map.delete(oldest.key);
+        }
+
+        const node = new ListNode(key, value);
+        this.list.addToFront(node);
+        this.map.set(key, node);
+    }
+```
+
+And two small helpers:
+
+```js
+    size() {
+        return this.map.size;
+    }
+
+    // The keys, most recent first.
+    keys() {
+        return this.list.keys();
+    }
 }
 ```
 
-**Part 4: try it.** The same steps on both caches give the same result, because both follow the `Cache` interface.
+### Part 4: The Map shortcut
+
+`MapLRUCache` uses a JavaScript trick: a `Map` remembers the order in which keys were added, and deleting then setting a key moves it to the end.
 
 ```js
-function fillAndUse(cache) { // works with any Cache
-  cache.put('a', 1);
-  cache.put('b', 2);
-  cache.put('c', 3);
-  cache.get('a'); // 'a' is now the most recent
-  cache.put('d', 4); // full: 'b' is the least recently used, so it goes
-  return cache.keys();
+// The shortcut: only a Map.
+// The first key is the oldest. The last key is the newest.
+class MapLRUCache extends Cache {
+    constructor(capacity) {
+        super();
+        checkCapacity(capacity);
+        this.capacity = capacity;
+        this.map = new Map();
+    }
+
+    get(key) {
+        if (!this.map.has(key)) {
+            return undefined;
+        }
+
+        const value = this.map.get(key);
+
+        // Delete, then set: the key moves to the end (the newest).
+        this.map.delete(key);
+        this.map.set(key, value);
+        return value;
+    }
+```
+
+The rest of `MapLRUCache`. When it is too full, the first key in the Map goes.
+
+```js
+    put(key, value) {
+        if (this.capacity === 0) {
+            return;
+        }
+
+        // Delete first. A plain set would keep an old key in its old place.
+        this.map.delete(key);
+        this.map.set(key, value);
+
+        if (this.map.size > this.capacity) {
+            // keys() walks the keys in order. next().value is the first one,
+            // which is the least recently used.
+            const oldest = this.map.keys().next().value;
+            this.map.delete(oldest);
+        }
+    }
+
+    size() {
+        return this.map.size;
+    }
+
+    // The keys, most recent first, like LRUCache.
+    keys() {
+        const keys = Array.from(this.map.keys());
+        keys.reverse();
+        return keys;
+    }
 }
+```
+
+### Part 5: Try it
+
+The same steps on both caches give the same result, because both follow the `Cache` interface.
+
+```js
+// Works with any Cache.
+function fillAndUse(cache) {
+    cache.put("a", 1);
+    cache.put("b", 2);
+    cache.put("c", 3);
+
+    // "a" is now the most recent.
+    cache.get("a");
+
+    // Full: "b" is the least recently used, so it goes.
+    cache.put("d", 4);
+
+    return cache.keys();
+}
+
 console.log(fillAndUse(new LRUCache(3))); // [ 'd', 'a', 'c' ]
 console.log(fillAndUse(new MapLRUCache(3))); // [ 'd', 'a', 'c' ]
+```
 
+Eviction and updates on a cache with room for two:
+
+```js
 const cache = new LRUCache(2);
-cache.put('x', 10);
-cache.put('y', 20);
-console.log(cache.get('x')); // 10
-cache.put('z', 30); // removes 'y'
-console.log(cache.get('y')); // undefined
-cache.put('x', 11); // an update: nothing is removed
-console.log(cache.keys(), cache.size); // [ 'x', 'z' ] 2
+cache.put("x", 10);
+cache.put("y", 20);
+console.log(cache.get("x")); // 10
 
+// Full, and "y" is the least recently used, so it goes.
+cache.put("z", 30);
+console.log(cache.get("y")); // undefined
+
+// An update: nothing is removed.
+cache.put("x", 11);
+console.log(cache.keys(), cache.size()); // [ 'x', 'z' ] 2
+```
+
+The capacity edge cases: 1, 0 and a negative number.
+
+```js
 const tiny = new LRUCache(1);
-tiny.put('a', 1);
-tiny.put('b', 2);
+tiny.put("a", 1);
+tiny.put("b", 2);
 console.log(tiny.keys()); // [ 'b' ]
 
 const none = new LRUCache(0);
-none.put('a', 1);
-console.log(none.get('a'), none.size); // undefined 0
-try { new LRUCache(-1); } catch (e) { console.log(e.message); } // Capacity must be a whole number, 0 or more
+none.put("a", 1);
+console.log(none.get("a"), none.size()); // undefined 0
+
+try {
+    new LRUCache(-1);
+} catch (error) {
+    console.log(error.message); // Capacity must be a whole number, 0 or more
+}
 ```
 
 <Callout title="Why the interviewer may still want the long way" type="idea">
@@ -338,12 +496,18 @@ try { new LRUCache(-1); } catch (e) { console.log(e.message); } // Capacity must
 ```js
 // A fragment, not runnable on its own.
 async function getUser(id) {
-  let promise = cache.get(id);
-  if (!promise) {
-    promise = db.loadUser(id); // no await here
-    cache.put(id, promise);    // the second request finds this promise and waits for the same load
-  }
-  return promise;              // (if the load fails, remove the promise so the next call tries again)
+    let promise = cache.get(id);
+
+    if (promise === undefined) {
+        // No await here: start the load and keep its promise.
+        promise = db.loadUser(id);
+
+        // A second request finds this promise and waits for the same load.
+        cache.put(id, promise);
+    }
+
+    // (If the load fails, remove the promise so the next call tries again.)
+    return promise;
 }
 ```
 

@@ -78,17 +78,25 @@ So **short bursts up to the capacity are fine**, but over time the user can't go
 You only store **two numbers** per user: tokens left, and the time of the last refill. No timer is needed to add tokens. You work them out when a request arrives:
 
 ```js
+// bucket is { capacity, refillPerSecond, tokens, lastRefill }
+// now is the current time in milliseconds
 function allowRequest(bucket, now) {
-  // Add the tokens earned since last time, but never more than the capacity
-  const secondsPassed = (now - bucket.lastRefill) / 1000;
-  bucket.tokens = Math.min(bucket.capacity, bucket.tokens + secondsPassed * bucket.refillPerSecond);
-  bucket.lastRefill = now;
+    // Work out the tokens earned since last time
+    const secondsPassed = (now - bucket.lastRefill) / 1000;
+    const earnedTokens = secondsPassed * bucket.refillPerSecond;
 
-  if (bucket.tokens >= 1) {
-    bucket.tokens -= 1;
-    return true; // allowed
-  }
-  return false; // rejected with 429
+    // Add them, but never more than the capacity
+    bucket.tokens = Math.min(bucket.capacity, bucket.tokens + earnedTokens);
+    bucket.lastRefill = now;
+
+    // A token is left: take it, and allow the request
+    if (bucket.tokens >= 1) {
+        bucket.tokens -= 1;
+        return true;
+    }
+
+    // No token left: reject it with 429
+    return false;
 }
 ```
 
@@ -114,14 +122,24 @@ Split time into fixed windows, such as each clock minute: 10:00:00 to 10:00:59, 
 It is very simple to build with Redis:
 
 ```js
-const key = `rate:${userId}:${currentMinute}`; // one key per user per minute
-// MULTI runs both commands as one unit, so the key can never be left without an expiry
-const [[, count]] = await redis
-  .multi()
-  .incr(key)        // add 1 and get the new count
-  .expire(key, 60)  // clean up after the window
-  .exec();          // ioredis returns [error, result] for each command
-if (count > 5) return reject429();
+// One key per user per minute
+const key = `rate:${userId}:${currentMinute}`;
+
+// MULTI runs both commands as one unit, so the key can never be left without an expiry.
+// incr adds 1 and gives back the new count. expire cleans up after the window.
+const results = await redis
+    .multi()
+    .incr(key)
+    .expire(key, 60)
+    .exec();
+
+// ioredis gives back [error, result] for each command. The count comes from the first one, incr.
+const incrResult = results[0];
+const count = incrResult[1];
+
+if (count > 5) {
+    return reject429();
+}
 ```
 
 **The problem: bursts at the edges.**

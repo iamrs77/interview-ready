@@ -16,18 +16,35 @@ A **Factory** is the kitchen for objects. Your code asks for "a card payment" an
 ## The problem
 
 ```js
-class Card { pay(amount) { return `Paid ${amount} by card`; } }
-class PayPal { pay(amount) { return `Paid ${amount} by PayPal`; } }
-
-function checkout(type, amount) {
-  let method;
-  if (type === 'card') method = new Card();
-  else if (type === 'paypal') method = new PayPal();
-  else throw new Error(`Unknown payment type: ${type}`);
-  return method.pay(amount);
+class Card {
+    pay(amount) {
+        return `Paid ${amount} by card`;
+    }
 }
 
-console.log(checkout('card', 50)); // Paid 50 by card
+class PayPal {
+    pay(amount) {
+        return `Paid ${amount} by PayPal`;
+    }
+}
+
+function checkout(type, amount) {
+    // checkout has to know every payment class by name.
+    let method;
+
+    if (type === "card") {
+        method = new Card();
+    } else if (type === "paypal") {
+        method = new PayPal();
+    } else {
+        throw new Error(`Unknown payment type: ${type}`);
+    }
+
+    return method.pay(amount);
+}
+
+console.log(checkout("card", 50)); // Paid 50 by card
+
 // refund() and subscribe() copy the same if/else...
 ```
 
@@ -71,41 +88,82 @@ classDiagram
   PaymentMethod <|.. ApplePay
 ```
 
-The textbook form is a `PaymentFactory` class with a static `create(type)` method. In JavaScript, a plain **function with a lookup table** does the same job:
+The textbook form is a `PaymentFactory` class with a static `create(type)` method. In JavaScript, a plain **function with a lookup table** does the same job. Here it is in three steps.
+
+#### Step 1: Create the payment classes
+
+Every payment method has the same `pay(amount)` method.
 
 ```js
-class PaymentMethod { // interface
-  pay(amount) { throw new Error('not implemented'); }
-}
-class Card extends PaymentMethod {
-  pay(amount) { return `Paid ${amount} by card`; }
-}
-class PayPal extends PaymentMethod {
-  pay(amount) { return `Paid ${amount} by PayPal`; }
-}
-class ApplePay extends PaymentMethod {
-  pay(amount) { return `Paid ${amount} by Apple Pay`; }
+// The shared interface. Every payment method must have pay(amount).
+class PaymentMethod {
+    pay(amount) {
+        throw new Error("not implemented");
+    }
 }
 
-const paymentTypes = new Map([
-  ['card', Card],
-  ['paypal', PayPal],
-  ['applepay', ApplePay],
-]);
+class Card extends PaymentMethod {
+    pay(amount) {
+        return `Paid ${amount} by card`;
+    }
+}
+
+class PayPal extends PaymentMethod {
+    pay(amount) {
+        return `Paid ${amount} by PayPal`;
+    }
+}
+
+class ApplePay extends PaymentMethod {
+    pay(amount) {
+        return `Paid ${amount} by Apple Pay`;
+    }
+}
+```
+
+#### Step 2: Create the factory
+
+The lookup table maps each type name to its class. The factory looks up the class and creates the object.
+
+```js
+// In JavaScript a class is a value, so it can be stored in a Map.
+const paymentTypes = new Map();
+paymentTypes.set("card", Card);
+paymentTypes.set("paypal", PayPal);
+paymentTypes.set("applepay", ApplePay);
 
 function createPayment(type) {
-  const PaymentClass = paymentTypes.get(type);
-  if (!PaymentClass) throw new Error(`Unknown payment type: ${type}`);
-  return new PaymentClass();
-}
+    const PaymentClass = paymentTypes.get(type);
 
+    // get() gives back undefined when the type is not in the map.
+    if (PaymentClass === undefined) {
+        throw new Error(`Unknown payment type: ${type}`);
+    }
+
+    // A class kept in a variable works with "new", like any class.
+    return new PaymentClass();
+}
+```
+
+#### Step 3: Use the factory
+
+`checkout` asks the factory for a payment method. It never names a class.
+
+```js
 function checkout(type, amount) {
-  return createPayment(type).pay(amount); // no class names here
+    const method = createPayment(type);
+
+    return method.pay(amount);
 }
 
-console.log(checkout('card', 50));     // Paid 50 by card
-console.log(checkout('applepay', 20)); // Paid 20 by Apple Pay
-try { checkout('cash', 10); } catch (e) { console.log(e.message); } // Unknown payment type: cash
+console.log(checkout("card", 50)); // Paid 50 by card
+console.log(checkout("applepay", 20)); // Paid 20 by Apple Pay
+
+try {
+    checkout("cash", 10);
+} catch (error) {
+    console.log(error.message); // Unknown payment type: cash
+}
 ```
 
 A new payment method is now **one new class and one new line** in the map. `checkout` never changes.
@@ -138,32 +196,74 @@ classDiagram
   RobotFactory ..> Robot : creates
 ```
 
+#### Step 1: Create the base factory
+
+The base class does the shared steps. It leaves `createToy()` empty for the subclasses to fill in.
+
 ```js
-class ToyFactory { // abstract
-  constructor() {
-    if (new.target === ToyFactory) throw new Error('ToyFactory is abstract');
-  }
+// Abstract: we only make a CarFactory or a RobotFactory, never a plain ToyFactory.
+class ToyFactory {
+    constructor() {
+        // this.constructor is the class that "new" was called with.
+        if (this.constructor === ToyFactory) {
+            throw new Error("ToyFactory is abstract");
+        }
+    }
 
-  createToy() { throw new Error('not implemented'); } // the factory method
+    // The factory method. Each subclass decides which toy to create.
+    createToy() {
+        throw new Error("not implemented");
+    }
 
-  makeToy() { // the shared steps
-    const toy = this.createToy(); // the subclass decides which toy
-    return `${toy.name}: built, tested and boxed`;
-  }
+    // The shared steps, the same for every toy.
+    makeToy() {
+        const toy = this.createToy();
+
+        return `${toy.name}: built, tested and boxed`;
+    }
+}
+```
+
+#### Step 2: Create the toys and their factories
+
+Each factory only fills in `createToy()`.
+
+```js
+class ToyCar {
+    constructor() {
+        this.name = "Toy car";
+    }
 }
 
-class ToyCar { name = 'Toy car'; }
-class Robot { name = 'Robot'; }
+class Robot {
+    constructor() {
+        this.name = "Robot";
+    }
+}
 
 class CarFactory extends ToyFactory {
-  createToy() { return new ToyCar(); }
-}
-class RobotFactory extends ToyFactory {
-  createToy() { return new Robot(); }
+    createToy() {
+        return new ToyCar();
+    }
 }
 
-console.log(new CarFactory().makeToy());   // Toy car: built, tested and boxed
-console.log(new RobotFactory().makeToy()); // Robot: built, tested and boxed
+class RobotFactory extends ToyFactory {
+    createToy() {
+        return new Robot();
+    }
+}
+```
+
+#### Step 3: Use the factories
+
+Both factories run the same steps. Only the toy is different.
+
+```js
+const carFactory = new CarFactory();
+const robotFactory = new RobotFactory();
+
+console.log(carFactory.makeToy()); // Toy car: built, tested and boxed
+console.log(robotFactory.makeToy()); // Robot: built, tested and boxed
 ```
 
 | | Simple Factory | Factory Method |

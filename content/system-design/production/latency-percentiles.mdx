@@ -61,18 +61,25 @@ With only 10 requests, p99 is simply the slowest one. Real systems compute perce
 The same thing in code:
 
 ```js
+// p is the percentile we want, like 50, 90 or 99
 function percentile(times, p) {
-  const sorted = [...times].sort((a, b) => a - b);
-  // Position, counting from 1. Multiply before dividing: (p / 100) can be off
-  // by a tiny bit (0.07 * 100 = 7.000000000000001), and then ceil picks the next one.
-  const position = Math.ceil((p * sorted.length) / 100);
-  return sorted[position - 1];
+    // Copy the list, then sort it from fastest to slowest
+    const sorted = times.slice();
+    sorted.sort((first, second) => first - second);
+
+    // Position, counting from 1. Multiply before dividing: (p / 100) can be off
+    // by a tiny bit (0.07 * 100 = 7.000000000000001), and then ceil picks the next one.
+    const position = Math.ceil((p * sorted.length) / 100);
+
+    // Arrays count from 0, so step back by one
+    return sorted[position - 1];
 }
 
 const times = [32, 25, 900, 28, 22, 40, 25, 30, 20, 35];
-percentile(times, 50); // 28
-percentile(times, 90); // 40
-percentile(times, 99); // 900
+
+console.log(percentile(times, 50)); // 28
+console.log(percentile(times, 90)); // 40
+console.log(percentile(times, 99)); // 900
 ```
 
 (Monitoring tools use slightly different formulas, so their numbers can differ a little. The idea is the same.)

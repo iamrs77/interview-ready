@@ -78,7 +78,7 @@ flowchart TB
 
 Plus one helper function, `parsePath`, that turns `/home/asha` into `['home', 'asha']`.
 
-**Enums:** none are needed. The error codes (`ENOENT`, `ENOTDIR`, `EISDIR`) sit in one frozen object.
+**Enums:** none are needed. The error codes (`ENOENT`, `ENOTDIR`, `EISDIR`) sit in one object.
 
 Only four classes, and that is right for this problem. The power comes from the recursion in `size`, not from many
 classes. See [DRY, KISS and YAGNI](../design-principles/dry-kiss-yagni.mdx).
@@ -173,169 +173,397 @@ sequenceDiagram
 
 ## Step 5: Code
 
-Run all the parts together as one `.mjs` file.
+Run all the parts together as one `.mjs` file. Long classes come in a few pieces. Paste the pieces in order and they
+make the whole class.
 
-**Part 1: errors and path parsing.** Error messages look like Node's, and `parsePath` turns a path into a list of
-names.
+### Part 1: Errors and path parsing
+
+**The errors.** Error messages look like Node's.
 
 ```js
-const ERRORS = Object.freeze({
-  ENOENT: 'no such file or directory',
-  ENOTDIR: 'not a directory',
-  EISDIR: 'illegal operation on a directory',
-});
-const fsError = (code, path) => new Error(`${code}: ${ERRORS[code]}, ${path}`);
+const ERRORS = {
+    ENOENT: "no such file or directory",
+    ENOTDIR: "not a directory",
+    EISDIR: "illegal operation on a directory",
+};
 
-// "/a//b/" -> ["a", "b"]
+// Makes an error like "ENOENT: no such file or directory, /tmp".
+function fsError(code, path) {
+    return new Error(`${code}: ${ERRORS[code]}, ${path}`);
+}
+```
+
+**Path parsing.** `parsePath` turns a path into a list of names.
+
+```js
+// Turns "/a//b/" into ["a", "b"].
 function parsePath(path) {
-  if (typeof path !== 'string' || !path.startsWith('/')) throw new Error(`Path must start with "/": ${path}`);
-  const names = path.split('/').filter((name) => name !== '');
-  if (names.some((name) => name === '.' || name === '..')) throw new Error(`"." and ".." are not supported: ${path}`);
-  return names;
+    if (typeof path !== "string" || !path.startsWith("/")) {
+        throw new Error(`Path must start with "/": ${path}`);
+    }
+
+    // Extra slashes make empty pieces. Drop them.
+    const pieces = path.split("/");
+    const names = pieces.filter((name) => name !== "");
+
+    for (const name of names) {
+        if (name === "." || name === "..") {
+            throw new Error(`"." and ".." are not supported: ${path}`);
+        }
+    }
+
+    return names;
 }
 ```
 
-**Part 2: the Composite.** An abstract `Entry`, a `File` leaf, and a `Directory` that holds more entries.
+### Part 2: The Composite
+
+**The abstract `Entry`, piece 1.** It holds what files and folders share: a name, a parent, and a path.
 
 ```js
-class Entry { // abstract: a file or a folder
-  constructor(name, parent) {
-    if (new.target === Entry) throw new Error('Entry is abstract');
-    this.name = name;
-    this.parent = parent; // a Directory, or null for "/"
-  }
-  get path() {
-    if (!this.parent) return '/';
-    const parentPath = this.parent.path;
-    return parentPath === '/' ? `/${this.name}` : `${parentPath}/${this.name}`;
-  }
-  isDirectory() { return false; }
-  size() { throw new Error('not implemented'); }
-  list() { throw new Error('not implemented'); }
-}
+// Abstract: a file or a folder. Only File and Directory are ever created.
+class Entry {
+    constructor(name, parent) {
+        // Stop anyone from writing "new Entry()" directly.
+        if (this.constructor === Entry) {
+            throw new Error("Entry is abstract");
+        }
 
-class File extends Entry {
-  #content = '';
-  size() { return this.#content.length; } // one character = one byte, to keep it simple
-  list() { return [this.name]; } // like `ls notes.txt`
-  read() { return this.#content; }
-  write(text) { this.#content = text; }
-  append(text) { this.#content += text; }
-}
+        this.name = name;
+        // A Directory, or null for the root "/".
+        this.parent = parent;
+    }
 
-class Directory extends Entry {
-  #children = new Map(); // name -> Entry
-  isDirectory() { return true; }
-  size() { // a folder's size is the sum of its children: the Composite pattern
-    let total = 0;
-    for (const child of this.#children.values()) total += child.size();
-    return total;
-  }
-  list() { return [...this.#children.keys()].sort(); }
-  child(name) { return this.#children.get(name) ?? null; }
-  add(entry) {
-    this.#children.set(entry.name, entry);
-    return entry;
-  }
-  remove(name) { this.#children.delete(name); }
+    // "get" lets us read it like a property: entry.path, not entry.path().
+    // It walks up through the parents to build a path like "/home/asha".
+    get path() {
+        if (!this.parent) {
+            return "/";
+        }
+
+        const parentPath = this.parent.path;
+        if (parentPath === "/") {
+            return `/${this.name}`;
+        }
+
+        return `${parentPath}/${this.name}`;
+    }
+```
+
+**The abstract `Entry`, piece 2.** Every entry has these methods. `File` and `Directory` each answer in their own way.
+
+```js
+    isDirectory() {
+        return false;
+    }
+
+    size() {
+        throw new Error("not implemented");
+    }
+
+    list() {
+        throw new Error("not implemented");
+    }
 }
 ```
 
-**Part 3: the main service.** `FileSystem` walks paths from the root and turns every wrong path into a clear error.
+**The `File` leaf.** It holds text.
+
+```js
+class File extends Entry {
+    constructor(name, parent) {
+        super(name, parent);
+        this.content = "";
+    }
+
+    // One character = one byte, to keep it simple.
+    size() {
+        return this.content.length;
+    }
+
+    // Like `ls notes.txt`: just its own name.
+    list() {
+        return [this.name];
+    }
+
+    read() {
+        return this.content;
+    }
+
+    write(text) {
+        this.content = text;
+    }
+
+    append(text) {
+        this.content += text;
+    }
+}
+```
+
+**The `Directory`, piece 1.** It holds more entries, in a `Map` from name to entry.
+
+```js
+class Directory extends Entry {
+    constructor(name, parent) {
+        super(name, parent);
+        // Name -> Entry (a File or another Directory).
+        this.children = new Map();
+    }
+
+    isDirectory() {
+        return true;
+    }
+
+    // A folder's size is the sum of its children: the Composite pattern.
+    // A child folder does the same, so this goes all the way down the tree.
+    size() {
+        let total = 0;
+        for (const child of this.children.values()) {
+            total += child.size();
+        }
+
+        return total;
+    }
+
+    // The names of the children, sorted.
+    list() {
+        const names = Array.from(this.children.keys());
+        return names.sort();
+    }
+```
+
+**The `Directory`, piece 2.** Find, add and remove a child. These finish the class.
+
+```js
+    // The child with this name, or null if there is none.
+    child(name) {
+        if (!this.children.has(name)) {
+            return null;
+        }
+
+        return this.children.get(name);
+    }
+
+    add(entry) {
+        this.children.set(entry.name, entry);
+        return entry;
+    }
+
+    remove(name) {
+        this.children.delete(name);
+    }
+}
+```
+
+### Part 3: The main service
+
+`FileSystem` walks paths from the root and turns every wrong path into a clear error.
+
+**Piece 1: the root, and `mkdir`.**
 
 ```js
 class FileSystem {
-  #root = new Directory('', null);
-
-  mkdir(path) { // like `mkdir -p`: makes every missing folder on the way
-    let dir = this.#root;
-    for (const name of parsePath(path)) {
-      const next = dir.child(name) ?? dir.add(new Directory(name, dir));
-      if (!next.isDirectory()) throw fsError('ENOTDIR', next.path); // a file is in the way
-      dir = next;
+    constructor() {
+        // The root folder "/". It has no name and no parent.
+        this.root = new Directory("", null);
     }
-    return dir;
-  }
 
-  ls(path = '/') { return this.#find(path).list(); }
+    // Like `mkdir -p`: makes every missing folder on the way.
+    mkdir(path) {
+        let folder = this.root;
 
-  writeFile(path, text) { this.#fileAt(path).write(text); }
-  appendFile(path, text) { this.#fileAt(path).append(text); }
+        for (const name of parsePath(path)) {
+            let next = folder.child(name);
+            if (next === null) {
+                next = folder.add(new Directory(name, folder));
+            }
 
-  readFile(path) {
-    const entry = this.#find(path);
-    if (entry.isDirectory()) throw fsError('EISDIR', path);
-    return entry.read();
-  }
+            // A file is in the way.
+            if (!next.isDirectory()) {
+                throw fsError("ENOTDIR", next.path);
+            }
 
-  delete(path) { // a folder goes with everything inside it, like `rm -r`
-    const entry = this.#find(path);
-    if (entry === this.#root) throw new Error('Cannot delete "/"');
-    entry.parent.remove(entry.name);
-  }
+            folder = next;
+        }
 
-  size(path = '/') { return this.#find(path).size(); }
-
-  #find(path) { // walk down from "/", one name at a time
-    let entry = this.#root;
-    for (const name of parsePath(path)) {
-      if (!entry.isDirectory()) throw fsError('ENOTDIR', entry.path);
-      entry = entry.child(name);
-      if (entry === null) throw fsError('ENOENT', path);
+        return folder;
     }
-    return entry;
-  }
+```
 
-  #fileAt(path) { // the file at path; made if missing, but its folder must exist
-    const names = parsePath(path);
-    const name = names.pop();
-    if (name === undefined) throw fsError('EISDIR', '/');
-    const parent = this.#find(`/${names.join('/')}`);
-    if (!parent.isDirectory()) throw fsError('ENOTDIR', parent.path);
-    const entry = parent.child(name) ?? parent.add(new File(name, parent));
-    if (entry.isDirectory()) throw fsError('EISDIR', entry.path);
-    return entry;
-  }
+**Piece 2: list, write and read.**
+
+```js
+    // A folder lists its children. A file lists just its own name.
+    ls(path = "/") {
+        const entry = this.find(path);
+        return entry.list();
+    }
+
+    writeFile(path, text) {
+        const file = this.fileAt(path);
+        file.write(text);
+    }
+
+    appendFile(path, text) {
+        const file = this.fileAt(path);
+        file.append(text);
+    }
+
+    readFile(path) {
+        const entry = this.find(path);
+        if (entry.isDirectory()) {
+            throw fsError("EISDIR", path);
+        }
+
+        return entry.read();
+    }
+```
+
+**Piece 3: delete and size.**
+
+```js
+    // A folder goes with everything inside it, like `rm -r`.
+    delete(path) {
+        const entry = this.find(path);
+        if (entry === this.root) {
+            throw new Error(`Cannot delete "/"`);
+        }
+
+        // Ask the parent to forget this entry.
+        entry.parent.remove(entry.name);
+    }
+
+    size(path = "/") {
+        const entry = this.find(path);
+        return entry.size();
+    }
+```
+
+**Piece 4: `find`.** It walks down from `/`, one name at a time.
+
+```js
+    find(path) {
+        let entry = this.root;
+
+        for (const name of parsePath(path)) {
+            // We can only step inside a folder.
+            if (!entry.isDirectory()) {
+                throw fsError("ENOTDIR", entry.path);
+            }
+
+            entry = entry.child(name);
+            if (entry === null) {
+                throw fsError("ENOENT", path);
+            }
+        }
+
+        return entry;
+    }
+```
+
+**Piece 5: `fileAt`.** It finds the file at a path, and makes it if it is missing. The folder must already exist. This
+finishes the `FileSystem` class.
+
+```js
+    fileAt(path) {
+        // Split "/home/asha/hello.js" into the folder names and the file name.
+        const names = parsePath(path);
+        const fileName = names.pop();
+
+        // The path was just "/", which is a folder.
+        if (fileName === undefined) {
+            throw fsError("EISDIR", "/");
+        }
+
+        const folderPath = "/" + names.join("/");
+        const folder = this.find(folderPath);
+        if (!folder.isDirectory()) {
+            throw fsError("ENOTDIR", folder.path);
+        }
+
+        let entry = folder.child(fileName);
+        if (entry === null) {
+            entry = folder.add(new File(fileName, folder));
+        }
+
+        if (entry.isDirectory()) {
+            throw fsError("EISDIR", entry.path);
+        }
+
+        return entry;
+    }
 }
 ```
 
-**Part 4: try it.** Build the tree from the picture above, then try every kind of bad path.
+### Part 4: Try it
+
+Build the tree from the picture above, then try every kind of bad path.
+
+**A helper for errors.** `attempt` runs some code. If the code throws, it returns the error message instead, so we
+can print it.
 
 ```js
 const fs = new FileSystem();
-const attempt = (fn) => {
-  try {
-    return fn();
-  } catch (e) {
-    return e.message;
-  }
-};
 
-// 1. Make folders and files.
-fs.mkdir('/home/asha/notes'); // (makes home, asha and notes)
-fs.writeFile('/home/asha/notes/todo.txt', 'buy milk');
-fs.appendFile('/home/asha/notes/todo.txt', ', fix bike');
-fs.writeFile('/home/asha/hello.js', 'console.log(1)');
-fs.mkdir('/home/ben');
+function attempt(action) {
+    try {
+        return action();
+    } catch (error) {
+        return error.message;
+    }
+}
+```
+
+**Make folders and files, then list, read and size them.**
+
+```js
+// 1. Make folders and files. The first line makes home, asha and notes.
+fs.mkdir("/home/asha/notes");
+fs.writeFile("/home/asha/notes/todo.txt", "buy milk");
+fs.appendFile("/home/asha/notes/todo.txt", ", fix bike");
+fs.writeFile("/home/asha/hello.js", "console.log(1)");
+fs.mkdir("/home/ben");
 
 // 2. List, read and size.
-console.log(fs.ls('/home')); // [ 'asha', 'ben' ]
-console.log(fs.ls('/home/asha')); // [ 'hello.js', 'notes' ]
-console.log(fs.ls('/home/asha/hello.js')); // [ 'hello.js' ]
-console.log(fs.readFile('/home/asha/notes/todo.txt')); // buy milk, fix bike
-console.log(fs.size('/home/asha/notes/todo.txt'), fs.size('/home/asha/hello.js'), fs.size('/')); // 18 14 32
+console.log(fs.ls("/home")); // [ 'asha', 'ben' ]
+console.log(fs.ls("/home/asha")); // [ 'hello.js', 'notes' ]
+console.log(fs.ls("/home/asha/hello.js")); // [ 'hello.js' ]
+console.log(fs.readFile("/home/asha/notes/todo.txt")); // buy milk, fix bike
+console.log(fs.size("/home/asha/notes/todo.txt")); // 18
+console.log(fs.size("/home/asha/hello.js")); // 14
+console.log(fs.size("/")); // 32
+```
 
+**Try the bad paths.**
+
+```js
 // 3. Edge cases.
-console.log(attempt(() => fs.readFile('/home/zoe/a.txt'))); // ENOENT: no such file or directory, /home/zoe/a.txt
-console.log(attempt(() => fs.mkdir('/home/asha/hello.js/lib'))); // ENOTDIR: not a directory, /home/asha/hello.js
-console.log(attempt(() => fs.readFile('/home'))); // EISDIR: illegal operation on a directory, /home
-console.log(attempt(() => fs.writeFile('/tmp/a.txt', 'hi'))); // ENOENT: no such file or directory, /tmp
-console.log(attempt(() => fs.ls('home'))); // Path must start with "/": home
-console.log(attempt(() => fs.delete('/'))); // Cannot delete "/"
+const missingFile = attempt(() => fs.readFile("/home/zoe/a.txt"));
+console.log(missingFile); // ENOENT: no such file or directory, /home/zoe/a.txt
 
+const fileAsFolder = attempt(() => fs.mkdir("/home/asha/hello.js/lib"));
+console.log(fileAsFolder); // ENOTDIR: not a directory, /home/asha/hello.js
+
+const readFolder = attempt(() => fs.readFile("/home"));
+console.log(readFolder); // EISDIR: illegal operation on a directory, /home
+
+const missingFolder = attempt(() => fs.writeFile("/tmp/a.txt", "hi"));
+console.log(missingFolder); // ENOENT: no such file or directory, /tmp
+
+const noSlash = attempt(() => fs.ls("home"));
+console.log(noSlash); // Path must start with "/": home
+
+const deleteRoot = attempt(() => fs.delete("/"));
+console.log(deleteRoot); // Cannot delete "/"
+```
+
+**Delete a folder with everything in it.**
+
+```js
 // 4. Delete a folder with everything in it.
-fs.delete('/home/asha/notes');
-console.log(fs.ls('/home/asha'), fs.size('/')); // [ 'hello.js' ] 14
+fs.delete("/home/asha/notes");
+console.log(fs.ls("/home/asha")); // [ 'hello.js' ]
+console.log(fs.size("/")); // 14
 ```
 
 The variable is called `fs`, like Node's file system module, but it is our own in-memory class. Nothing touches the
@@ -368,8 +596,11 @@ The danger comes when the files live somewhere slow, like a disk or a database, 
 ```js
 // Not runnable: a broken async appendFile, to show the bug.
 async appendFile(path, text) {
-  const old = await this.#store.read(path); // both appends read "buy milk"
-  await this.#store.write(path, old + text); // the second write wipes out the first one's text
+    // Both appends read "buy milk".
+    const oldText = await this.store.read(path);
+
+    // The second write wipes out the first one's text.
+    await this.store.write(path, oldText + text);
 }
 ```
 
@@ -391,33 +622,53 @@ their own home folder:
 
 ```js
 // Builds on the Step 5 code.
-class UserFileSystem { // a Proxy: same methods, plus a permission check
-  #fs;
-  #user;
-  constructor(fs, user) {
-    this.#fs = fs;
-    this.#user = user;
-  }
-  #check(path) {
-    const [top, owner] = parsePath(path);
-    if (top !== 'home' || owner !== this.#user) throw new Error(`EACCES: permission denied, ${path}`);
-  }
-  writeFile(path, text) { this.#check(path); this.#fs.writeFile(path, text); }
-  readFile(path) { this.#check(path); return this.#fs.readFile(path); }
+// A Proxy: the same methods as FileSystem, plus a permission check.
+class UserFileSystem {
+    constructor(fs, user) {
+        this.fs = fs;
+        this.user = user;
+    }
+
+    // A user may only touch paths inside their own home folder, like /home/ben/...
+    check(path) {
+        const names = parsePath(path);
+        const top = names[0];
+        const owner = names[1];
+        if (top !== "home" || owner !== this.user) {
+            throw new Error(`EACCES: permission denied, ${path}`);
+        }
+    }
+
+    writeFile(path, text) {
+        this.check(path);
+        this.fs.writeFile(path, text);
+    }
+
+    readFile(path) {
+        this.check(path);
+        return this.fs.readFile(path);
+    }
 }
-const ben = new UserFileSystem(fs, 'ben');
-ben.writeFile('/home/ben/a.txt', 'hi');
-console.log(ben.readFile('/home/ben/a.txt')); // hi
-console.log(attempt(() => ben.readFile('/home/asha/hello.js'))); // EACCES: permission denied, /home/asha/hello.js
+```
+
+Ben can use his own folder, but not Asha's:
+
+```js
+const ben = new UserFileSystem(fs, "ben");
+ben.writeFile("/home/ben/a.txt", "hi");
+console.log(ben.readFile("/home/ben/a.txt")); // hi
+
+const notAllowed = attempt(() => ben.readFile("/home/asha/hello.js"));
+console.log(notAllowed); // EACCES: permission denied, /home/asha/hello.js
 ```
 
 Real Unix-style permissions go further: each `Entry` stores an `owner` and read, write and execute bits for the
-owner, the group, and everyone else. `#find` then checks each folder on the way down. That is a change inside the
+owner, the group, and everyone else. `find` then checks each folder on the way down. That is a change inside the
 core, so say so in the interview.
 
 **2. Links.**
 
-- A **symbolic link** (a shortcut) is a new `Entry` subclass, `SymLink`, that stores a target path. `#find`
+- A **symbolic link** (a shortcut) is a new `Entry` subclass, `SymLink`, that stores a target path. `find`
   follows it when walking. Add a hop limit to stop loops (Linux gives up after 40 links, with `ELOOP`). The
   Composite takes the new kind of entry without changes to `Directory`.
 - A **hard link** is two names for the same file. That breaks "each entry has one parent". The fix is to split the

@@ -24,24 +24,47 @@ The **app** talks to both the cache and the database. The cache is "on the side"
 
 The read flow is drawn in [What is Caching](./what-is-caching.mdx). In code:
 
+**Read:** check the cache first. On a miss, read the database and keep a copy.
+
 ```js
 async function getProduct(id) {
-  const key = `product:${id}`;
-  const cached = await redis.get(key);
-  if (cached) return JSON.parse(cached); // cache hit
+    const key = `product:${id}`;
 
-  // cache miss: read the database, then keep a copy.
-  // Found: keep it 10 minutes. Not found (null): only 1 minute,
-  // so a product created soon after still shows up quickly.
-  const { rows } = await db.query('SELECT * FROM products WHERE id = $1', [id]);
-  const product = rows[0] ?? null;
-  await redis.set(key, JSON.stringify(product), 'EX', product ? 600 : 60);
-  return product;
+    // 1. Look in the cache
+    const cached = await redis.get(key);
+
+    if (cached) {
+        // Cache hit
+        return JSON.parse(cached);
+    }
+
+    // 2. Cache miss: read the database. No row means null.
+    const result = await db.query("SELECT * FROM products WHERE id = $1", [id]);
+    let product = null;
+    if (result.rows.length > 0) {
+        product = result.rows[0];
+    }
+
+    // 3. Keep a copy. Found: keep it 10 minutes. Not found (null): only 1 minute,
+    // so a product created soon after still shows up quickly.
+    let seconds = 60;
+    if (product) {
+        seconds = 600;
+    }
+
+    await redis.set(key, JSON.stringify(product), "EX", seconds);
+    return product;
 }
+```
 
+**Write:** update the database, then delete the cached copy.
+
+```js
 async function updatePrice(id, price) {
-  await db.query('UPDATE products SET price = $1 WHERE id = $2', [price, id]);
-  await redis.del(`product:${id}`); // the next read loads the new price
+    await db.query("UPDATE products SET price = $1 WHERE id = $2", [price, id]);
+
+    // The next read misses, and loads the new price
+    await redis.del(`product:${id}`);
 }
 ```
 

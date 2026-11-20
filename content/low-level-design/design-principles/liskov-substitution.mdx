@@ -20,31 +20,58 @@ It is the "L" in SOLID. It is named after Barbara Liskov, a computer scientist w
 
 ## Square extends Rectangle
 
-In maths, every square is a rectangle. So `Square extends Rectangle` feels right. Watch what happens:
+In maths, every square is a rectangle. So `Square extends Rectangle` feels right. Watch what happens.
+
+**Step 1: a rectangle.** Its width and height can be set one at a time:
 
 ```js
 class Rectangle {
-  constructor(width, height) {
-    this.width = width;
-    this.height = height;
-  }
-  setWidth(w) { this.width = w; }
-  setHeight(h) { this.height = h; }
-  area() { return this.width * this.height; }
-}
+    constructor(width, height) {
+        this.width = width;
+        this.height = height;
+    }
 
+    setWidth(width) {
+        this.width = width;
+    }
+
+    setHeight(height) {
+        this.height = height;
+    }
+
+    area() {
+        return this.width * this.height;
+    }
+}
+```
+
+**Step 2: a square that extends it.** A square must keep both sides equal, so each setter changes both:
+
+```js
 class Square extends Rectangle {
-  constructor(side) { super(side, side); }
-  // A square must keep both sides equal, so each setter changes both.
-  setWidth(w) { this.width = w; this.height = w; }
-  setHeight(h) { this.width = h; this.height = h; }
-}
+    constructor(side) {
+        super(side, side);
+    }
 
-// Written for rectangles. It trusts that setWidth() doesn't change the height.
+    setWidth(width) {
+        this.width = width;
+        this.height = width;
+    }
+
+    setHeight(height) {
+        this.width = height;
+        this.height = height;
+    }
+}
+```
+
+**Step 3: code written for rectangles.** `resize()` trusts that `setWidth()` doesn't change the height:
+
+```js
 function resize(rect) {
-  rect.setWidth(5);
-  rect.setHeight(4);
-  return rect.area();
+    rect.setWidth(5);
+    rect.setHeight(4);
+    return rect.area();
 }
 
 console.log(resize(new Rectangle(2, 3))); // 20
@@ -82,22 +109,47 @@ classDiagram
 ```
 
 ```js
-class Shape { // interface
-  area() { throw new Error('not implemented'); }
+// The interface: every shape can tell you its area.
+// JavaScript has no "interface" keyword, so a base class that throws stands in for one.
+class Shape {
+    area() {
+        throw new Error("not implemented");
+    }
 }
 
 class Rectangle extends Shape {
-  constructor(width, height) { super(); this.width = width; this.height = height; }
-  area() { return this.width * this.height; }
+    constructor(width, height) {
+        super();
+        this.width = width;
+        this.height = height;
+    }
+
+    area() {
+        return this.width * this.height;
+    }
 }
 
 class Square extends Shape {
-  constructor(side) { super(); this.side = side; }
-  area() { return this.side * this.side; }
-}
+    constructor(side) {
+        super();
+        this.side = side;
+    }
 
+    area() {
+        return this.side * this.side;
+    }
+}
+```
+
+Any list of shapes can now be handled the same way:
+
+```js
 const shapes = [new Rectangle(5, 4), new Square(4)];
-for (const shape of shapes) console.log(shape.constructor.name, shape.area());
+
+for (const shape of shapes) {
+    // constructor.name is the name of the object's class, like "Rectangle".
+    console.log(shape.constructor.name, shape.area());
+}
 // Rectangle 20
 // Square 16
 ```
@@ -108,22 +160,31 @@ Any code that takes a `Shape` only calls `area()`, and every shape keeps that pr
 
 ```js
 class Bird {
-  fly() { return 'Flying high'; }
-}
-class Sparrow extends Bird {}
-class Penguin extends Bird {
-  fly() { throw new Error("Penguins can't fly"); }
+    fly() {
+        return "Flying high";
+    }
 }
 
+// A sparrow is a bird with nothing extra.
+class Sparrow extends Bird {}
+
+class Penguin extends Bird {
+    fly() {
+        throw new Error("Penguins can't fly");
+    }
+}
+
+// Makes every bird in the list fly.
 function startMigration(birds) {
-  return birds.map((bird) => bird.fly());
+    return birds.map((bird) => bird.fly());
 }
 
 console.log(startMigration([new Sparrow()])); // [ 'Flying high' ]
+
 try {
-  startMigration([new Sparrow(), new Penguin()]);
-} catch (e) {
-  console.log(e.message); // Penguins can't fly
+    startMigration([new Sparrow(), new Penguin()]);
+} catch (error) {
+    console.log(error.message); // Penguins can't fly
 }
 ```
 
@@ -150,29 +211,53 @@ classDiagram
   Bird <|-- Penguin
 ```
 
+**Step 1: the two parent classes.** Every bird can eat. Only a `FlyingBird` can fly:
+
 ```js
 class Bird {
-  constructor(name) {
-    if (new.target === Bird || new.target === FlyingBird) throw new Error('abstract class');
-    this.name = name;
-  }
-  eat() { return `${this.name} is eating`; }
+    constructor(name) {
+        // Bird and FlyingBird are abstract: you can't create one directly.
+        // new.target is the class that "new" was called with.
+        if (new.target === Bird || new.target === FlyingBird) {
+            throw new Error("abstract class");
+        }
+
+        this.name = name;
+    }
+
+    eat() {
+        return `${this.name} is eating`;
+    }
 }
+
 class FlyingBird extends Bird {
-  fly() { return `${this.name} is flying`; }
+    fly() {
+        return `${this.name} is flying`;
+    }
 }
+```
+
+**Step 2: the real birds.** A sparrow is a flying bird. A penguin is a bird that swims. `startMigration()` now asks only for flying birds:
+
+```js
 class Sparrow extends FlyingBird {}
+
 class Penguin extends Bird {
-  swim() { return `${this.name} is swimming`; }
+    swim() {
+        return `${this.name} is swimming`;
+    }
 }
 
-function startMigration(flyingBirds) { // only takes FlyingBirds now
-  return flyingBirds.map((bird) => bird.fly());
+// Only takes FlyingBirds now.
+function startMigration(flyingBirds) {
+    return flyingBirds.map((bird) => bird.fly());
 }
 
-console.log(startMigration([new Sparrow('Sparrow')])); // [ 'Sparrow is flying' ]
-console.log(new Penguin('Pingu').swim());              // Pingu is swimming
-console.log(new Penguin('Pingu').eat());               // Pingu is eating
+const pingu = new Penguin("Pingu");
+
+console.log(startMigration([new Sparrow("Sparrow")])); // [ 'Sparrow is flying' ]
+console.log(pingu.swim());                             // Pingu is swimming
+console.log(pingu.eat());                              // Pingu is eating
 ```
 
 Another fix is to make flying an ability, a small `Flyer` interface that only flying birds have. See [Interface Segregation Principle](./interface-segregation.mdx).

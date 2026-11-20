@@ -51,14 +51,16 @@ SET lock:report-rebuild 7f3a9c NX PX 30000
 To release the lock, delete the key, but **only if it still holds your token**. Otherwise you might delete a lock that has since passed to someone else. The check and the delete must happen together, so use a small Lua script, which Redis runs as one step:
 
 ```js
-// Delete the lock only if we still own it
+// The Lua script: delete the lock only if it still holds our token
 const RELEASE = `
-  if redis.call("GET", KEYS[1]) == ARGV[1] then
-    return redis.call("DEL", KEYS[1])
-  end
-  return 0
+    if redis.call("GET", KEYS[1]) == ARGV[1] then
+        return redis.call("DEL", KEYS[1])
+    end
+    return 0
 `;
-await redis.eval(RELEASE, 1, 'lock:report-rebuild', myToken);
+
+// The 1 means "one key name comes next". Then the key, then our token.
+await redis.eval(RELEASE, 1, "lock:report-rebuild", myToken);
 ```
 
 ```mermaid
@@ -134,15 +136,23 @@ Where to get tokens: **etcd** and **ZooKeeper** give every change a number that 
 **Fencing only protects storage that checks the token.** It can't stop a second invoice **email**. So for billing, also make the work itself safe to repeat (see [Idempotency](../messaging/idempotency.mdx)). A unique rule allows one invoice per customer per month, and the email is queued in the same transaction as the invoice (see [Outbox Pattern](./outbox-pattern.mdx)):
 
 ```js
-// The invoices table has a unique rule on (customer_id, month)
-await db.transaction(async (tx) => {
-  const added = await tx.query(
-    `INSERT INTO invoices (customer_id, month, total) VALUES ($1, $2, $3)
-     ON CONFLICT (customer_id, month) DO NOTHING`,
-    [customerId, month, total]
-  );
-  if (added.rowCount === 0) return;               // already billed: no second invoice, no second email
-  await queueInvoiceEmail(tx, customerId, month); // an outbox row, saved in the same transaction
+// The invoices table has a unique rule on (customer_id, month).
+// If that invoice already exists, DO NOTHING skips the insert.
+const addInvoiceSql = `
+    INSERT INTO invoices (customer_id, month, total) VALUES ($1, $2, $3)
+    ON CONFLICT (customer_id, month) DO NOTHING
+`;
+
+await db.transaction(async (transaction) => {
+    const result = await transaction.query(addInvoiceSql, [customerId, month, total]);
+
+    // No row added: already billed. No second invoice, and no second email.
+    if (result.rowCount === 0) {
+        return;
+    }
+
+    // Queue the email as an outbox row, saved in the same transaction
+    await queueInvoiceEmail(transaction, customerId, month);
 });
 ```
 

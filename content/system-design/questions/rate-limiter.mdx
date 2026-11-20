@@ -139,17 +139,39 @@ Example with small numbers, to keep the math easy: bucket size 10, refill 1 toke
 
 ```js
 // One bucket per client: { tokens, lastRefill }
+// now is the current time in milliseconds
 function allowRequest(bucket, capacity, refillPerSecond, now) {
-  const secondsPassed = (now - bucket.lastRefill) / 1000;
-  bucket.tokens = Math.min(capacity, bucket.tokens + secondsPassed * refillPerSecond);
-  bucket.lastRefill = now;
+    // Work out the tokens earned since the last refill
+    const secondsPassed = (now - bucket.lastRefill) / 1000;
+    const earnedTokens = secondsPassed * refillPerSecond;
 
-  if (bucket.tokens >= 1) {
-    bucket.tokens -= 1;
-    return true; // allowed
-  }
-  return false; // blocked: send 429
+    // Add them, but never go above the bucket size
+    bucket.tokens = Math.min(capacity, bucket.tokens + earnedTokens);
+    bucket.lastRefill = now;
+
+    // A token is left: take it, and allow the request
+    if (bucket.tokens >= 1) {
+        bucket.tokens -= 1;
+        return true;
+    }
+
+    // No token left: block it, and send 429
+    return false;
 }
+```
+
+The example above, in code (bucket size 10, refill 1 token per second):
+
+```js
+const bucket = { tokens: 10, lastRefill: 0 };
+
+// 10 requests at once: all allowed
+for (let i = 0; i < 10; i++) {
+    allowRequest(bucket, 10, 1, 0);
+}
+
+console.log(allowRequest(bucket, 10, 1, 0)); // false
+console.log(allowRequest(bucket, 10, 1, 3000)); // true
 ```
 
 Two more you should know by name:

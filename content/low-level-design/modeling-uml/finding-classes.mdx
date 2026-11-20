@@ -115,57 +115,160 @@ classDiagram
   BookCopy -- CopyStatus
 ```
 
-And the same draft as running code. Days are plain numbers (day 1, day 18) to keep it short:
+And the same draft as running code. Days are plain numbers (day 1, day 18) to keep it short. The parts below run together as one file.
+
+**Part 1: The enum and the rules.** The fixed values and numbers from the problem statement:
 
 ```js
-const CopyStatus = Object.freeze({ AVAILABLE: 'AVAILABLE', BORROWED: 'BORROWED' });
-const LOAN_DAYS = 14, MAX_LOANS = 3, FINE_PER_DAY = 1;
+// The enum: a copy is either on the shelf or borrowed
+const CopyStatus = {
+    AVAILABLE: "AVAILABLE",
+    BORROWED: "BORROWED",
+};
+
+// The fixed numbers from the rules
+const LOAN_DAYS = 14;
+const MAX_LOANS = 3;
+const FINE_PER_DAY = 1;
+```
+
+**Part 2: A book and its copies.** A `Book` is the description, a `BookCopy` is one real item on the shelf:
+
+```js
+class BookCopy {
+    // Every new copy starts on the shelf
+    status = CopyStatus.AVAILABLE;
+
+    constructor(barcode, book) {
+        this.barcode = barcode;
+        this.book = book;
+    }
+}
 
 class Book {
-  copies = [];
-  constructor(isbn, title, author) { Object.assign(this, { isbn, title, author }); }
-  addCopy(barcode) { this.copies.push(new BookCopy(barcode, this)); }
-  availableCopy() { return this.copies.find((c) => c.status === CopyStatus.AVAILABLE); }
+    copies = [];
+
+    constructor(isbn, title, author) {
+        this.isbn = isbn;
+        this.title = title;
+        this.author = author;
+    }
+
+    addCopy(barcode) {
+        const copy = new BookCopy(barcode, this);
+        this.copies.push(copy);
+    }
+
+    // The first copy on the shelf, or undefined if every copy is out
+    availableCopy() {
+        return this.copies.find((copy) => copy.status === CopyStatus.AVAILABLE);
+    }
 }
-class BookCopy {
-  status = CopyStatus.AVAILABLE;
-  constructor(barcode, book) { this.barcode = barcode; this.book = book; }
-}
+```
+
+**Part 3: A member and a loan.** The member knows its own loans, and the loan knows its due day:
+
+```js
 class Member {
-  loans = [];
-  constructor(id, name) { this.id = id; this.name = name; }
-  canBorrow() { return this.loans.length < MAX_LOANS; }
-}
-class Loan {
-  constructor(copy, member, today) { Object.assign(this, { copy, member, dueDay: today + LOAN_DAYS }); }
-  fine(today) { return Math.max(0, today - this.dueDay) * FINE_PER_DAY; }
-}
-class Library {
-  #books = new Map(); // isbn -> Book
-  addBook(book) { this.#books.set(book.isbn, book); }
-  search(text) { return [...this.#books.values()].filter((b) => b.title.includes(text) || b.author.includes(text)); }
-  borrow(member, isbn, today) {
-    const copy = this.#books.get(isbn)?.availableCopy();
-    if (!copy || !member.canBorrow()) return null;
-    copy.status = CopyStatus.BORROWED;
-    const loan = new Loan(copy, member, today);
-    member.loans.push(loan);
-    return loan;
-  }
-  returnCopy(loan, today) {
-    loan.copy.status = CopyStatus.AVAILABLE;
-    loan.member.loans = loan.member.loans.filter((l) => l !== loan);
-    return loan.fine(today);
-  }
+    loans = [];
+
+    constructor(id, name) {
+        this.id = id;
+        this.name = name;
+    }
+
+    canBorrow() {
+        return this.loans.length < MAX_LOANS;
+    }
 }
 
+class Loan {
+    constructor(copy, member, today) {
+        this.copy = copy;
+        this.member = member;
+        this.dueDay = today + LOAN_DAYS;
+    }
+
+    fine(today) {
+        const daysLate = today - this.dueDay;
+
+        // Back on time or early: no fine
+        if (daysLate <= 0) {
+            return 0;
+        }
+
+        return daysLate * FINE_PER_DAY;
+    }
+}
+```
+
+**Part 4: The library.** It holds all the books and runs search, borrow and return:
+
+```js
+class Library {
+    // A Map from isbn to Book, so we can find a book by its isbn
+    books = new Map();
+
+    addBook(book) {
+        this.books.set(book.isbn, book);
+    }
+
+    search(text) {
+        const allBooks = Array.from(this.books.values());
+
+        return allBooks.filter((book) => {
+            return book.title.includes(text) || book.author.includes(text);
+        });
+    }
+
+    borrow(member, isbn, today) {
+        const book = this.books.get(isbn);
+        if (!book) {
+            return null;
+        }
+
+        // Stop if every copy is out, or the member already has too many loans
+        const copy = book.availableCopy();
+        if (!copy || !member.canBorrow()) {
+            return null;
+        }
+
+        copy.status = CopyStatus.BORROWED;
+
+        const loan = new Loan(copy, member, today);
+        member.loans.push(loan);
+        return loan;
+    }
+
+    returnCopy(loan, today) {
+        loan.copy.status = CopyStatus.AVAILABLE;
+
+        // Keep every loan except this one
+        const member = loan.member;
+        member.loans = member.loans.filter((memberLoan) => memberLoan !== loan);
+
+        return loan.fine(today);
+    }
+}
+```
+
+**Part 5: Try it.** Add a book, borrow it on day 1, and bring it back late on day 18:
+
+```js
 const library = new Library();
-const hobbit = new Book('978-0', 'The Hobbit', 'Tolkien');
-hobbit.addCopy('C1');
+
+const hobbit = new Book("978-0", "The Hobbit", "Tolkien");
+hobbit.addCopy("C1");
 library.addBook(hobbit);
-console.log(library.search('Tolkien').length); // 1
-const loan = library.borrow(new Member('M1', 'Ana'), '978-0', 1);
-console.log(loan.dueDay);                  // 15
+
+const results = library.search("Tolkien");
+console.log(results.length); // 1
+
+const ana = new Member("M1", "Ana");
+const loan = library.borrow(ana, "978-0", 1);
+console.log(loan.dueDay); // 15
+
+// Due on day 15, back on day 18: 3 days late
 console.log(library.returnCopy(loan, 18)); // 3
 ```
 

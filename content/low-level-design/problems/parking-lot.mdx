@@ -1,7 +1,7 @@
 ---
 title: "Design a Parking Lot"
 description: "The classic first LLD question: levels, spots, vehicles, tickets and fees."
-icon: SquareParking
+icon: ParkingMeter
 ---
 
 <Callout title="About this question">
@@ -170,197 +170,434 @@ sequenceDiagram
 
 ## Step 5: Code
 
-**Part 1: enums and small classes.** Each vehicle knows the smallest spot size it needs. The factory turns a type name into the right class.
+The code comes in small parts. Paste them together in order, and they run as one file.
+
+### Part 1: The enums
+
+Fixed lists of choices are plain objects. `SIZES` puts the spot sizes in order, from small to large.
 
 ```js
-const SpotSize = Object.freeze({ SMALL: 'SMALL', MEDIUM: 'MEDIUM', LARGE: 'LARGE' });
-const VehicleType = Object.freeze({ MOTORCYCLE: 'MOTORCYCLE', CAR: 'CAR', TRUCK: 'TRUCK' });
-const SIZES = [SpotSize.SMALL, SpotSize.MEDIUM, SpotSize.LARGE]; // small to large
+const SpotSize = {
+    SMALL: "SMALL",
+    MEDIUM: "MEDIUM",
+    LARGE: "LARGE",
+};
 
-class Vehicle { // abstract
-  constructor(plate) {
-    if (new.target === Vehicle) throw new Error('Vehicle is abstract');
-    this.plate = plate;
-  }
-  get size() { throw new Error('not implemented'); } // the smallest spot it fits in
-}
-class Motorcycle extends Vehicle { get size() { return SpotSize.SMALL; } }
-class Car extends Vehicle { get size() { return SpotSize.MEDIUM; } }
-class Truck extends Vehicle { get size() { return SpotSize.LARGE; } }
+const VehicleType = {
+    MOTORCYCLE: "MOTORCYCLE",
+    CAR: "CAR",
+    TRUCK: "TRUCK",
+};
 
-class VehicleFactory {
-  static #classes = { MOTORCYCLE: Motorcycle, CAR: Car, TRUCK: Truck };
-  static create(type, plate) {
-    const VehicleClass = VehicleFactory.#classes[type];
-    if (!VehicleClass) throw new Error(`Unknown vehicle type: ${type}`);
-    return new VehicleClass(plate);
-  }
-}
+// The spot sizes in order, from small to large.
+const SIZES = [SpotSize.SMALL, SpotSize.MEDIUM, SpotSize.LARGE];
+```
 
-class ParkingSpot {
-  #vehicle = null;
-  constructor(id, size) {
-    this.id = id;
-    this.size = size;
-  }
-  get isFree() { return this.#vehicle === null; }
-  fits(vehicle) { return SIZES.indexOf(this.size) >= SIZES.indexOf(vehicle.size); }
-  park(vehicle) {
-    if (!this.isFree) throw new Error(`Spot ${this.id} is taken`);
-    this.#vehicle = vehicle;
-  }
-  leave() { this.#vehicle = null; }
+### Part 2: The vehicles
+
+Each vehicle knows the smallest spot size it needs. The lot never asks which kind of vehicle it is.
+
+```js
+// Abstract: we only make a Motorcycle, a Car or a Truck, never a plain Vehicle.
+class Vehicle {
+    constructor(plate, size) {
+        // this.constructor is the class that `new` was called with.
+        if (this.constructor === Vehicle) {
+            throw new Error("Vehicle is abstract");
+        }
+
+        this.plate = plate;
+        // The smallest spot size this vehicle fits in.
+        this.size = size;
+    }
 }
 
-class Ticket {
-  static #nextId = 1;
-  constructor(vehicle, spot, entryTime) {
-    this.id = `T${Ticket.#nextId++}`;
-    this.vehicle = vehicle;
-    this.spot = spot;
-    this.entryTime = entryTime;
-  }
+class Motorcycle extends Vehicle {
+    constructor(plate) {
+        super(plate, SpotSize.SMALL);
+    }
+}
+
+class Car extends Vehicle {
+    constructor(plate) {
+        super(plate, SpotSize.MEDIUM);
+    }
+}
+
+class Truck extends Vehicle {
+    constructor(plate) {
+        super(plate, SpotSize.LARGE);
+    }
 }
 ```
 
-**Part 2: levels and the two rules.** Each rule is an "interface" (a base class whose method throws) with small classes that fill it in.
+### Part 3: The vehicle factory
+
+The factory turns a type name like `"CAR"` into the right class.
+
+```js
+class VehicleFactory {
+    static create(type, plate) {
+        // Each type name points to its class.
+        const classes = {
+            MOTORCYCLE: Motorcycle,
+            CAR: Car,
+            TRUCK: Truck,
+        };
+
+        const VehicleClass = classes[type];
+        if (!VehicleClass) {
+            throw new Error(`Unknown vehicle type: ${type}`);
+        }
+
+        // A class kept in a variable works with `new`, like any class.
+        return new VehicleClass(plate);
+    }
+}
+```
+
+### Part 4: A parking spot
+
+A spot holds one vehicle at most. `fits` compares sizes by their place in `SIZES`.
+
+```js
+class ParkingSpot {
+    constructor(id, size) {
+        this.id = id;
+        this.size = size;
+        // The parked vehicle, or null when the spot is free.
+        this.vehicle = null;
+    }
+
+    isFree() {
+        return this.vehicle === null;
+    }
+
+    // A vehicle fits if the spot is its size or bigger.
+    fits(vehicle) {
+        const spotRank = SIZES.indexOf(this.size);
+        const neededRank = SIZES.indexOf(vehicle.size);
+        return spotRank >= neededRank;
+    }
+
+    park(vehicle) {
+        if (!this.isFree()) {
+            throw new Error(`Spot ${this.id} is taken`);
+        }
+
+        this.vehicle = vehicle;
+    }
+
+    leave() {
+        this.vehicle = null;
+    }
+}
+```
+
+### Part 5: A ticket
+
+A ticket remembers who parked, where, and when. Each new ticket gets the next id: T1, T2, T3.
+
+```js
+// The number for the next ticket id.
+let nextTicketNumber = 1;
+
+class Ticket {
+    constructor(vehicle, spot, entryTime) {
+        this.id = `T${nextTicketNumber}`;
+        nextTicketNumber += 1;
+
+        this.vehicle = vehicle;
+        this.spot = spot;
+        this.entryTime = entryTime;
+    }
+}
+```
+
+### Part 6: A level
+
+A level makes its own spots from a count for each size.
 
 ```js
 class Level {
-  constructor(number, counts) { // counts: how many spots of each size, e.g. { SMALL: 2, MEDIUM: 5 }
-    this.number = number;
-    this.spots = [];
-    for (const size of SIZES) {
-      for (let i = 1; i <= (counts[size] ?? 0); i++) {
-        this.spots.push(new ParkingSpot(`L${number}-${size}-${i}`, size));
-      }
-    }
-  }
-  freeCount(size) { return this.spots.filter((s) => s.isFree && s.size === size).length; }
-}
+    // counts: how many spots of each size, for example { SMALL: 2, MEDIUM: 5 }
+    constructor(number, counts) {
+        this.number = number;
+        this.spots = [];
 
-class SpotFinder { // interface
-  find(levels, vehicle) { throw new Error('not implemented'); }
-}
-class NearestSpotFinder extends SpotFinder { // lowest level first, any spot that fits
-  find(levels, vehicle) {
-    for (const level of levels) {
-      const spot = level.spots.find((s) => s.isFree && s.fits(vehicle));
-      if (spot) return spot;
-    }
-    return null;
-  }
-}
-class BestFitSpotFinder extends SpotFinder { // smallest spot that fits, so big spots stay free
-  find(levels, vehicle) {
-    for (const size of SIZES.slice(SIZES.indexOf(vehicle.size))) {
-      for (const level of levels) {
-        const spot = level.spots.find((s) => s.isFree && s.size === size);
-        if (spot) return spot;
-      }
-    }
-    return null;
-  }
-}
+        for (const size of SIZES) {
+            // A size missing from counts gets 0 spots.
+            let count = counts[size];
+            if (count === undefined) {
+                count = 0;
+            }
 
-const HOUR = 60 * 60 * 1000;
-class FeeStrategy { // interface
-  calculate(ticket, exitTime) { throw new Error('not implemented'); }
-}
-class HourlyFee extends FeeStrategy {
-  constructor(ratePerHour) { // price per hour, by vehicle size
-    super();
-    this.ratePerHour = ratePerHour;
-  }
-  calculate(ticket, exitTime) {
-    const hours = Math.max(1, Math.ceil((exitTime - ticket.entryTime) / HOUR)); // a started hour counts as full
-    return hours * this.ratePerHour[ticket.vehicle.size];
-  }
-}
-class FlatFee extends FeeStrategy {
-  constructor(amount) {
-    super();
-    this.amount = amount;
-  }
-  calculate() { return this.amount; }
+            for (let i = 1; i <= count; i++) {
+                const id = `L${number}-${size}-${i}`;
+                this.spots.push(new ParkingSpot(id, size));
+            }
+        }
+    }
+
+    freeCount(size) {
+        const freeSpots = this.spots.filter((spot) => spot.isFree() && spot.size === size);
+        return freeSpots.length;
+    }
 }
 ```
 
-**Part 3: the main service.** `ParkingLot` gets its rules from outside (dependency injection), so tests and new rules are easy.
+### Part 7: The spot-choosing rule
+
+`SpotFinder` is the "interface": a base class whose method only throws. Each rule is a small class that fills it in. The first rule takes the first free spot that fits, on the lowest level.
+
+```js
+// Interface: every spot finder has a find() method.
+class SpotFinder {
+    find(levels, vehicle) {
+        throw new Error("not implemented");
+    }
+}
+
+// Lowest level first, any free spot that fits.
+class NearestSpotFinder extends SpotFinder {
+    find(levels, vehicle) {
+        for (const level of levels) {
+            const freeSpot = level.spots.find((spot) => spot.isFree() && spot.fits(vehicle));
+            if (freeSpot) {
+                return freeSpot;
+            }
+        }
+
+        return null;
+    }
+}
+```
+
+### Part 8: The best-fit rule
+
+This rule takes the smallest spot that fits, so big spots stay free for big vehicles.
+
+```js
+class BestFitSpotFinder extends SpotFinder {
+    find(levels, vehicle) {
+        // The sizes that fit, smallest first. A car gets [MEDIUM, LARGE].
+        const firstFit = SIZES.indexOf(vehicle.size);
+        const sizesThatFit = SIZES.slice(firstFit);
+
+        // Look on every level for the smallest size, then try the next size up.
+        for (const size of sizesThatFit) {
+            for (const level of levels) {
+                const freeSpot = level.spots.find((spot) => spot.isFree() && spot.size === size);
+                if (freeSpot) {
+                    return freeSpot;
+                }
+            }
+        }
+
+        return null;
+    }
+}
+```
+
+### Part 9: The hourly fee
+
+The fee rule is an interface too. `HourlyFee` charges for every started hour, with a price for each vehicle size.
+
+```js
+// One hour in milliseconds. All times are in milliseconds.
+const HOUR = 60 * 60 * 1000;
+
+// Interface: every fee rule has a calculate() method.
+class FeeStrategy {
+    calculate(ticket, exitTime) {
+        throw new Error("not implemented");
+    }
+}
+
+class HourlyFee extends FeeStrategy {
+    // ratePerHour: the price per hour for each size, for example { SMALL: 1, MEDIUM: 2 }
+    constructor(ratePerHour) {
+        super();
+        this.ratePerHour = ratePerHour;
+    }
+
+    calculate(ticket, exitTime) {
+        const hoursParked = (exitTime - ticket.entryTime) / HOUR;
+
+        // A started hour counts as a full hour, and you always pay for at least 1.
+        let hoursToPay = Math.ceil(hoursParked);
+        if (hoursToPay < 1) {
+            hoursToPay = 1;
+        }
+
+        const rate = this.ratePerHour[ticket.vehicle.size];
+        return hoursToPay * rate;
+    }
+}
+```
+
+### Part 10: The flat fee
+
+The same price, however long you stay.
+
+```js
+class FlatFee extends FeeStrategy {
+    constructor(amount) {
+        super();
+        this.amount = amount;
+    }
+
+    calculate(ticket, exitTime) {
+        return this.amount;
+    }
+}
+```
+
+### Part 11: The parking lot, entering
+
+`ParkingLot` is the main service. It gets its two rules from outside (dependency injection), so tests and new rules are easy. The class goes on in Part 12.
 
 ```js
 class ParkingLot {
-  #tickets = new Map(); // ticket id -> Ticket
-  #platesInside = new Set();
-  constructor(levels, spotFinder, feeStrategy) {
-    this.levels = levels;
-    this.spotFinder = spotFinder;
-    this.feeStrategy = feeStrategy;
-  }
+    constructor(levels, spotFinder, feeStrategy) {
+        this.levels = levels;
+        this.spotFinder = spotFinder;
+        this.feeStrategy = feeStrategy;
 
-  // Find and take the spot with no `await` in between, so no other car can grab it.
-  enter(vehicle, time = Date.now()) {
-    if (this.#platesInside.has(vehicle.plate)) throw new Error(`${vehicle.plate} is already inside`);
-    const spot = this.spotFinder.find(this.levels, vehicle);
-    if (!spot) throw new Error(`Full: no spot for ${vehicle.plate}`);
-    spot.park(vehicle);
-    this.#platesInside.add(vehicle.plate);
-    const ticket = new Ticket(vehicle, spot, time);
-    this.#tickets.set(ticket.id, ticket);
-    return ticket;
-  }
+        // Open tickets: ticket id -> Ticket
+        this.tickets = new Map();
+        // The plates of the vehicles inside right now.
+        this.platesInside = new Set();
+    }
 
-  exit(ticketId, time = Date.now()) {
-    const ticket = this.#tickets.get(ticketId);
-    if (!ticket) throw new Error(`Unknown ticket: ${ticketId}`);
-    const fee = this.feeStrategy.calculate(ticket, time);
-    ticket.spot.leave();
-    this.#tickets.delete(ticketId); // a used ticket can't be used again
-    this.#platesInside.delete(ticket.vehicle.plate);
-    return { plate: ticket.vehicle.plate, spot: ticket.spot.id, fee };
-  }
+    // Find and take the spot with no `await` in between, so no other car can grab it.
+    enter(vehicle, time = Date.now()) {
+        // 1. The same car can't come in twice.
+        if (this.platesInside.has(vehicle.plate)) {
+            throw new Error(`${vehicle.plate} is already inside`);
+        }
 
-  freeSpots() {
-    const free = {};
-    for (const size of SIZES) free[size] = this.levels.reduce((n, level) => n + level.freeCount(size), 0);
-    return free;
-  }
+        // 2. Find a free spot that fits.
+        const spot = this.spotFinder.find(this.levels, vehicle);
+        if (!spot) {
+            throw new Error(`Full: no spot for ${vehicle.plate}`);
+        }
+
+        // 3. Take the spot and make the ticket.
+        spot.park(vehicle);
+        this.platesInside.add(vehicle.plate);
+
+        const ticket = new Ticket(vehicle, spot, time);
+        this.tickets.set(ticket.id, ticket);
+        return ticket;
+    }
+```
+
+### Part 12: The parking lot, leaving
+
+The rest of the class. `exit` prices the stay and frees the spot. `freeSpots` counts free spots for the sign at the entrance.
+
+```js
+    exit(ticketId, time = Date.now()) {
+        const ticket = this.tickets.get(ticketId);
+        if (!ticket) {
+            throw new Error(`Unknown ticket: ${ticketId}`);
+        }
+
+        const fee = this.feeStrategy.calculate(ticket, time);
+
+        // Free the spot, and delete the ticket so it can't be used again.
+        ticket.spot.leave();
+        this.tickets.delete(ticketId);
+        this.platesInside.delete(ticket.vehicle.plate);
+
+        return { plate: ticket.vehicle.plate, spot: ticket.spot.id, fee: fee };
+    }
+
+    freeSpots() {
+        const free = {};
+
+        // Add up the free spots of each size on every level.
+        for (const size of SIZES) {
+            free[size] = 0;
+            for (const level of this.levels) {
+                free[size] += level.freeCount(size);
+            }
+        }
+
+        return free;
+    }
 }
 ```
 
-**Part 4: try it.** A tiny lot with four spots on two levels.
+### Part 13: Try it
+
+A tiny lot with four spots on two levels.
 
 ```js
-const lot = new ParkingLot(
-  [new Level(1, { SMALL: 1, MEDIUM: 1 }), new Level(2, { MEDIUM: 1, LARGE: 1 })],
-  new BestFitSpotFinder(),
-  new HourlyFee({ SMALL: 1, MEDIUM: 2, LARGE: 4 }),
-);
-const nine = Date.UTC(2026, 0, 1, 9); // 9:00, as milliseconds
+// Level 1: one SMALL and one MEDIUM spot. Level 2: one MEDIUM and one LARGE spot.
+const level1 = new Level(1, { SMALL: 1, MEDIUM: 1 });
+const level2 = new Level(2, { MEDIUM: 1, LARGE: 1 });
 
-const bike = VehicleFactory.create(VehicleType.MOTORCYCLE, 'BIKE-1');
-const car1 = VehicleFactory.create(VehicleType.CAR, 'CAR-1');
-const car2 = VehicleFactory.create(VehicleType.CAR, 'CAR-2');
-const truck = VehicleFactory.create(VehicleType.TRUCK, 'TRUCK-1');
+const spotFinder = new BestFitSpotFinder();
+const hourlyFee = new HourlyFee({ SMALL: 1, MEDIUM: 2, LARGE: 4 });
+const lot = new ParkingLot([level1, level2], spotFinder, hourlyFee);
 
-const t1 = lot.enter(bike, nine);
-const t2 = lot.enter(car1, nine);
-const t3 = lot.enter(car2, nine);
-console.log(t1.id, t1.spot.id); // T1 L1-SMALL-1
-console.log(t3.id, t3.spot.id); // T3 L2-MEDIUM-1
+// 9:00 on 1 January 2026, in milliseconds.
+const nine = Date.UTC(2026, 0, 1, 9);
+
+const bike = VehicleFactory.create(VehicleType.MOTORCYCLE, "BIKE-1");
+const car1 = VehicleFactory.create(VehicleType.CAR, "CAR-1");
+const car2 = VehicleFactory.create(VehicleType.CAR, "CAR-2");
+const truck = VehicleFactory.create(VehicleType.TRUCK, "TRUCK-1");
+```
+
+Three vehicles come in. Best fit puts the bike in the SMALL spot, and the cars in the two MEDIUM spots.
+
+```js
+const ticket1 = lot.enter(bike, nine);
+const ticket2 = lot.enter(car1, nine);
+const ticket3 = lot.enter(car2, nine);
+
+console.log(ticket1.id, ticket1.spot.id); // T1 L1-SMALL-1
+console.log(ticket3.id, ticket3.spot.id); // T3 L2-MEDIUM-1
 console.log(lot.freeSpots()); // { SMALL: 0, MEDIUM: 0, LARGE: 1 }
+```
 
-try { lot.enter(car2, nine); } catch (e) { console.log(e.message); } // CAR-2 is already inside
-lot.enter(truck, nine);
+The gate refuses a car that is already inside, and a car when the lot is full.
+
+```js
 try {
-  lot.enter(VehicleFactory.create(VehicleType.CAR, 'CAR-3'), nine);
-} catch (e) { console.log(e.message); } // Full: no spot for CAR-3
+    lot.enter(car2, nine);
+} catch (error) {
+    console.log(error.message); // CAR-2 is already inside
+}
 
-console.log(lot.exit(t2.id, nine + 2.5 * HOUR)); // { plate: 'CAR-1', spot: 'L1-MEDIUM-1', fee: 6 }
+// The truck takes the last spot.
+lot.enter(truck, nine);
+
+try {
+    const car3 = VehicleFactory.create(VehicleType.CAR, "CAR-3");
+    lot.enter(car3, nine);
+} catch (error) {
+    console.log(error.message); // Full: no spot for CAR-3
+}
+```
+
+Two vehicles leave and pay. Before the second one, we swap the fee rule.
+
+```js
+// CAR-1 leaves at 11:30.
+const carExitTime = nine + 2.5 * HOUR;
+console.log(lot.exit(ticket2.id, carExitTime)); // { plate: 'CAR-1', spot: 'L1-MEDIUM-1', fee: 6 }
 console.log(lot.freeSpots()); // { SMALL: 0, MEDIUM: 1, LARGE: 0 }
 
-lot.feeStrategy = new FlatFee(5); // weekend price: swap the strategy, nothing else changes
-console.log(lot.exit(t1.id, nine + 8 * HOUR).fee); // 5
+// Weekend price: swap the strategy. Nothing else changes.
+lot.feeStrategy = new FlatFee(5);
+
+const bikeExitTime = nine + 8 * HOUR;
+const bikeReceipt = lot.exit(ticket1.id, bikeExitTime);
+console.log(bikeReceipt.fee); // 5
 ```
 
 `CAR-1` stayed 2.5 hours. That is 3 started hours × 2 = 6.
@@ -389,9 +626,14 @@ JavaScript runs one piece of code at a time. A plain function like `enter` alway
 ```js
 // NOT SAFE. A fragment, not runnable on its own.
 async enter(vehicle) {
-  const spot = this.spotFinder.find(this.levels, vehicle); // car A finds L2-LARGE-1
-  await this.printer.printTicket(vehicle);                 // car A waits here. Car B runs and finds the same spot.
-  spot.park(vehicle);                                      // the second park() throws "Spot is taken"
+    // Car A finds L2-LARGE-1.
+    const spot = this.spotFinder.find(this.levels, vehicle);
+
+    // Car A waits here. Car B runs now and finds the same spot.
+    await this.printer.printTicket(vehicle);
+
+    // The second park() throws "Spot is taken".
+    spot.park(vehicle);
 }
 ```
 
@@ -400,10 +642,16 @@ The fix: take the spot first, then do the slow work.
 ```js
 // SAFE. A fragment, not runnable on its own.
 async enter(vehicle) {
-  const spot = this.spotFinder.find(this.levels, vehicle);
-  if (!spot) throw new Error('Full');
-  spot.park(vehicle);                      // taken at once; no one else can find it now
-  await this.printer.printTicket(vehicle); // slow work after (if it fails, call spot.leave())
+    const spot = this.spotFinder.find(this.levels, vehicle);
+    if (!spot) {
+        throw new Error("Full");
+    }
+
+    // Take the spot at once. Now no one else can find it.
+    spot.park(vehicle);
+
+    // The slow work comes after. If it fails, call spot.leave().
+    await this.printer.printTicket(vehicle);
 }
 ```
 

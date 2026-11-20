@@ -18,24 +18,32 @@ A **Composite** lets code treat **one item** and a **group of items** the same w
 Files and folders are the classic example. Without the pattern, every function checks "is it a file or a folder?":
 
 ```js
-const home = {
-  type: 'folder', name: 'home', children: [
-    { type: 'file', name: 'notes.txt', size: 50 },
-    { type: 'folder', name: 'photos', children: [{ type: 'file', name: 'cat.jpg', size: 300 }] },
-  ],
-};
+// A small tree of plain objects: home holds notes.txt and a photos folder.
+const catPhoto = { type: "file", name: "cat.jpg", size: 300 };
+const photos = { type: "folder", name: "photos", children: [catPhoto] };
+const notes = { type: "file", name: "notes.txt", size: 50 };
+const home = { type: "folder", name: "home", children: [notes, photos] };
 
 function totalSize(item) {
-  if (item.type === 'file') return item.size;
-  if (item.type === 'folder') {
-    let sum = 0;
-    for (const child of item.children) sum += totalSize(child);
-    return sum;
-  }
-  throw new Error(`Unknown type: ${item.type}`);
+    if (item.type === "file") {
+        return item.size;
+    }
+
+    if (item.type === "folder") {
+        let total = 0;
+
+        for (const child of item.children) {
+            total = total + totalSize(child);
+        }
+
+        return total;
+    }
+
+    throw new Error(`Unknown type: ${item.type}`);
 }
 
 console.log(totalSize(home)); // 350
+
 // countFiles(), print() and search() each repeat the same file-or-folder check...
 ```
 
@@ -76,41 +84,109 @@ classDiagram
 
 The key line is the last one: a `Folder` **is** a `FileSystemItem`, and it **contains** `FileSystemItem`s. So a folder can hold files and other folders.
 
+### Step 1: The shared interface
+
+Files and folders both have a name, `size()` and `print()`.
+
 ```js
-class FileSystemItem { // abstract
-  constructor(name) {
-    if (new.target === FileSystemItem) throw new Error('FileSystemItem is abstract');
-    this.name = name;
-  }
-  size() { throw new Error('not implemented'); }
-  print(indent = '') { throw new Error('not implemented'); }
-}
+// Abstract: we only make a File or a Folder, never a plain FileSystemItem.
+class FileSystemItem {
+    constructor(name) {
+        // this.constructor is the class that "new" was called with.
+        if (this.constructor === FileSystemItem) {
+            throw new Error("FileSystemItem is abstract");
+        }
 
+        this.name = name;
+    }
+
+    size() {
+        throw new Error("not implemented");
+    }
+
+    // indent is the spaces printed before the name. It starts as "" (no spaces).
+    print(indent = "") {
+        throw new Error("not implemented");
+    }
+}
+```
+
+### Step 2: A file (the leaf)
+
+A file knows its own size, and has no children.
+
+```js
 class File extends FileSystemItem {
-  #bytes;
-  constructor(name, bytes) {
-    super(name);
-    this.#bytes = bytes;
-  }
-  size() { return this.#bytes; }
-  print(indent = '') { console.log(`${indent}${this.name} (${this.size()} B)`); }
-}
+    constructor(name, bytes) {
+        super(name);
+        this.bytes = bytes;
+    }
 
+    size() {
+        return this.bytes;
+    }
+
+    print(indent = "") {
+        console.log(`${indent}${this.name} (${this.size()} B)`);
+    }
+}
+```
+
+### Step 3: A folder (the composite)
+
+A folder holds a list of children. To answer, it asks each child and combines the answers.
+
+```js
 class Folder extends FileSystemItem {
-  #children = [];
-  add(item) { this.#children.push(item); return this; }
-  size() { return this.#children.reduce((sum, child) => sum + child.size(), 0); }
-  print(indent = '') {
-    console.log(`${indent}${this.name}/ (${this.size()} B)`);
-    for (const child of this.#children) child.print(indent + '  ');
-  }
+    constructor(name) {
+        super(name);
+        this.children = [];
+    }
+
+    // Returns the folder, so calls can chain: folder.add(file1).add(file2)
+    add(item) {
+        this.children.push(item);
+        return this;
+    }
+
+    // Ask each child for its size, and add them up.
+    size() {
+        let total = 0;
+
+        for (const child of this.children) {
+            total = total + child.size();
+        }
+
+        return total;
+    }
+
+    print(indent = "") {
+        console.log(`${indent}${this.name}/ (${this.size()} B)`);
+
+        // Print each child with 2 more spaces in front.
+        for (const child of this.children) {
+            child.print(indent + "  ");
+        }
+    }
 }
+```
 
-const photos = new Folder('photos').add(new File('cat.jpg', 300)).add(new File('dog.jpg', 200));
-const home = new Folder('home').add(new File('notes.txt', 50)).add(photos);
+### Step 4: Build a tree and use it
 
-console.log(home.size());   // 550
+A folder can hold files and other folders.
+
+```js
+const photos = new Folder("photos");
+photos.add(new File("cat.jpg", 300));
+photos.add(new File("dog.jpg", 200));
+
+const home = new Folder("home");
+home.add(new File("notes.txt", 50));
+home.add(photos);
+
+console.log(home.size()); // 550
 console.log(photos.size()); // 500
+
 home.print();
 // home/ (550 B)
 //   notes.txt (50 B)

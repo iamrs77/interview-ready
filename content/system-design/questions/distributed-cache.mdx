@@ -62,10 +62,15 @@ GET user:42                            # returns (nil): not found
 Apps don't send these by hand. They use a **cache client library**, like this:
 
 ```ts
+// The three things an app can do with the cache
 interface Cache {
-  get(key: string): Promise<string | null>;
-  set(key: string, value: string, ttlSeconds?: number): Promise<void>;
-  delete(key: string): Promise<void>;
+    // Gives back the value, or null if the key is not there
+    get(key: string): Promise<string | null>;
+
+    // The ? means ttlSeconds is optional: leave it out, and the key never expires
+    set(key: string, value: string, ttlSeconds?: number): Promise<void>;
+
+    delete(key: string): Promise<void>;
 }
 ```
 
@@ -160,28 +165,57 @@ LRU is built from a **hash map** (to find a key fast) plus a **list ordered by l
 
 ```js
 class LRUCache {
-  constructor(capacity) {
-    this.capacity = capacity;
-    this.map = new Map(); // oldest key first, newest key last
-  }
+    constructor(capacity) {
+        this.capacity = capacity;
 
-  get(key) {
-    if (!this.map.has(key)) return null;
-    const value = this.map.get(key);
-    this.map.delete(key); // move it to the newest end
-    this.map.set(key, value);
-    return value;
-  }
-
-  set(key, value) {
-    this.map.delete(key);
-    this.map.set(key, value);
-    if (this.map.size > this.capacity) {
-      const oldest = this.map.keys().next().value;
-      this.map.delete(oldest); // evict the least recently used key
+        // Keys stay in the order they were added: oldest first, newest last
+        this.map = new Map();
     }
-  }
+
+    get(key) {
+        if (!this.map.has(key)) {
+            return null;
+        }
+
+        const value = this.map.get(key);
+
+        // Move it to the newest end: remove it, then add it again
+        this.map.delete(key);
+        this.map.set(key, value);
+
+        return value;
+    }
+
+    set(key, value) {
+        // Remove it first, so the key lands at the newest end
+        this.map.delete(key);
+        this.map.set(key, value);
+
+        if (this.map.size > this.capacity) {
+            // keys() walks the keys in order. next().value is the first one: the least recently used.
+            const oldestKey = this.map.keys().next().value;
+            this.map.delete(oldestKey);
+        }
+    }
 }
+```
+
+Try it with room for only 2 keys:
+
+```js
+const cache = new LRUCache(2);
+
+cache.set("a", 1);
+cache.set("b", 2);
+
+// Reading "a" makes it the newest, so "b" is now the oldest
+cache.get("a");
+
+// The cache is full, so "b" is thrown away
+cache.set("c", 3);
+
+console.log(cache.get("b")); // null
+console.log(cache.get("a")); // 1
 ```
 
 A real cache saves memory with **approximate LRU**: instead of keeping a perfect order of all keys, it picks a few random keys and evicts the one used longest ago. It is almost as good and needs much less memory.

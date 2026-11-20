@@ -66,46 +66,88 @@ The shared state is the lot's map of spots. The unsafe version finds a free spot
 ```js
 // Unsafe, and not complete code: it only shows the bug.
 async assignSpot(plate) {
-  const spot = this.#findFreeSpot();  // 1. find
-  await this.#printTicket(plate);     // 2. other cars run here and find the same spot
-  this.#spots.set(spot, plate);       // 3. take: two cars, one spot
+    // 1. Find a free spot.
+    const spot = this.findFreeSpot();
+
+    // 2. Print the ticket. assignSpot pauses here, and other cars
+    //    run now. They find the same free spot.
+    await this.printTicket(plate);
+
+    // 3. Take the spot: two cars, one spot.
+    this.spots.set(spot, plate);
 }
 ```
 
-The safe version **finds and takes** the spot in one synchronous step, then does the slow work:
+The safe version **finds and takes** the spot in one synchronous step, then does the slow work.
+
+**Part 1: a helper.** `sleep` stands in for slow work. Both examples on this page use it:
 
 ```js
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-class ParkingLot {
-  #spots = new Map([['S1', null], ['S2', null]]); // spot -> plate (null = free)
-
-  #takeFreeSpot(plate) { // find AND take, in one synchronous step
-    for (const [spot, plateThere] of this.#spots) {
-      if (plateThere === null) {
-        this.#spots.set(spot, plate);
-        return spot;
-      }
-    }
-    return null;
-  }
-
-  async assignSpot(plate) {
-    const spot = this.#takeFreeSpot(plate); // atomic: no await inside
-    if (!spot) return `${plate}: lot is full`;
-    try {
-      await sleep(30); // print the ticket, open the gate...
-      return `${plate}: park at ${spot}`;
-    } catch (error) {
-      this.#spots.set(spot, null); // something failed: free the spot again
-      throw error;
-    }
-  }
+// Gives back a promise that finishes after "ms" milliseconds.
+function sleep(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
 }
+```
 
+**Part 2: the parking lot.** `takeFreeSpot` finds a spot and takes it before any `await`:
+
+```js
+class ParkingLot {
+    constructor() {
+        // spot -> plate of the car parked there (null means free)
+        this.spots = new Map([["S1", null], ["S2", null]]);
+    }
+
+    // Find a free spot AND take it, in one step with no await inside.
+    takeFreeSpot(plate) {
+        for (const spot of this.spots.keys()) {
+            const plateThere = this.spots.get(spot);
+
+            if (plateThere === null) {
+                this.spots.set(spot, plate);
+                return spot;
+            }
+        }
+
+        return null;
+    }
+
+    async assignSpot(plate) {
+        // Atomic: the spot is ours before the first await.
+        const spot = this.takeFreeSpot(plate);
+
+        if (spot === null) {
+            return `${plate}: lot is full`;
+        }
+
+        try {
+            // Print the ticket, open the gate... Other cars run during
+            // this wait, but they can't take our spot any more.
+            await sleep(30);
+            return `${plate}: park at ${spot}`;
+        } catch (error) {
+            // Something failed: free the spot again.
+            this.spots.set(spot, null);
+            throw error;
+        }
+    }
+}
+```
+
+**Part 3: three cars at once.** Three cars reach two gates at the same moment:
+
+```js
 const lot = new ParkingLot();
-const cars = ['CAR-1', 'CAR-2', 'CAR-3']; // three cars reach two gates at once
-console.log(await Promise.all(cars.map((plate) => lot.assignSpot(plate))));
+const cars = ["CAR-1", "CAR-2", "CAR-3"];
+
+// Start all three at once. Each call gives back a promise right away.
+const bookings = cars.map((plate) => lot.assignSpot(plate));
+
+// Wait until every car has an answer.
+const results = await Promise.all(bookings);
+console.log(results);
 // [ 'CAR-1: park at S1', 'CAR-2: park at S2', 'CAR-3: lot is full' ]
 ```
 
@@ -119,68 +161,146 @@ A user picks several seats, and the system **holds** them for a few minutes whil
 - **sorted order**, so Asha asks for A2 and A1 but locks A1 first, the same order as Ben;
 - **a small critical section**, released in `finally` right after the write.
 
-**Part 1** is the `Mutex` class from [Race Conditions and Locks](./race-conditions-locks.mdx):
+The parts below run together with the `sleep` helper above, as one file.
+
+**Part 1: the lock.** This is the `Mutex` class from [Race Conditions and Locks](./race-conditions-locks.mdx):
 
 ```js
 class Mutex {
-  #locked = false;
-  #waiting = []; // wake-up functions of tasks waiting for the lock
-
-  async lock() {
-    if (this.#locked) {
-      await new Promise((resolve) => this.#waiting.push(resolve)); // wait in line
-    } else {
-      this.#locked = true;
+    constructor() {
+        this.locked = false;
+        // Wake-up functions of the tasks waiting in line, oldest first.
+        this.waiting = [];
     }
-    let released = false;
-    return () => { // the release function
-      if (released) return; // releasing twice does nothing
-      released = true;
-      const next = this.#waiting.shift();
-      if (next) next(); // hand the lock straight to the next task in line
-      else this.#locked = false;
-    };
-  }
+
+    // Waits until this task holds the lock, then gives back a release function.
+    async lock() {
+        if (this.locked) {
+            // Taken: join the line. "resolve" is our wake-up function.
+            // We stay paused here until the holder calls it.
+            await new Promise((resolve) => {
+                this.waiting.push(resolve);
+            });
+        } else {
+            // Free: take the lock now.
+            this.locked = true;
+        }
+
+        let released = false;
+        const release = () => {
+            // Releasing twice does nothing.
+            if (released) {
+                return;
+            }
+            released = true;
+
+            const next = this.waiting.shift();
+            if (next) {
+                // Hand the lock straight to the next task in line.
+                next();
+            } else {
+                // Nobody is waiting: the lock is free again.
+                this.locked = false;
+            }
+        };
+
+        return release;
+    }
 }
 ```
 
-**Part 2** is the booking:
+**Part 2: one lock per seat.** `SeatLocks` keeps a `Mutex` for each seat, and locks a list of seats one by one:
 
 ```js
-// Runs together with the Mutex class above, as one file.
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-class ShowBooking {
-  #holds = new Map(); // seatId -> user holding it
-  #locks = new Map(); // seatId -> Mutex: one lock per seat, not one for the whole show
-
-  #lockFor(seatId) {
-    if (!this.#locks.has(seatId)) this.#locks.set(seatId, new Mutex());
-    return this.#locks.get(seatId);
-  }
-
-  async holdSeats(user, seatIds) {
-    const sorted = [...seatIds].sort(); // everyone locks in the same order: no deadlock
-    const releases = [];
-    for (const id of sorted) releases.push(await this.#lockFor(id).lock());
-    try {
-      const taken = sorted.filter((id) => this.#holds.has(id));
-      if (taken.length > 0) return `${user}: ${taken.join(', ')} already held`;
-      await sleep(30); // save the hold to the database
-      for (const id of sorted) this.#holds.set(id, user);
-      return `${user}: holding ${sorted.join(', ')}`;
-    } finally {
-      for (const release of releases) release(); // unlock as soon as we are done
+class SeatLocks {
+    constructor() {
+        // seatId -> Mutex: one lock per seat, not one for the whole show
+        this.locks = new Map();
     }
-  }
-}
 
+    // Gets the lock for one seat. Makes it the first time it is needed.
+    lockFor(seatId) {
+        if (!this.locks.has(seatId)) {
+            this.locks.set(seatId, new Mutex());
+        }
+
+        return this.locks.get(seatId);
+    }
+
+    // Locks every seat in the list, in the order given.
+    // Gives back one release function per seat.
+    async lockAll(seatIds) {
+        const releases = [];
+
+        for (const seatId of seatIds) {
+            // Wait here until this seat's lock is ours. Only then lock the next seat.
+            const release = await this.lockFor(seatId).lock();
+            releases.push(release);
+        }
+
+        return releases;
+    }
+}
+```
+
+**Part 3: the booking.** It sorts the seats, locks them, checks, saves, and unlocks:
+
+```js
+class ShowBooking {
+    constructor() {
+        // seatId -> user holding it
+        this.holds = new Map();
+        this.seatLocks = new SeatLocks();
+    }
+
+    async holdSeats(user, seatIds) {
+        // Sort a copy of the list. Everyone locks seats in the same order: no deadlock.
+        const sorted = Array.from(seatIds);
+        sorted.sort();
+
+        // Wait here until we hold the lock of every seat we want.
+        const releases = await this.seatLocks.lockAll(sorted);
+
+        try {
+            // Check: is any of these seats held already?
+            const taken = sorted.filter((seatId) => this.holds.has(seatId));
+            if (taken.length > 0) {
+                return `${user}: ${taken.join(", ")} already held`;
+            }
+
+            // Save the hold to the database. Anyone who wants
+            // these seats is waiting for our locks meanwhile.
+            await sleep(30);
+
+            for (const seatId of sorted) {
+                this.holds.set(seatId, user);
+            }
+            return `${user}: holding ${sorted.join(", ")}`;
+        } finally {
+            // Unlock every seat as soon as we are done, even after an error.
+            for (const release of releases) {
+                release();
+            }
+        }
+    }
+}
+```
+
+**Part 4: three users at once.** Asha and Ben both want A1. Chen wants a different seat:
+
+```js
 const show = new ShowBooking();
-console.log(await Promise.all([
-  show.holdSeats('Asha', ['A2', 'A1']),
-  show.holdSeats('Ben', ['A1', 'A3']), // wants A1 too: waits for Asha, then fails
-  show.holdSeats('Chen', ['B1']), // other seats: never waits for Asha
-]));
+
+// All three ask at the same moment. Wait for all three answers.
+const results = await Promise.all([
+    show.holdSeats("Asha", ["A2", "A1"]),
+    // Ben wants A1 too: he waits for Asha's lock, then fails.
+    show.holdSeats("Ben", ["A1", "A3"]),
+    // Chen wants other seats: he never waits for Asha.
+    show.holdSeats("Chen", ["B1"]),
+]);
+
+console.log(results);
 // [ 'Asha: holding A1, A2', 'Ben: A1 already held', 'Chen: holding B1' ]
 ```
 

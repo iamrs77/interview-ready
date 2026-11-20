@@ -183,293 +183,640 @@ sequenceDiagram
 
 ## Step 5: Code
 
-**Part 1: enums and small classes.** Money is in whole rupees, so there are no decimal problems.
+The code comes in small parts. Paste them together in order, and they run as one file. Money is in whole rupees, so there are no decimal problems.
+
+### Part 1: The enums
+
+Fixed lists of choices are plain objects. `rupees` turns `2600` into `"₹2600"` for messages.
 
 ```js
-const TransactionType = Object.freeze({ WITHDRAW: 'WITHDRAW', DEPOSIT: 'DEPOSIT' });
-const TransactionStatus = Object.freeze({ DONE: 'DONE', REVERSED: 'REVERSED' });
+const TransactionType = {
+    WITHDRAW: "WITHDRAW",
+    DEPOSIT: "DEPOSIT",
+};
+
+const TransactionStatus = {
+    DONE: "DONE",
+    REVERSED: "REVERSED",
+};
+
 const MAX_PIN_TRIES = 3;
-const rupees = (amount) => `₹${amount}`;
 
+function rupees(amount) {
+    return `₹${amount}`;
+}
+```
+
+### Part 2: Cards and accounts
+
+An account lives at the bank, never in the ATM. It refuses to go below 0.
+
+```js
 class Card {
-  constructor(number, accountId) {
-    this.number = number;
-    this.accountId = accountId;
-  }
+    constructor(number, accountId) {
+        this.number = number;
+        this.accountId = accountId;
+    }
 }
 
-class Account { // lives at the bank, never in the ATM
-  #balance;
-  constructor(id, balance) {
-    this.id = id;
-    this.#balance = balance;
-  }
-  get balance() { return this.#balance; }
-  debit(amount) {
-    if (amount > this.#balance) throw new Error('Not enough money in the account');
-    this.#balance -= amount;
-  }
-  credit(amount) { this.#balance += amount; }
+// Lives at the bank, never in the ATM.
+class Account {
+    constructor(id, balance) {
+        this.id = id;
+        this.balance = balance;
+    }
+
+    debit(amount) {
+        if (amount > this.balance) {
+            throw new Error("Not enough money in the account");
+        }
+
+        this.balance -= amount;
+    }
+
+    credit(amount) {
+        this.balance += amount;
+    }
 }
+```
+
+### Part 3: A transaction
+
+A record of one money move. Each new transaction gets the next id: TX1, TX2, TX3.
+
+```js
+// The number for the next transaction id.
+let nextTransactionNumber = 1;
 
 class Transaction {
-  static #nextId = 1;
-  constructor(type, accountId, amount) {
-    this.id = `TX${Transaction.#nextId++}`;
-    this.type = type;
-    this.accountId = accountId;
-    this.amount = amount;
-    this.status = TransactionStatus.DONE;
-  }
+    constructor(type, accountId, amount) {
+        this.id = `TX${nextTransactionNumber}`;
+        nextTransactionNumber += 1;
+
+        this.type = type;
+        this.accountId = accountId;
+        this.amount = amount;
+        this.status = TransactionStatus.DONE;
+    }
 }
 ```
 
-**Part 2: the bank, behind an interface.** `InMemoryBank` is a fake bank for tests. A real one would call the bank's servers.
+### Part 4: The bank interface
+
+The ATM only knows "something that checks PINs and moves money". This base class lists the methods, and each one only throws.
 
 ```js
-class Bank { // interface: the bank's side, reached over the network
-  checkPin(cardNumber, pin) { throw new Error('not implemented'); }
-  isBlocked(cardNumber) { throw new Error('not implemented'); }
-  blockCard(cardNumber) { throw new Error('not implemented'); }
-  balance(accountId) { throw new Error('not implemented'); }
-  debit(accountId, amount) { throw new Error('not implemented'); }
-  credit(accountId, amount) { throw new Error('not implemented'); }
-  reverse(transactionId) { throw new Error('not implemented'); }
-}
+// Interface: the bank's side, reached over the network.
+class Bank {
+    checkPin(cardNumber, pin) {
+        throw new Error("not implemented");
+    }
 
-class InMemoryBank extends Bank {
-  #accounts = new Map();
-  #pins = new Map(); // card number -> PIN (a real bank keeps only a hash)
-  #blocked = new Set();
-  #transactions = new Map();
+    isBlocked(cardNumber) {
+        throw new Error("not implemented");
+    }
 
-  addAccount(account) { this.#accounts.set(account.id, account); }
-  issueCard(card, pin) { this.#pins.set(card.number, pin); }
-  checkPin(cardNumber, pin) { return this.#pins.get(cardNumber) === pin; }
-  isBlocked(cardNumber) { return this.#blocked.has(cardNumber); }
-  blockCard(cardNumber) { this.#blocked.add(cardNumber); }
-  balance(accountId) { return this.#account(accountId).balance; }
-  debit(accountId, amount) { // check and take with no `await` in between
-    this.#account(accountId).debit(amount);
-    return this.#record(new Transaction(TransactionType.WITHDRAW, accountId, amount));
-  }
-  credit(accountId, amount) {
-    this.#account(accountId).credit(amount);
-    return this.#record(new Transaction(TransactionType.DEPOSIT, accountId, amount));
-  }
-  reverse(transactionId) { // undo a withdrawal: put the money back
-    const tx = this.#transactions.get(transactionId);
-    if (!tx || tx.type !== TransactionType.WITHDRAW) throw new Error(`Can't reverse ${transactionId}`);
-    if (tx.status === TransactionStatus.REVERSED) return; // already done: safe to call twice
-    this.#account(tx.accountId).credit(tx.amount);
-    tx.status = TransactionStatus.REVERSED;
-  }
-  get transactions() { return [...this.#transactions.values()]; }
+    blockCard(cardNumber) {
+        throw new Error("not implemented");
+    }
 
-  #record(tx) {
-    this.#transactions.set(tx.id, tx);
-    return tx;
-  }
-  #account(id) {
-    const account = this.#accounts.get(id);
-    if (!account) throw new Error(`Unknown account ${id}`);
-    return account;
-  }
+    balance(accountId) {
+        throw new Error("not implemented");
+    }
+
+    debit(accountId, amount) {
+        throw new Error("not implemented");
+    }
+
+    credit(accountId, amount) {
+        throw new Error("not implemented");
+    }
+
+    reverse(transactionId) {
+        throw new Error("not implemented");
+    }
 }
 ```
 
-**Part 3: the cash dispenser, a Chain of Responsibility.** Each handler gives as many of its notes as it can, and passes the rest to the next one.
+### Part 5: A fake bank
+
+`InMemoryBank` is a fake bank for tests. A real one would call the bank's servers. The class goes on over the next three blocks.
+
+```js
+class InMemoryBank extends Bank {
+    constructor() {
+        super();
+        // account id -> Account
+        this.accounts = new Map();
+        // card number -> PIN (a real bank keeps only a hash of the PIN)
+        this.pins = new Map();
+        // The card numbers that are blocked.
+        this.blocked = new Set();
+        // transaction id -> Transaction
+        this.transactions = new Map();
+    }
+
+    addAccount(account) {
+        this.accounts.set(account.id, account);
+    }
+
+    issueCard(card, pin) {
+        this.pins.set(card.number, pin);
+    }
+
+    findAccount(id) {
+        const account = this.accounts.get(id);
+        if (!account) {
+            throw new Error(`Unknown account ${id}`);
+        }
+        return account;
+    }
+```
+
+**Cards and balances.** Small lookups in the maps above.
+
+```js
+    checkPin(cardNumber, pin) {
+        return this.pins.get(cardNumber) === pin;
+    }
+
+    isBlocked(cardNumber) {
+        return this.blocked.has(cardNumber);
+    }
+
+    blockCard(cardNumber) {
+        this.blocked.add(cardNumber);
+    }
+
+    balance(accountId) {
+        const account = this.findAccount(accountId);
+        return account.balance;
+    }
+```
+
+**Moving money.** Every debit and credit is saved as a transaction.
+
+```js
+    record(transaction) {
+        this.transactions.set(transaction.id, transaction);
+        return transaction;
+    }
+
+    // Check and take the money with no `await` in between.
+    debit(accountId, amount) {
+        const account = this.findAccount(accountId);
+        account.debit(amount);
+
+        const transaction = new Transaction(TransactionType.WITHDRAW, accountId, amount);
+        return this.record(transaction);
+    }
+
+    credit(accountId, amount) {
+        const account = this.findAccount(accountId);
+        account.credit(amount);
+
+        const transaction = new Transaction(TransactionType.DEPOSIT, accountId, amount);
+        return this.record(transaction);
+    }
+```
+
+**Reversing a withdrawal.** It puts the money back. Calling it twice is safe: the second call does nothing.
+
+```js
+    reverse(transactionId) {
+        const transaction = this.transactions.get(transactionId);
+        if (!transaction || transaction.type !== TransactionType.WITHDRAW) {
+            throw new Error(`Can't reverse ${transactionId}`);
+        }
+
+        // Already reversed: nothing to do.
+        if (transaction.status === TransactionStatus.REVERSED) {
+            return;
+        }
+
+        const account = this.findAccount(transaction.accountId);
+        account.credit(transaction.amount);
+        transaction.status = TransactionStatus.REVERSED;
+    }
+}
+```
+
+### Part 6: One note handler
+
+The cash box is a Chain of Responsibility. Each handler holds one kind of note. It gives as many of its notes as it can, and passes the rest to the next handler. The class goes on over the next two blocks.
 
 ```js
 class NoteHandler {
-  #next = null;
-  constructor(note, count) {
-    this.note = note; // 500, 200 or 100
-    this.count = count; // how many of these notes are inside
-  }
-  setNext(handler) {
-    this.#next = handler;
-    return handler;
-  }
-  plan(amount, notes = new Map()) { // returns note -> how many, or null if it can't be made
-    const use = Math.min(Math.floor(amount / this.note), this.count);
-    if (use > 0) notes.set(this.note, use);
-    const rest = amount - use * this.note;
-    if (rest === 0) return notes;
-    return this.#next ? this.#next.plan(rest, notes) : null;
-  }
-  take(notes) {
-    this.count -= notes.get(this.note) ?? 0;
-    this.#next?.take(notes);
-  }
-}
+    constructor(note, count) {
+        // 500, 200 or 100
+        this.note = note;
+        // How many of these notes are inside.
+        this.count = count;
+        // The next handler in the chain, or null at the end.
+        this.next = null;
+    }
 
-class CashDispenser {
-  #first;
-  constructor(stock) { // e.g. [[500, 10], [200, 10], [100, 20]]: note and count
-    const handlers = stock.toSorted((a, b) => b[0] - a[0]).map(([note, count]) => new NoteHandler(note, count));
-    handlers.reduce((prev, next) => prev.setNext(next)); // biggest note first
-    this.#first = handlers[0];
-  }
-  canDispense(amount) { return this.#first.plan(amount) !== null; }
-  dispense(amount) { // the real machine pushes the notes out here
-    const notes = this.#first.plan(amount);
-    if (!notes) throw new Error(`Can't make ${rupees(amount)} from the notes inside`);
-    this.#first.take(notes);
-    return notes;
-  }
-}
-
-const formatNotes = (notes) => [...notes].map(([note, n]) => `${n} x ${rupees(note)}`).join(', ');
+    setNext(handler) {
+        this.next = handler;
+    }
 ```
 
-**Part 4: the ATM steps (State).** The base class says "not now" to every button. Each state allows only its own buttons.
+**Planning the notes.** `plan` only works out which notes to give. It doesn't take them yet. It returns a `Map` of note → how many, or `null` if the amount can't be made.
 
 ```js
-class ATMState { // abstract
-  constructor() { if (new.target === ATMState) throw new Error('ATMState is abstract'); }
-  get name() { throw new Error('not implemented'); }
-  insertCard(atm, card) { this.#notNow('insert a card'); }
-  enterPin(atm, pin) { this.#notNow('enter a PIN'); }
-  withdraw(atm, amount) { this.#notNow('withdraw'); }
-  deposit(atm, amount) { this.#notNow('deposit'); }
-  checkBalance(atm) { this.#notNow('check the balance'); }
-  ejectCard(atm) { this.#notNow('eject a card'); }
-  #notNow(action) { throw new Error(`You can't ${action} now (${this.name})`); }
-}
+    plan(amount, notes = new Map()) {
+        // Use as many of this note as we can, but not more than we have.
+        const wanted = Math.floor(amount / this.note);
+        const used = Math.min(wanted, this.count);
+        if (used > 0) {
+            notes.set(this.note, used);
+        }
 
-class IdleState extends ATMState {
-  get name() { return 'Idle'; }
-  insertCard(atm, card) {
-    if (atm.bank.isBlocked(card.number)) throw new Error('This card is blocked. Please call your bank.');
-    atm.startSession(card);
-    atm.setState(new CardInsertedState());
-    return 'Enter your PIN';
-  }
-}
+        const rest = amount - used * this.note;
+        if (rest === 0) {
+            return notes;
+        }
 
-class CardInsertedState extends ATMState {
-  get name() { return 'CardInserted'; }
-  enterPin(atm, pin) {
-    if (atm.bank.checkPin(atm.card.number, pin)) {
-      atm.setState(new AuthenticatedState());
-      return 'PIN OK';
+        // Pass the rest on. With no next handler, the amount can't be made.
+        if (this.next === null) {
+            return null;
+        }
+        return this.next.plan(rest, notes);
     }
-    atm.pinTries += 1;
-    const left = MAX_PIN_TRIES - atm.pinTries;
-    if (left > 0) return `Wrong PIN. ${left} ${left === 1 ? 'try' : 'tries'} left.`;
-    atm.bank.blockCard(atm.card.number);
-    atm.endSession(); // the machine keeps the card
-    return 'Wrong PIN 3 times. The card is kept. Please call your bank.';
-  }
-  ejectCard(atm) {
-    atm.endSession();
-    return 'Take your card';
-  }
-}
+```
 
-const checkAmount = (amount) => {
-  if (!Number.isInteger(amount) || amount <= 0 || amount % 100 !== 0) throw new Error('Amount must be a multiple of ₹100');
-};
+**Taking the notes.** Each handler takes out its own notes, then tells the next one.
 
-class AuthenticatedState extends ATMState {
-  get name() { return 'Authenticated'; }
-  checkBalance(atm) { return `Balance: ${rupees(atm.bank.balance(atm.card.accountId))}`; }
-  deposit(atm, amount) {
-    checkAmount(amount);
-    atm.bank.credit(atm.card.accountId, amount);
-    return `Deposited ${rupees(amount)}`;
-  }
-  withdraw(atm, amount) {
-    checkAmount(amount);
-    if (!atm.dispenser.canDispense(amount)) throw new Error(`This ATM can't give ${rupees(amount)} right now`);
-    const tx = atm.bank.debit(atm.card.accountId, amount); // 1. take the money from the account
-    try {
-      const notes = atm.dispenser.dispense(amount); // 2. give out the cash
-      return `Take your cash: ${formatNotes(notes)}`;
-    } catch (err) {
-      atm.bank.reverse(tx.id); // 3. the cash failed: put the money back
-      return `Sorry, no cash was given (${err.message}). ${rupees(amount)} is back in your account.`;
+```js
+    take(notes) {
+        if (notes.has(this.note)) {
+            this.count -= notes.get(this.note);
+        }
+
+        if (this.next !== null) {
+            this.next.take(notes);
+        }
     }
-  }
-  ejectCard(atm) {
-    atm.endSession();
-    return 'Take your card';
-  }
 }
 ```
 
-**Part 5: the main service.** Every button on the ATM just asks the current state.
+### Part 7: The cash dispenser
+
+The dispenser builds the chain, biggest note first: ₹500 → ₹200 → ₹100. The class goes on in the next block.
+
+```js
+class CashDispenser {
+    // stock: [note, count] pairs, for example [[500, 10], [200, 10], [100, 20]]
+    constructor(stock) {
+        const handlers = [];
+        for (const [note, count] of stock) {
+            handlers.push(new NoteHandler(note, count));
+        }
+
+        // Biggest note first.
+        handlers.sort((first, second) => second.note - first.note);
+
+        // Link each handler to the one after it.
+        for (let i = 0; i < handlers.length - 1; i++) {
+            handlers[i].setNext(handlers[i + 1]);
+        }
+
+        this.first = handlers[0];
+    }
+```
+
+**Giving out cash.** Plan first. Take the notes only if the plan works.
+
+```js
+    canDispense(amount) {
+        const notes = this.first.plan(amount);
+        return notes !== null;
+    }
+
+    // The real machine pushes the notes out here.
+    dispense(amount) {
+        const notes = this.first.plan(amount);
+        if (notes === null) {
+            throw new Error(`Can't make ${rupees(amount)} from the notes inside`);
+        }
+
+        this.first.take(notes);
+        return notes;
+    }
+}
+
+// Turns the notes into text like "4 x ₹500, 3 x ₹200".
+function formatNotes(notes) {
+    const parts = [];
+    for (const [note, howMany] of notes) {
+        parts.push(`${howMany} x ${rupees(note)}`);
+    }
+    return parts.join(", ");
+}
+```
+
+### Part 8: The base state
+
+Each ATM step is a state object (the State pattern). The base class says "not now" to every button. The class goes on in the next block.
+
+```js
+// Abstract: we only make the states below, never a plain ATMState.
+class ATMState {
+    constructor(name) {
+        // this.constructor is the class that `new` was called with.
+        if (this.constructor === ATMState) {
+            throw new Error("ATMState is abstract");
+        }
+
+        this.name = name;
+    }
+
+    notNow(action) {
+        throw new Error(`You can't ${action} now (${this.name})`);
+    }
+```
+
+**Every button says "not now".** Each state below replaces only the buttons it allows.
+
+```js
+    insertCard(atm, card) {
+        this.notNow("insert a card");
+    }
+
+    enterPin(atm, pin) {
+        this.notNow("enter a PIN");
+    }
+
+    withdraw(atm, amount) {
+        this.notNow("withdraw");
+    }
+
+    deposit(atm, amount) {
+        this.notNow("deposit");
+    }
+
+    checkBalance(atm) {
+        this.notNow("check the balance");
+    }
+
+    ejectCard(atm) {
+        this.notNow("eject a card");
+    }
+}
+```
+
+### Part 9: The idle state
+
+With no card inside, the only button that works is "insert card".
+
+```js
+class IdleState extends ATMState {
+    constructor() {
+        super("Idle");
+    }
+
+    insertCard(atm, card) {
+        if (atm.bank.isBlocked(card.number)) {
+            throw new Error("This card is blocked. Please call your bank.");
+        }
+
+        atm.startSession(card);
+        atm.setState(new CardInsertedState());
+        return "Enter your PIN";
+    }
+}
+```
+
+### Part 10: The card-inserted state
+
+Now the user can type a PIN or take the card back. After 3 wrong PINs, the bank blocks the card and the machine keeps it.
+
+```js
+class CardInsertedState extends ATMState {
+    constructor() {
+        super("CardInserted");
+    }
+
+    enterPin(atm, pin) {
+        if (atm.bank.checkPin(atm.card.number, pin)) {
+            atm.setState(new AuthenticatedState());
+            return "PIN OK";
+        }
+
+        // A wrong PIN: count it.
+        atm.pinTries += 1;
+        const triesLeft = MAX_PIN_TRIES - atm.pinTries;
+        if (triesLeft > 1) {
+            return `Wrong PIN. ${triesLeft} tries left.`;
+        }
+        if (triesLeft === 1) {
+            return "Wrong PIN. 1 try left.";
+        }
+
+        // No tries left. The machine keeps the card.
+        atm.bank.blockCard(atm.card.number);
+        atm.endSession();
+        return "Wrong PIN 3 times. The card is kept. Please call your bank.";
+    }
+
+    ejectCard(atm) {
+        atm.endSession();
+        return "Take your card";
+    }
+}
+```
+
+### Part 11: The authenticated state
+
+The PIN was right, so the money buttons work. The class goes on in the next block with `withdraw`.
+
+```js
+// Amounts must be a whole multiple of ₹100, above 0.
+function checkAmount(amount) {
+    if (!Number.isInteger(amount) || amount <= 0 || amount % 100 !== 0) {
+        throw new Error("Amount must be a multiple of ₹100");
+    }
+}
+
+class AuthenticatedState extends ATMState {
+    constructor() {
+        super("Authenticated");
+    }
+
+    checkBalance(atm) {
+        const balance = atm.bank.balance(atm.card.accountId);
+        return `Balance: ${rupees(balance)}`;
+    }
+
+    deposit(atm, amount) {
+        checkAmount(amount);
+        atm.bank.credit(atm.card.accountId, amount);
+        return `Deposited ${rupees(amount)}`;
+    }
+
+    ejectCard(atm) {
+        atm.endSession();
+        return "Take your card";
+    }
+```
+
+**Withdrawing.** Check the notes, debit the bank, then give the cash. If the cash fails, put the money back.
+
+```js
+    withdraw(atm, amount) {
+        checkAmount(amount);
+
+        // Check the notes first, so the account is never touched if the ATM can't pay.
+        if (!atm.dispenser.canDispense(amount)) {
+            throw new Error(`This ATM can't give ${rupees(amount)} right now`);
+        }
+
+        // 1. Take the money from the account.
+        const transaction = atm.bank.debit(atm.card.accountId, amount);
+
+        // 2. Give out the cash.
+        try {
+            const notes = atm.dispenser.dispense(amount);
+            return `Take your cash: ${formatNotes(notes)}`;
+        } catch (error) {
+            // 3. The cash failed: put the money back.
+            atm.bank.reverse(transaction.id);
+            return `Sorry, no cash was given (${error.message}). ${rupees(amount)} is back in your account.`;
+        }
+    }
+}
+```
+
+### Part 12: The ATM
+
+`ATM` is the main service. It keeps the card and the PIN tries for one session. The class goes on in the next block.
 
 ```js
 class ATM {
-  constructor(bank, dispenser) {
-    this.bank = bank;
-    this.dispenser = dispenser;
-    this.state = new IdleState();
-    this.card = null;
-    this.pinTries = 0;
-  }
-  setState(state) { this.state = state; }
-  startSession(card) {
-    this.card = card;
-    this.pinTries = 0;
-  }
-  endSession() {
-    this.card = null;
-    this.pinTries = 0;
-    this.setState(new IdleState());
-  }
+    constructor(bank, dispenser) {
+        this.bank = bank;
+        this.dispenser = dispenser;
+        this.state = new IdleState();
+        // The card inside, for this session only.
+        this.card = null;
+        this.pinTries = 0;
+    }
 
-  insertCard(card) { return this.state.insertCard(this, card); }
-  enterPin(pin) { return this.state.enterPin(this, pin); }
-  withdraw(amount) { return this.state.withdraw(this, amount); }
-  deposit(amount) { return this.state.deposit(this, amount); }
-  checkBalance() { return this.state.checkBalance(this); }
-  ejectCard() { return this.state.ejectCard(this); }
+    setState(state) {
+        this.state = state;
+    }
+
+    startSession(card) {
+        this.card = card;
+        this.pinTries = 0;
+    }
+
+    endSession() {
+        this.card = null;
+        this.pinTries = 0;
+        this.setState(new IdleState());
+    }
+```
+
+**The buttons.** Every button just asks the current state, and passes the ATM itself along.
+
+```js
+    insertCard(card) {
+        return this.state.insertCard(this, card);
+    }
+
+    enterPin(pin) {
+        return this.state.enterPin(this, pin);
+    }
+
+    withdraw(amount) {
+        return this.state.withdraw(this, amount);
+    }
+
+    deposit(amount) {
+        return this.state.deposit(this, amount);
+    }
+
+    checkBalance() {
+        return this.state.checkBalance(this);
+    }
+
+    ejectCard() {
+        return this.state.ejectCard(this);
+    }
 }
 ```
 
-**Part 6: try it.** One account with ₹3,000, and an ATM with four ₹500, five ₹200 and ten ₹100 notes.
+### Part 13: Try it
+
+One account with ₹3,000, and an ATM with four ₹500, five ₹200 and ten ₹100 notes. `show` presses one button and prints the message, or the error if the button was refused.
 
 ```js
-const show = (fn) => { try { console.log(fn()); } catch (e) { console.log(e.message); } };
+function show(pressButton) {
+    try {
+        const message = pressButton();
+        console.log(message);
+    } catch (error) {
+        console.log(error.message);
+    }
+}
 
 const bank = new InMemoryBank();
-bank.addAccount(new Account('ACC-1', 3000));
-const card = new Card('4000-1234', 'ACC-1');
-bank.issueCard(card, '1234');
-const atm = new ATM(bank, new CashDispenser([[500, 4], [200, 5], [100, 10]]));
+bank.addAccount(new Account("ACC-1", 3000));
 
+const card = new Card("4000-1234", "ACC-1");
+bank.issueCard(card, "1234");
+
+const dispenser = new CashDispenser([[500, 4], [200, 5], [100, 10]]);
+const atm = new ATM(bank, dispenser);
+```
+
+One full visit: a button at the wrong step, a wrong PIN, then cash, a deposit and the balance.
+
+```js
 show(() => atm.withdraw(500)); // You can't withdraw now (Idle)
 show(() => atm.insertCard(card)); // Enter your PIN
-show(() => atm.enterPin('0000')); // Wrong PIN. 2 tries left.
-show(() => atm.enterPin('1234')); // PIN OK
+show(() => atm.enterPin("0000")); // Wrong PIN. 2 tries left.
+show(() => atm.enterPin("1234")); // PIN OK
 show(() => atm.withdraw(2600)); // Take your cash: 4 x ₹500, 3 x ₹200
 show(() => atm.withdraw(250)); // Amount must be a multiple of ₹100
 show(() => atm.withdraw(1000)); // Not enough money in the account
 show(() => atm.deposit(500)); // Deposited ₹500
 show(() => atm.checkBalance()); // Balance: ₹900
 show(() => atm.ejectCard()); // Take your card
+```
 
+Now a cash box whose notes always get stuck. The money goes back to the account.
+
+```js
 // A test double: a cash box whose notes always get stuck.
 class JammedDispenser extends CashDispenser {
-  dispense() { throw new Error('notes stuck'); }
+    dispense(amount) {
+        throw new Error("notes stuck");
+    }
 }
+
 const brokenAtm = new ATM(bank, new JammedDispenser([[100, 50]]));
 brokenAtm.insertCard(card);
-brokenAtm.enterPin('1234');
+brokenAtm.enterPin("1234");
 show(() => brokenAtm.withdraw(300)); // Sorry, no cash was given (notes stuck). ₹300 is back in your account.
 show(() => brokenAtm.checkBalance()); // Balance: ₹900
-for (const tx of bank.transactions) console.log(tx.id, tx.type, tx.amount, tx.status);
+
+for (const transaction of bank.transactions.values()) {
+    console.log(transaction.id, transaction.type, transaction.amount, transaction.status);
+}
 // TX1 WITHDRAW 2600 DONE
 // TX2 DEPOSIT 500 DONE
 // TX3 WITHDRAW 300 REVERSED
+```
 
+Last, three wrong PINs. The card is kept and blocked.
+
+```js
 atm.insertCard(card);
-atm.enterPin('1111');
-atm.enterPin('2222');
-show(() => atm.enterPin('3333')); // Wrong PIN 3 times. The card is kept. Please call your bank.
+atm.enterPin("1111");
+atm.enterPin("2222");
+show(() => atm.enterPin("3333")); // Wrong PIN 3 times. The card is kept. Please call your bank.
 show(() => atm.insertCard(card)); // This card is blocked. Please call your bank.
 ```
 
@@ -499,9 +846,14 @@ The danger is at the bank, if it reads the balance, waits, and then writes:
 ```js
 // NOT SAFE. A fragment, not runnable on its own.
 async debit(accountId, amount) {
-  const balance = await db.getBalance(accountId);            // both ATMs read ₹3,000
-  if (balance < amount) throw new Error('Not enough money');
-  await db.setBalance(accountId, balance - amount);          // both take ₹2,000: ₹4,000 left the account
+    // Both ATMs read ₹3,000.
+    const balance = await db.getBalance(accountId);
+    if (balance < amount) {
+        throw new Error("Not enough money");
+    }
+
+    // Both take ₹2,000, so ₹4,000 left the account.
+    await db.setBalance(accountId, balance - amount);
 }
 ```
 

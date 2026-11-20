@@ -25,21 +25,22 @@ A shop checkout that takes card, PayPal and wallet payments:
 
 ```js
 class Checkout {
-  pay(method, amount) {
-    if (method === 'card') {
-      return `Charged ${amount} to the card`;
-    } else if (method === 'paypal') {
-      return `Sent to PayPal for ${amount}`;
-    } else if (method === 'wallet') {
-      return `Paid ${amount} from the wallet`;
+    pay(method, amount) {
+        if (method === "card") {
+            return `Charged ${amount} to the card`;
+        } else if (method === "paypal") {
+            return `Sent to PayPal for ${amount}`;
+        } else if (method === "wallet") {
+            return `Paid ${amount} from the wallet`;
+        }
+
+        throw new Error(`Unknown payment method: ${method}`);
     }
-    throw new Error(`Unknown payment method: ${method}`);
-  }
 }
 
 const checkout = new Checkout();
-console.log(checkout.pay('card', 50));   // Charged 50 to the card
-console.log(checkout.pay('wallet', 20)); // Paid 20 from the wallet
+console.log(checkout.pay("card", 50));   // Charged 50 to the card
+console.log(checkout.pay("wallet", 20)); // Paid 20 from the wallet
 ```
 
 Now the shop wants **gift cards**. Why does this hurt?
@@ -83,43 +84,81 @@ classDiagram
   PaymentMethod <|.. GiftCard
 ```
 
+**Step 1: the role and two simple methods.** `PaymentMethod` names the role. `Card` and `PayPal` fill it in:
+
 ```js
-class PaymentMethod { // interface
-  pay(amount) { throw new Error('not implemented'); }
+// The interface. JavaScript has no "interface" keyword,
+// so a base class whose method throws stands in for one.
+class PaymentMethod {
+    pay(amount) {
+        throw new Error("not implemented");
+    }
 }
 
 class Card extends PaymentMethod {
-  pay(amount) { return `Charged ${amount} to the card`; }
-}
-class PayPal extends PaymentMethod {
-  pay(amount) { return `Sent to PayPal for ${amount}`; }
-}
-class Wallet extends PaymentMethod {
-  #balance;
-  constructor(balance) { super(); this.#balance = balance; }
-  pay(amount) {
-    if (amount > this.#balance) throw new Error('Not enough money in the wallet');
-    this.#balance -= amount;
-    return `Paid ${amount} from the wallet, ${this.#balance} left`;
-  }
+    pay(amount) {
+        return `Charged ${amount} to the card`;
+    }
 }
 
+class PayPal extends PaymentMethod {
+    pay(amount) {
+        return `Sent to PayPal for ${amount}`;
+    }
+}
+```
+
+**Step 2: a wallet.** It is a payment method too, with its own balance and its own rule:
+
+```js
+class Wallet extends PaymentMethod {
+    constructor(balance) {
+        // A child class must call super() before it can use "this".
+        super();
+        this.balance = balance;
+    }
+
+    pay(amount) {
+        if (amount > this.balance) {
+            throw new Error("Not enough money in the wallet");
+        }
+
+        this.balance = this.balance - amount;
+        return `Paid ${amount} from the wallet, ${this.balance} left`;
+    }
+}
+```
+
+**Step 3: the checkout.** It just calls `pay()` on whatever method it gets:
+
+```js
 class Checkout {
-  pay(method, amount) {
-    return method.pay(amount); // no if/else: works for any PaymentMethod
-  }
+    pay(method, amount) {
+        // No if/else: this works for any PaymentMethod.
+        return method.pay(amount);
+    }
 }
 
 const checkout = new Checkout();
 console.log(checkout.pay(new Card(), 50));      // Charged 50 to the card
 console.log(checkout.pay(new Wallet(100), 30)); // Paid 30 from the wallet, 70 left
+```
 
-// Next year: gift cards. One NEW class. Checkout and the old classes don't change.
+**Step 4: next year, gift cards.** One new class. `Checkout` and the old classes don't change:
+
+```js
 class GiftCard extends PaymentMethod {
-  constructor(code) { super(); this.code = code; }
-  pay(amount) { return `Used gift card ${this.code} for ${amount}`; }
+    constructor(code) {
+        super();
+        this.code = code;
+    }
+
+    pay(amount) {
+        return `Used gift card ${this.code} for ${amount}`;
+    }
 }
-console.log(checkout.pay(new GiftCard('BDAY-25'), 25)); // Used gift card BDAY-25 for 25
+
+console.log(checkout.pay(new GiftCard("BDAY-25"), 25)); // Used gift card BDAY-25 for 25
 ```
 
 `Checkout` is now **closed**: it never changes when a payment method is added. The design is **open**: anyone can add a new `PaymentMethod`.

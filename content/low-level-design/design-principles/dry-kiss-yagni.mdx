@@ -28,14 +28,24 @@ This rule comes from the book _The Pragmatic Programmer_ (1999). The key word is
 
 ```js
 function cartTotal(items) {
-  const sum = items.reduce((s, i) => s + i.price, 0);
-  return sum + sum * 0.18;
+    let sum = 0;
+    for (const item of items) {
+        sum = sum + item.price;
+    }
+
+    // Tax, copy 1
+    return sum + sum * 0.18;
 }
+
 function invoiceTax(amount) {
-  return amount * 0.18;
+    // Tax, copy 2
+    return amount * 0.18;
 }
+
 function priceLabel(price) {
-  return `${(price * 1.18).toFixed(2)} incl. tax`;
+    // Tax, copy 3, hidden as 1.18
+    const priceWithTax = price * 1.18;
+    return `${priceWithTax.toFixed(2)} incl. tax`;
 }
 
 console.log(cartTotal([{ price: 100 }, { price: 50 }])); // 177
@@ -48,13 +58,24 @@ When the tax becomes 20%, you must find every copy. A search for `0.18` even mis
 
 ```js
 const TAX_RATE = 0.18;
-const withTax = (amount) => amount * (1 + TAX_RATE);
+
+// The one place that knows how to add tax.
+function withTax(amount) {
+    return amount * (1 + TAX_RATE);
+}
 
 function cartTotal(items) {
-  return withTax(items.reduce((sum, i) => sum + i.price, 0));
+    let sum = 0;
+    for (const item of items) {
+        sum = sum + item.price;
+    }
+
+    return withTax(sum);
 }
+
 function priceLabel(price) {
-  return `${withTax(price).toFixed(2)} incl. tax`;
+    const priceWithTax = withTax(price);
+    return `${priceWithTax.toFixed(2)} incl. tax`;
 }
 
 console.log(cartTotal([{ price: 100 }, { price: 50 }])); // 177
@@ -64,8 +85,16 @@ console.log(priceLabel(10)); // 11.80 incl. tax
 **Careful:** code that only **looks** the same is not always repeated knowledge.
 
 ```js
-const isAdult = (age) => age >= 18;      // the law's rule
-const canRentCar = (age) => age >= 18;   // the rental company's rule
+// The law's rule
+function isAdult(age) {
+    return age >= 18;
+}
+
+// The rental company's rule
+function canRentCar(age) {
+    return age >= 18;
+}
+
 console.log(isAdult(19), canRentCar(19)); // true true
 ```
 
@@ -80,12 +109,19 @@ A handy habit, the **rule of three**: the first time, write it. The second time,
 The phrase is often credited to Kelly Johnson, an aircraft engineer at Lockheed, who wanted planes that a mechanic could fix in the field with basic tools.
 
 ```js
-// Too clever: works, but you have to stop and decode it
-const isWeekendClever = (date) => !!((1 << date.getDay()) & 0b1000001);
+// Too clever: it works, but you have to stop and decode it.
+function isWeekendClever(date) {
+    return !!((1 << date.getDay()) & 0b1000001);
+}
 
-// Simple: anyone can read it
-const isWeekend = (date) => date.getDay() === 0 || date.getDay() === 6;
+// Simple: anyone can read it.
+function isWeekend(date) {
+    // getDay() gives 0 for Sunday and 6 for Saturday.
+    const day = date.getDay();
+    return day === 0 || day === 6;
+}
 
+// 21 November 2026. Months start at 0, so 10 means November.
 const saturday = new Date(2026, 10, 21);
 console.log(isWeekendClever(saturday), isWeekend(saturday)); // true true
 ```
@@ -123,12 +159,14 @@ flowchart TB
 ```js
 // Asked for: "log messages with a label". This is enough for today.
 class Logger {
-  log(level, message) {
-    console.log(`[${level}] ${message}`);
-  }
+    log(level, message) {
+        console.log(`[${level}] ${message}`);
+    }
 }
 
-new Logger().log('INFO', 'Server started'); // [INFO] Server started
+const logger = new Logger();
+logger.log("INFO", "Server started"); // [INFO] Server started
+
 // Not built yet: log rotation, cloud upload, colours, plugins.
 ```
 

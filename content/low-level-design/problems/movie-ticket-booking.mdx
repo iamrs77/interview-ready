@@ -189,315 +189,595 @@ sequenceDiagram
 ## Step 5: Code
 
 Money is in whole **paise** (₹1 = 100 paise), so there are no rounding errors. Time is in milliseconds from a clock
-that we pass in. Run all the parts together as one `.mjs` file (the last part uses top-level `await`).
+that we pass in. Run all the parts together as one `.mjs` file (the last part uses top-level `await`). Long classes
+come in a few pieces. Paste the pieces in order and they make the whole class.
 
-**Part 1: enums and small classes.** Plain data holders, plus a fake clock for tests.
+### Part 1: Enums and small classes
+
+**The enums and a print helper.**
 
 ```js
-const SeatType = Object.freeze({ REGULAR: 'REGULAR', PREMIUM: 'PREMIUM' });
-const BookingStatus = Object.freeze({
-  HELD: 'HELD', PAYING: 'PAYING', CONFIRMED: 'CONFIRMED', EXPIRED: 'EXPIRED', CANCELLED: 'CANCELLED',
-});
+const SeatType = {
+    REGULAR: "REGULAR",
+    PREMIUM: "PREMIUM",
+};
 
-const rupees = (paise) => `₹${(paise / 100).toFixed(2)}`; // only for printing
+const BookingStatus = {
+    HELD: "HELD",
+    PAYING: "PAYING",
+    CONFIRMED: "CONFIRMED",
+    EXPIRED: "EXPIRED",
+    CANCELLED: "CANCELLED",
+};
 
+// Only for printing: 84000 paise becomes "₹840.00".
+function rupees(paise) {
+    const amount = paise / 100;
+    return `₹${amount.toFixed(2)}`;
+}
+```
+
+**Movie and Seat.** Plain data holders.
+
+```js
 class Movie {
-  constructor(id, title, minutes) {
-    this.id = id;
-    this.title = title;
-    this.minutes = minutes;
-  }
+    constructor(id, title, minutes) {
+        this.id = id;
+        this.title = title;
+        this.minutes = minutes;
+    }
 }
 
 class Seat {
-  constructor(id, type) {
-    this.id = id; // like "A1"
-    this.type = type; // a SeatType
-  }
-}
-
-class Screen {
-  #seats = new Map(); // seat id -> Seat
-  constructor(id, name, seats) {
-    this.id = id;
-    this.name = name;
-    for (const seat of seats) this.#seats.set(seat.id, seat);
-  }
-  seat(id) {
-    const seat = this.#seats.get(id);
-    if (!seat) throw new Error(`No seat ${id} in ${this.name}`);
-    return seat;
-  }
-  get seats() { return [...this.#seats.values()]; }
-}
-
-class Theatre {
-  constructor(id, name, city) {
-    this.id = id;
-    this.name = name;
-    this.city = city;
-    this.screens = [];
-  }
-  addScreen(screen) {
-    this.screens.push(screen);
-    return screen;
-  }
-}
-
-class Payment {
-  constructor(id, bookingId, amount, paidAt) {
-    this.id = id;
-    this.bookingId = bookingId;
-    this.amount = amount; // whole paise
-    this.paidAt = paidAt;
-  }
-}
-
-class FakeClock { // tests control time
-  constructor(ms) { this.ms = ms; }
-  now() { return this.ms; }
-  advanceMinutes(minutes) { this.ms += minutes * 60_000; }
+    constructor(id, type) {
+        // Like "A1".
+        this.id = id;
+        // A SeatType.
+        this.type = type;
+    }
 }
 ```
 
-**Part 2: the core classes.** Pricing rules, the `Show` with its atomic `hold`, the `Booking`, and the payment
-interface.
+**Screen.** One hall. It also keeps its seats in a `Map`, so finding seat "A1" is quick.
 
 ```js
-class PricingStrategy { // interface
-  priceFor(seat, show) { throw new Error('not implemented'); }
+class Screen {
+    constructor(id, name, seats) {
+        this.id = id;
+        this.name = name;
+        this.seats = seats;
+        // Seat id -> Seat, for quick lookups.
+        this.seatsById = new Map();
+        for (const seat of seats) {
+            this.seatsById.set(seat.id, seat);
+        }
+    }
+
+    seat(id) {
+        const seat = this.seatsById.get(id);
+        if (!seat) {
+            throw new Error(`No seat ${id} in ${this.name}`);
+        }
+
+        return seat;
+    }
+}
+```
+
+**Theatre.** A cinema building with its screens.
+
+```js
+class Theatre {
+    constructor(id, name, city) {
+        this.id = id;
+        this.name = name;
+        this.city = city;
+        this.screens = [];
+    }
+
+    addScreen(screen) {
+        this.screens.push(screen);
+        return screen;
+    }
+}
+```
+
+**Payment and a fake clock.** Tests control the fake clock. It only moves when we tell it to.
+
+```js
+class Payment {
+    constructor(id, bookingId, amount, paidAt) {
+        this.id = id;
+        this.bookingId = bookingId;
+        // Whole paise.
+        this.amount = amount;
+        this.paidAt = paidAt;
+    }
+}
+
+class FakeClock {
+    constructor(ms) {
+        this.ms = ms;
+    }
+
+    now() {
+        return this.ms;
+    }
+
+    advanceMinutes(minutes) {
+        // One minute is 60 * 1000 milliseconds.
+        this.ms += minutes * 60 * 1000;
+    }
+}
+```
+
+### Part 2: The core classes
+
+**The pricing rules.** `SeatTypePricing` looks up the price by seat type.
+
+```js
+// The interface: every pricing rule has priceFor(seat, show).
+class PricingStrategy {
+    priceFor(seat, show) {
+        throw new Error("not implemented");
+    }
 }
 
 class SeatTypePricing extends PricingStrategy {
-  #prices;
-  constructor(prices) { // like { REGULAR: 20000, PREMIUM: 35000 }, in paise
-    super();
-    this.#prices = prices;
-  }
-  priceFor(seat, show) { return this.#prices[seat.type]; }
-}
+    // prices is like { REGULAR: 20000, PREMIUM: 35000 }, in paise.
+    constructor(prices) {
+        super();
+        this.prices = prices;
+    }
 
+    priceFor(seat, show) {
+        return this.prices[seat.type];
+    }
+}
+```
+
+**Weekend pricing.** It takes the seat type price, then adds a percent on Saturday and Sunday.
+
+```js
 class WeekendPricing extends SeatTypePricing {
-  #extraPercent;
-  constructor(prices, extraPercent) {
-    super(prices);
-    this.#extraPercent = extraPercent;
-  }
-  priceFor(seat, show) {
-    const base = super.priceFor(seat, show);
-    const day = new Date(show.startsAt).getUTCDay(); // 0 = Sunday, 6 = Saturday
-    const weekend = day === 0 || day === 6;
-    return weekend ? base + Math.round((base * this.#extraPercent) / 100) : base;
-  }
-}
+    constructor(prices, extraPercent) {
+        super(prices);
+        this.extraPercent = extraPercent;
+    }
 
+    priceFor(seat, show) {
+        const basePrice = super.priceFor(seat, show);
+
+        // getUTCDay() gives 0 for Sunday and 6 for Saturday.
+        const day = new Date(show.startsAt).getUTCDay();
+        const isWeekend = day === 0 || day === 6;
+        if (!isWeekend) {
+            return basePrice;
+        }
+
+        const extra = Math.round((basePrice * this.extraPercent) / 100);
+        return basePrice + extra;
+    }
+}
+```
+
+**The `Show`, piece 1: is a seat free?** Each show keeps its own seat states. A seat that is not in the `Map` is free.
+
+```js
 class Show {
-  #seatState = new Map(); // seat id -> { bookingId, booked, holdUntil }
-  constructor(id, movie, screen, startsAt, pricing) {
-    this.id = id;
-    this.movie = movie;
-    this.screen = screen;
-    this.startsAt = startsAt; // milliseconds, UTC
-    this.pricing = pricing; // a PricingStrategy
-  }
-  isFree(seatId, now) {
-    const state = this.#seatState.get(seatId);
-    return !state || (!state.booked && state.holdUntil <= now); // a hold that ran out is free
-  }
-  // All or nothing, and no await inside: nothing else can run between the check and the write.
-  hold(seatIds, bookingId, now, holdUntil) {
-    for (const id of seatIds) {
-      this.screen.seat(id); // throws if the seat does not exist
-      if (!this.isFree(id, now)) throw new Error(`Seat ${id} is not free`);
+    constructor(id, movie, screen, startsAt, pricing) {
+        this.id = id;
+        this.movie = movie;
+        this.screen = screen;
+        // Milliseconds, UTC.
+        this.startsAt = startsAt;
+        // A PricingStrategy.
+        this.pricing = pricing;
+        // Seat id -> { bookingId, booked, holdUntil }.
+        this.seatState = new Map();
     }
-    for (const id of seatIds) this.#seatState.set(id, { bookingId, booked: false, holdUntil });
-  }
-  isHeldBy(seatIds, bookingId) { // still ours, even if the hold just ran out
-    return seatIds.every((id) => this.#seatState.get(id)?.bookingId === bookingId);
-  }
-  book(seatIds) {
-    for (const id of seatIds) this.#seatState.get(id).booked = true;
-  }
-  release(seatIds, bookingId) {
-    for (const id of seatIds) {
-      if (this.#seatState.get(id)?.bookingId === bookingId) this.#seatState.delete(id);
-    }
-  }
-  freeSeats(now) {
-    return this.screen.seats.filter((s) => this.isFree(s.id, now)).map((s) => s.id);
-  }
-}
 
+    isFree(seatId, now) {
+        const state = this.seatState.get(seatId);
+
+        // Nobody has held this seat.
+        if (!state) {
+            return true;
+        }
+
+        // A booked seat is never free.
+        if (state.booked) {
+            return false;
+        }
+
+        // A hold that ran out counts as free.
+        return state.holdUntil <= now;
+    }
+```
+
+**The `Show`, piece 2: the atomic `hold`.** It checks every seat first, then takes every seat. There is no `await`
+inside, so nothing else can run between the check and the write.
+
+```js
+    hold(seatIds, bookingId, now, holdUntil) {
+        // 1. Check every seat. Throw before we change anything: all or nothing.
+        for (const seatId of seatIds) {
+            // seat() throws if the seat does not exist.
+            this.screen.seat(seatId);
+
+            if (!this.isFree(seatId, now)) {
+                throw new Error(`Seat ${seatId} is not free`);
+            }
+        }
+
+        // 2. Take every seat.
+        for (const seatId of seatIds) {
+            this.seatState.set(seatId, { bookingId: bookingId, booked: false, holdUntil: holdUntil });
+        }
+    }
+
+    // True if this booking still holds every seat, even if the hold just ran out.
+    isHeldBy(seatIds, bookingId) {
+        for (const seatId of seatIds) {
+            const state = this.seatState.get(seatId);
+            if (!state || state.bookingId !== bookingId) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+```
+
+**The `Show`, piece 3: book, release and list.** These finish the `Show` class.
+
+```js
+    book(seatIds) {
+        for (const seatId of seatIds) {
+            this.seatState.get(seatId).booked = true;
+        }
+    }
+
+    // Free the seats, but only the ones this booking still holds.
+    release(seatIds, bookingId) {
+        for (const seatId of seatIds) {
+            const state = this.seatState.get(seatId);
+            if (state && state.bookingId === bookingId) {
+                this.seatState.delete(seatId);
+            }
+        }
+    }
+
+    freeSeats(now) {
+        const freeIds = [];
+        for (const seat of this.screen.seats) {
+            if (this.isFree(seat.id, now)) {
+                freeIds.push(seat.id);
+            }
+        }
+
+        return freeIds;
+    }
+}
+```
+
+**The `Booking`.** One user's seats for one show.
+
+```js
 class Booking {
-  constructor(id, userId, show, seatIds, amount, holdUntil) {
-    this.id = id;
-    this.userId = userId;
-    this.show = show;
-    this.seatIds = seatIds;
-    this.amount = amount; // whole paise
-    this.holdUntil = holdUntil;
-    this.status = BookingStatus.HELD;
-    this.payment = null;
-  }
+    constructor(id, userId, show, seatIds, amount, holdUntil) {
+        this.id = id;
+        this.userId = userId;
+        this.show = show;
+        this.seatIds = seatIds;
+        // Whole paise.
+        this.amount = amount;
+        this.holdUntil = holdUntil;
+        this.status = BookingStatus.HELD;
+        // Set when the user pays.
+        this.payment = null;
+    }
 }
+```
 
-class PaymentGateway { // interface: a card or UPI provider
-  async charge(userId, amount) { throw new Error('not implemented'); }
-  async refund(paymentId) { throw new Error('not implemented'); }
+**The payment interface, and a fake for tests.** The fake never fails, and gives ids `PAY1`, `PAY2`, and so on.
+
+```js
+// The interface for a card or UPI provider.
+class PaymentGateway {
+    async charge(userId, amount) {
+        throw new Error("not implemented");
+    }
+
+    async refund(paymentId) {
+        throw new Error("not implemented");
+    }
 }
 
 class FakeGateway extends PaymentGateway {
-  #next = 1;
-  async charge(userId, amount) { return `PAY${this.#next++}`; }
-  async refund(paymentId) { return true; }
+    constructor() {
+        super();
+        this.nextNumber = 1;
+    }
+
+    async charge(userId, amount) {
+        const paymentId = `PAY${this.nextNumber}`;
+        this.nextNumber++;
+        return paymentId;
+    }
+
+    async refund(paymentId) {
+        return true;
+    }
 }
 ```
 
-**Part 3: the main service.** `holdSeats` has no `await`. `confirm` has one, so it marks the booking `PAYING`
-before it, and checks the seats again after it.
+### Part 3: The main service
+
+`holdSeats` has no `await`. `confirm` has one, so it marks the booking `PAYING` before it, and checks the seats again
+after it.
+
+**Piece 1: the data, and adding shows.**
 
 ```js
 class BookingService {
-  #shows = new Map();
-  #bookings = new Map();
-  #nextId = 1;
-  #clock;
-  #gateway;
-  #holdMs;
-
-  constructor({ clock, gateway, holdMinutes = 10 }) {
-    this.#clock = clock;
-    this.#gateway = gateway;
-    this.#holdMs = holdMinutes * 60_000;
-  }
-
-  addShow(show) {
-    this.#shows.set(show.id, show);
-    return show;
-  }
-
-  freeSeats(showId) {
-    return this.#findShow(showId).freeSeats(this.#clock.now());
-  }
-
-  holdSeats(showId, userId, seatIds) {
-    const show = this.#findShow(showId);
-    const now = this.#clock.now();
-    if (now >= show.startsAt) throw new Error(`Show ${showId} has started`);
-    if (seatIds.length === 0) throw new Error('Pick at least one seat');
-    if (new Set(seatIds).size !== seatIds.length) throw new Error('A seat is picked twice');
-    const id = `BK${this.#nextId}`;
-    show.hold(seatIds, id, now, now + this.#holdMs); // throws if any seat is taken
-    this.#nextId++;
-    const amount = seatIds.reduce((sum, s) => sum + show.pricing.priceFor(show.screen.seat(s), show), 0);
-    const booking = new Booking(id, userId, show, seatIds, amount, now + this.#holdMs);
-    this.#bookings.set(id, booking);
-    return booking;
-  }
-
-  async confirm(bookingId) {
-    const booking = this.#findBooking(bookingId);
-    if (booking.status !== BookingStatus.HELD) throw new Error(`${bookingId} is ${booking.status}`);
-    if (this.#clock.now() >= booking.holdUntil) {
-      booking.show.release(booking.seatIds, booking.id);
-      booking.status = BookingStatus.EXPIRED;
-      throw new Error(`Hold on ${bookingId} ran out. Pick seats again.`);
+    constructor(clock, gateway, holdMinutes = 10) {
+        this.clock = clock;
+        this.gateway = gateway;
+        this.holdMs = holdMinutes * 60 * 1000;
+        // Show id -> Show, and booking id -> Booking.
+        this.shows = new Map();
+        this.bookings = new Map();
+        // Used to make booking ids: BK1, BK2, and so on.
+        this.nextId = 1;
     }
-    booking.status = BookingStatus.PAYING; // a second "Pay" click now fails above
-    let paymentId;
-    try {
-      paymentId = await this.#gateway.charge(booking.userId, booking.amount);
-    } catch (err) {
-      booking.status = BookingStatus.HELD; // card failed: let the user try again
-      throw err;
-    }
-    // The await let other code run. Check again before we write.
-    if (!booking.show.isHeldBy(booking.seatIds, booking.id)) {
-      await this.#gateway.refund(paymentId);
-      booking.status = BookingStatus.EXPIRED;
-      throw new Error(`Seats for ${bookingId} were taken. Payment refunded.`);
-    }
-    booking.show.book(booking.seatIds);
-    booking.payment = new Payment(paymentId, booking.id, booking.amount, this.#clock.now());
-    booking.status = BookingStatus.CONFIRMED;
-    return booking;
-  }
 
-  cancelHold(bookingId) {
-    const booking = this.#findBooking(bookingId);
-    if (booking.status !== BookingStatus.HELD) throw new Error(`${bookingId} is ${booking.status}`);
-    booking.show.release(booking.seatIds, booking.id);
-    booking.status = BookingStatus.CANCELLED;
-  }
+    addShow(show) {
+        this.shows.set(show.id, show);
+        return show;
+    }
 
-  #findShow(id) {
-    const show = this.#shows.get(id);
-    if (!show) throw new Error(`No show ${id}`);
-    return show;
-  }
-  #findBooking(id) {
-    const booking = this.#bookings.get(id);
-    if (!booking) throw new Error(`No booking ${id}`);
-    return booking;
-  }
+    freeSeats(showId) {
+        const show = this.findShow(showId);
+        return show.freeSeats(this.clock.now());
+    }
+```
+
+**Piece 2: check the request.** A helper for `holdSeats`. It throws before any seat is touched.
+
+```js
+    checkRequest(show, seatIds, now) {
+        if (now >= show.startsAt) {
+            throw new Error(`Show ${show.id} has started`);
+        }
+
+        if (seatIds.length === 0) {
+            throw new Error("Pick at least one seat");
+        }
+
+        // A Set drops repeats. If the Set is smaller, a seat was picked twice.
+        if (new Set(seatIds).size !== seatIds.length) {
+            throw new Error("A seat is picked twice");
+        }
+    }
+```
+
+**Piece 3: `holdSeats`.** Hold all the seats or none, then work out the price.
+
+```js
+    holdSeats(showId, userId, seatIds) {
+        const show = this.findShow(showId);
+        const now = this.clock.now();
+        this.checkRequest(show, seatIds, now);
+
+        // Hold the seats. If any seat is taken, this throws and nothing is held.
+        const bookingId = `BK${this.nextId}`;
+        const holdUntil = now + this.holdMs;
+        show.hold(seatIds, bookingId, now, holdUntil);
+        // Only now use up the id, so a failed hold doesn't skip a number.
+        this.nextId++;
+
+        // Add up the price of every seat.
+        let amount = 0;
+        for (const seatId of seatIds) {
+            const seat = show.screen.seat(seatId);
+            amount += show.pricing.priceFor(seat, show);
+        }
+
+        const booking = new Booking(bookingId, userId, show, seatIds, amount, holdUntil);
+        this.bookings.set(bookingId, booking);
+        return booking;
+    }
+```
+
+**Piece 4: get ready to pay.** A helper for `confirm`. It runs before the `await`, and marks the booking `PAYING`.
+
+```js
+    startPaying(booking) {
+        if (booking.status !== BookingStatus.HELD) {
+            throw new Error(`${booking.id} is ${booking.status}`);
+        }
+
+        // Too late: the hold ran out. Give the seats back.
+        if (this.clock.now() >= booking.holdUntil) {
+            booking.show.release(booking.seatIds, booking.id);
+            booking.status = BookingStatus.EXPIRED;
+            throw new Error(`Hold on ${booking.id} ran out. Pick seats again.`);
+        }
+
+        // Mark it before the await. A second "Pay" click now fails the first check above.
+        booking.status = BookingStatus.PAYING;
+    }
+```
+
+**Piece 5: `confirm`.** Charge the user, check the seats again, then book them.
+
+```js
+    async confirm(bookingId) {
+        const booking = this.findBooking(bookingId);
+        this.startPaying(booking);
+
+        let paymentId;
+        try {
+            paymentId = await this.gateway.charge(booking.userId, booking.amount);
+        } catch (error) {
+            // The card failed. Let the user try again.
+            booking.status = BookingStatus.HELD;
+            throw error;
+        }
+
+        // The await let other code run. Check again before we write.
+        if (!booking.show.isHeldBy(booking.seatIds, booking.id)) {
+            await this.gateway.refund(paymentId);
+            booking.status = BookingStatus.EXPIRED;
+            throw new Error(`Seats for ${bookingId} were taken. Payment refunded.`);
+        }
+
+        booking.show.book(booking.seatIds);
+        const paidAt = this.clock.now();
+        booking.payment = new Payment(paymentId, booking.id, booking.amount, paidAt);
+        booking.status = BookingStatus.CONFIRMED;
+        return booking;
+    }
+```
+
+**Piece 6: cancel a hold, and the lookups.** These finish the `BookingService` class.
+
+```js
+    cancelHold(bookingId) {
+        const booking = this.findBooking(bookingId);
+        if (booking.status !== BookingStatus.HELD) {
+            throw new Error(`${bookingId} is ${booking.status}`);
+        }
+
+        booking.show.release(booking.seatIds, booking.id);
+        booking.status = BookingStatus.CANCELLED;
+    }
+
+    findShow(showId) {
+        const show = this.shows.get(showId);
+        if (!show) {
+            throw new Error(`No show ${showId}`);
+        }
+
+        return show;
+    }
+
+    findBooking(bookingId) {
+        const booking = this.bookings.get(bookingId);
+        if (!booking) {
+            throw new Error(`No booking ${bookingId}`);
+        }
+
+        return booking;
+    }
 }
 ```
 
-**Part 4: try it.** One screen, a Friday show and a Saturday show, and every tricky case.
+### Part 4: Try it
+
+One screen, a Friday show and a Saturday show, and every tricky case.
+
+**Set up the cinema.**
 
 ```js
-const clock = new FakeClock(Date.UTC(2026, 10, 20, 9, 0)); // Friday 20 Nov 2026, 09:00 UTC
-const service = new BookingService({ clock, gateway: new FakeGateway(), holdMinutes: 10 });
+// Friday 20 Nov 2026, 09:00 UTC. Months start at 0 in JavaScript, so 10 is November.
+const clock = new FakeClock(Date.UTC(2026, 10, 20, 9, 0));
+const service = new BookingService(clock, new FakeGateway(), 10);
 
-const cinema = new Theatre('T1', 'City Cinema', 'Pune');
-const audi1 = cinema.addScreen(new Screen('S1', 'Audi 1', [
-  new Seat('A1', SeatType.PREMIUM), new Seat('A2', SeatType.PREMIUM),
-  new Seat('B1', SeatType.REGULAR), new Seat('B2', SeatType.REGULAR),
-]));
-const movie = new Movie('M1', 'Toy Robots 3', 120);
-const prices = { REGULAR: 20000, PREMIUM: 35000 }; // ₹200 and ₹350, in paise
+const cinema = new Theatre("T1", "City Cinema", "Pune");
+const seats = [
+    new Seat("A1", SeatType.PREMIUM),
+    new Seat("A2", SeatType.PREMIUM),
+    new Seat("B1", SeatType.REGULAR),
+    new Seat("B2", SeatType.REGULAR),
+];
+const audi1 = cinema.addScreen(new Screen("S1", "Audi 1", seats));
+const movie = new Movie("M1", "Toy Robots 3", 120);
+```
+
+**Add two shows.** Friday uses normal prices. Saturday adds 20%.
+
+```js
+// ₹200 and ₹350, in paise.
+const prices = { REGULAR: 20000, PREMIUM: 35000 };
+
 const friday = Date.UTC(2026, 10, 20, 14, 0);
 const saturday = Date.UTC(2026, 10, 21, 14, 0);
-service.addShow(new Show('FRI', movie, audi1, friday, new SeatTypePricing(prices)));
-service.addShow(new Show('SAT', movie, audi1, saturday, new WeekendPricing(prices, 20)));
+service.addShow(new Show("FRI", movie, audi1, friday, new SeatTypePricing(prices)));
+service.addShow(new Show("SAT", movie, audi1, saturday, new WeekendPricing(prices, 20)));
+```
 
+**Cases 1 and 2: Alice holds two seats, and Bob can't get A2.**
+
+```js
 // 1. Alice holds two premium seats on Saturday (weekend: +20%).
-const alice = service.holdSeats('SAT', 'alice', ['A1', 'A2']);
+const alice = service.holdSeats("SAT", "alice", ["A1", "A2"]);
 console.log(alice.id, alice.status, rupees(alice.amount)); // BK1 HELD ₹840.00
 
 // 2. Bob wants B1 and A2. A2 is taken, so he gets neither.
 try {
-  service.holdSeats('SAT', 'bob', ['B1', 'A2']);
-} catch (e) {
-  console.log(e.message); // Seat A2 is not free
+    service.holdSeats("SAT", "bob", ["B1", "A2"]);
+} catch (error) {
+    console.log(error.message); // Seat A2 is not free
 }
-console.log(service.freeSeats('SAT')); // [ 'B1', 'B2' ]
-
-// 3. Alice pays.
-await service.confirm('BK1');
-console.log(alice.status, alice.payment.id); // CONFIRMED PAY1
-
-// 4. Bob holds B1 on Friday (normal price), then waits too long.
-const bob = service.holdSeats('FRI', 'bob', ['B1']);
-console.log(bob.id, rupees(bob.amount)); // BK2 ₹200.00
-clock.advanceMinutes(11);
-await service.confirm('BK2').catch((e) => console.log(e.message)); // Hold on BK2 ran out. Pick seats again.
-
-// 5. Carol and Dave click B1 at the same moment.
-const clicks = await Promise.allSettled([
-  Promise.resolve().then(() => service.holdSeats('FRI', 'carol', ['B1'])),
-  Promise.resolve().then(() => service.holdSeats('FRI', 'dave', ['B1'])),
-]);
-console.log(clicks.map((r) => (r.status === 'fulfilled' ? `${r.value.userId} got B1` : r.reason.message)));
-// [ 'carol got B1', 'Seat B1 is not free' ]
-
-// 6. Carol clicks "Pay" twice.
-const pays = await Promise.allSettled([service.confirm('BK3'), service.confirm('BK3')]);
-console.log(pays.map((r) => (r.status === 'fulfilled' ? r.value.status : r.reason.message)));
-// [ 'CONFIRMED', 'BK3 is PAYING' ]
+console.log(service.freeSeats("SAT")); // [ 'B1', 'B2' ]
 ```
 
 In case 2, B1 was free, but Bob did not get it, because A2 failed. That is "all or nothing".
+
+**Cases 3 and 4: Alice pays, and Bob waits too long.**
+
+```js
+// 3. Alice pays.
+await service.confirm("BK1");
+console.log(alice.status, alice.payment.id); // CONFIRMED PAY1
+
+// 4. Bob holds B1 on Friday (normal price), then waits too long.
+const bob = service.holdSeats("FRI", "bob", ["B1"]);
+console.log(bob.id, rupees(bob.amount)); // BK2 ₹200.00
+
+clock.advanceMinutes(11);
+try {
+    await service.confirm("BK2");
+} catch (error) {
+    console.log(error.message); // Hold on BK2 ran out. Pick seats again.
+}
+```
+
+**Case 5: Carol and Dave click B1 at the same moment.** `Promise.resolve().then(...)` runs each click a moment
+later, like a real request. `Promise.allSettled` waits for both, even if one fails.
+
+```js
+const carolClick = Promise.resolve().then(() => service.holdSeats("FRI", "carol", ["B1"]));
+const daveClick = Promise.resolve().then(() => service.holdSeats("FRI", "dave", ["B1"]));
+
+const clicks = await Promise.allSettled([carolClick, daveClick]);
+for (const click of clicks) {
+    if (click.status === "fulfilled") {
+        console.log(`${click.value.userId} got B1`);
+    } else {
+        console.log(click.reason.message);
+    }
+}
+// carol got B1
+// Seat B1 is not free
+```
+
+**Case 6: Carol clicks "Pay" twice.**
+
+```js
+const pays = await Promise.allSettled([service.confirm("BK3"), service.confirm("BK3")]);
+for (const pay of pays) {
+    if (pay.status === "fulfilled") {
+        console.log(pay.value.status);
+    } else {
+        console.log(pay.reason.message);
+    }
+}
+// CONFIRMED
+// BK3 is PAYING
+```
 
 ## Step 6: Edge cases and extensions
 
@@ -523,12 +803,21 @@ is a bug:
 ```js
 // Not runnable: a broken holdSeats, to show the bug.
 async holdSeats(showId, userId, seatIds) {
-  const show = this.#findShow(showId);
-  for (const id of seatIds) {
-    if (!show.isFree(id, now)) throw new Error(`Seat ${id} is not free`);
-  }
-  await this.#audit.log(userId, seatIds); // pause: Bob's request runs here and also sees A2 free
-  for (const id of seatIds) show.markHeld(id, bookingId); // both write, so A2 is sold twice
+    const show = this.findShow(showId);
+
+    for (const seatId of seatIds) {
+        if (!show.isFree(seatId, now)) {
+            throw new Error(`Seat ${seatId} is not free`);
+        }
+    }
+
+    // Pause: Bob's request runs here, and also sees A2 free.
+    await this.audit.log(userId, seatIds);
+
+    // Both requests write, so A2 is sold twice.
+    for (const seatId of seatIds) {
+        show.markHeld(seatId, bookingId);
+    }
 }
 ```
 
@@ -569,15 +858,26 @@ This is the [Strategy](../design-patterns/strategy.mdx) pattern, and it follows 
 
 ```js
 // Builds on the Step 5 code.
-class MorningPricing extends SeatTypePricing { // 30% off before 12:00
-  priceFor(seat, show) {
-    const base = super.priceFor(seat, show);
-    const morning = new Date(show.startsAt).getUTCHours() < 12;
-    return morning ? base - Math.round((base * 30) / 100) : base;
-  }
+// 30% off shows that start before 12:00.
+class MorningPricing extends SeatTypePricing {
+    priceFor(seat, show) {
+        const basePrice = super.priceFor(seat, show);
+
+        const hour = new Date(show.startsAt).getUTCHours();
+        if (hour >= 12) {
+            return basePrice;
+        }
+
+        const discount = Math.round((basePrice * 30) / 100);
+        return basePrice - discount;
+    }
 }
-service.addShow(new Show('SUN-AM', movie, audi1, Date.UTC(2026, 10, 22, 9, 0), new MorningPricing(prices)));
-console.log(rupees(service.holdSeats('SUN-AM', 'erin', ['A1']).amount)); // ₹245.00
+
+const sundayMorning = Date.UTC(2026, 10, 22, 9, 0);
+service.addShow(new Show("SUN-AM", movie, audi1, sundayMorning, new MorningPricing(prices)));
+
+const erin = service.holdSeats("SUN-AM", "erin", ["A1"]);
+console.log(rupees(erin.amount)); // ₹245.00
 ```
 
 **2. Send the ticket by e-mail and SMS.** Let `BookingService` announce "booking confirmed", and let an e-mail

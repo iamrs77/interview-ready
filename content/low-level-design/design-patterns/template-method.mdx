@@ -22,31 +22,56 @@ In the **Template Method** pattern, the **base class** holds the recipe card: on
 
 ## The problem
 
-Two importers read users from a CSV file and from JSON. Each one copies the whole flow:
+Two importers read users from a CSV file and from JSON. Each one copies the whole flow. First the CSV importer:
 
 ```js
 class CsvImporter {
-  run(raw) {
-    const rows = raw.trim().split('\n').slice(1).map((line) => {
-      const [name, email] = line.split(',');
-      return { name, email };
-    });
-    const good = rows.filter((row) => row.name && row.email?.includes('@'));
-    for (const row of good) console.log(`Saved ${row.name}`);
-    return `Imported ${good.length} of ${rows.length} rows`;
-  }
-}
+    run(raw) {
+        // 1. Read: one row per line. Start at 1 to skip the header line.
+        const lines = raw.trim().split("\n");
+        const rows = [];
+        for (let i = 1; i < lines.length; i++) {
+            const parts = lines[i].split(",");
+            rows.push({ name: parts[0], email: parts[1] });
+        }
 
+        // 2. Check: keep rows with a name and an email that has "@".
+        const good = rows.filter((row) => {
+            return row.name && row.email && row.email.includes("@");
+        });
+
+        // 3. Save.
+        for (const row of good) {
+            console.log(`Saved ${row.name}`);
+        }
+
+        return `Imported ${good.length} of ${rows.length} rows`;
+    }
+}
+```
+
+Then the JSON importer, which copies the same flow and gets one step wrong:
+
+```js
 class JsonImporter {
-  run(raw) {
-    const rows = JSON.parse(raw);
-    const good = rows.filter((row) => row.name); // forgot the email check!
-    for (const row of good) console.log(`Saved ${row.name}`);
-    return `Imported ${good.length} of ${rows.length} rows`;
-  }
+    run(raw) {
+        // 1. Read.
+        const rows = JSON.parse(raw);
+
+        // 2. Check: it forgot the email check!
+        const good = rows.filter((row) => row.name);
+
+        // 3. Save.
+        for (const row of good) {
+            console.log(`Saved ${row.name}`);
+        }
+
+        return `Imported ${good.length} of ${rows.length} rows`;
+    }
 }
 
-console.log(new JsonImporter().run('[{"name":"Ravi","email":"oops"}]'));
+const jsonImporter = new JsonImporter();
+console.log(jsonImporter.run('[{"name":"Ravi","email":"oops"}]'));
 // Saved Ravi
 // Imported 1 of 1 rows   <- a bad email got in
 ```
@@ -93,46 +118,95 @@ flowchart TB
   D --> E["afterImport(count): optional hook"]
 ```
 
+The code comes in three small steps. Paste them in order into one file to run it.
+
+**Step 1: the base class.** `run()` is the template method. It calls the other steps in a fixed order.
+
 ```js
-class DataImporter { // abstract
-  constructor() {
-    if (new.target === DataImporter) throw new Error('DataImporter is abstract');
-  }
+// The base class. Don't create it directly: create a CsvImporter or a JsonImporter.
+class DataImporter {
+    // The template method: the same steps, in the same order, for every format.
+    // Subclasses must not override it.
+    run(raw) {
+        const rows = this.read(raw);
+        const good = rows.filter((row) => this.check(row));
+        this.save(good);
+        this.afterImport(good.length);
 
-  // The template method: the same steps, in the same order, for every format.
-  run(raw) {
-    const rows = this.read(raw);
-    const good = rows.filter((row) => this.check(row));
-    this.save(good);
-    this.afterImport(good.length); // a hook: does nothing unless a subclass wants it
-    return `Imported ${good.length} of ${rows.length} rows`;
-  }
+        return `Imported ${good.length} of ${rows.length} rows`;
+    }
 
-  read(raw) { throw new Error('not implemented'); } // each format must fill this in
-  check(row) { return Boolean(row.name) && Boolean(row.email?.includes('@')); } // default
-  save(rows) { for (const row of rows) console.log(`Saved ${row.name}`); } // shared
-  afterImport(count) {} // hook with an empty default
+    // Abstract step: each format must fill this in.
+    read(raw) {
+        throw new Error("not implemented");
+    }
+
+    // Default step: a row needs a name and an email with "@". A subclass may replace it.
+    check(row) {
+        if (!row.name || !row.email) {
+            return false;
+        }
+
+        return row.email.includes("@");
+    }
+
+    // Shared step: the same for every format.
+    save(rows) {
+        for (const row of rows) {
+            console.log(`Saved ${row.name}`);
+        }
+    }
+
+    // Hook: does nothing unless a subclass adds extra work here.
+    afterImport(count) {
+        // Empty on purpose.
+    }
 }
+```
 
+**Step 2: the two importers.** Each one fills in only the steps that are different for its format.
+
+```js
+// CSV: one row per line, like "Asha,asha@mail.com".
 class CsvImporter extends DataImporter {
-  read(raw) {
-    return raw.trim().split('\n').slice(1).map((line) => { // slice(1) skips the header
-      const [name, email] = line.split(',');
-      return { name, email };
-    });
-  }
+    read(raw) {
+        const lines = raw.trim().split("\n");
+        const rows = [];
+
+        // Start at 1 to skip the header line.
+        for (let i = 1; i < lines.length; i++) {
+            const parts = lines[i].split(",");
+            rows.push({ name: parts[0], email: parts[1] });
+        }
+
+        return rows;
+    }
 }
 
+// JSON: the text already holds the rows. It also sends a report at the end.
 class JsonImporter extends DataImporter {
-  read(raw) { return JSON.parse(raw); }
-  afterImport(count) { console.log(`Report sent: ${count} imported`); }
-}
+    read(raw) {
+        return JSON.parse(raw);
+    }
 
-console.log(new CsvImporter().run('name,email\nAsha,asha@mail.com\nBen,no-email'));
+    afterImport(count) {
+        console.log(`Report sent: ${count} imported`);
+    }
+}
+```
+
+**Step 3: use them.**
+
+```js
+const csvImporter = new CsvImporter();
+const csv = "name,email\nAsha,asha@mail.com\nBen,no-email";
+console.log(csvImporter.run(csv));
 // Saved Asha
 // Imported 1 of 2 rows
+
+const jsonImporter = new JsonImporter();
 const json = '[{"name":"Ravi","email":"oops"},{"name":"Mia","email":"mia@mail.com"}]';
-console.log(new JsonImporter().run(json));
+console.log(jsonImporter.run(json));
 // Saved Mia
 // Report sent: 1 imported
 // Imported 1 of 2 rows
@@ -161,16 +235,29 @@ Instead of a subclass, pass the step that changes as a function:
 ```js
 // The same idea with functions: the fixed steps live in one function,
 // and the step that changes is passed in (this is Strategy).
-const hasEmail = (row) => Boolean(row.name) && Boolean(row.email?.includes('@'));
+function hasEmail(row) {
+    if (!row.name || !row.email) {
+        return false;
+    }
 
-function runImport(raw, read, check = hasEmail) {
-  const rows = read(raw);
-  const good = rows.filter(check);
-  for (const row of good) console.log(`Saved ${row.name}`);
-  return `Imported ${good.length} of ${rows.length} rows`;
+    return row.email.includes("@");
 }
 
-console.log(runImport('[{"name":"Mia","email":"mia@mail.com"}]', JSON.parse));
+// If no check is passed in, it uses hasEmail.
+function runImport(raw, read, check = hasEmail) {
+    const rows = read(raw);
+    const good = rows.filter(check);
+
+    for (const row of good) {
+        console.log(`Saved ${row.name}`);
+    }
+
+    return `Imported ${good.length} of ${rows.length} rows`;
+}
+
+// JSON.parse is the read step here.
+const json = '[{"name":"Mia","email":"mia@mail.com"}]';
+console.log(runImport(json, JSON.parse));
 // Saved Mia
 // Imported 1 of 1 rows
 ```

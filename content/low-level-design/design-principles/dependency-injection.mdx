@@ -25,21 +25,31 @@ An `OrderService` that creates its own payment gateway:
 
 ```js
 class StripeGateway {
-  charge(amount) {
-    // Imagine a real network call here that charges a real card.
-    return { ok: true };
-  }
+    charge(amount) {
+        // Imagine a real network call here that charges a real card.
+        return { ok: true };
+    }
 }
 
 class OrderService {
-  #gateway = new StripeGateway(); // builds its own dependency
+    constructor() {
+        // Builds its own dependency.
+        this.gateway = new StripeGateway();
+    }
 
-  placeOrder(amount) {
-    return this.#gateway.charge(amount).ok ? 'Order placed' : 'Payment failed';
-  }
+    placeOrder(amount) {
+        const result = this.gateway.charge(amount);
+
+        if (result.ok) {
+            return "Order placed";
+        }
+
+        return "Payment failed";
+    }
 }
 
-console.log(new OrderService().placeOrder(30)); // Order placed
+const service = new OrderService();
+console.log(service.placeOrder(30)); // Order placed
 ```
 
 What is wrong?
@@ -53,41 +63,74 @@ What is wrong?
 
 The service **asks** for what it needs. A test can now pass in **fakes**: small stand-in objects that behave the way the test wants.
 
+**Step 1: the service.** Its constructor takes a gateway and a mailer:
+
 ```js
-import assert from 'node:assert/strict';
-
 class OrderService {
-  #gateway;
-  #mailer;
-  constructor(gateway, mailer) { // dependencies come in from outside
-    this.#gateway = gateway;
-    this.#mailer = mailer;
-  }
-  placeOrder(email, amount) {
-    if (!this.#gateway.charge(amount).ok) return 'Payment failed';
-    this.#mailer.send(email, `Thanks! You paid ${amount}`);
-    return 'Order placed';
-  }
-}
+    // The dependencies come in from outside, through the constructor.
+    constructor(gateway, mailer) {
+        this.gateway = gateway;
+        this.mailer = mailer;
+    }
 
-// Fakes for tests: no network, no real money.
+    placeOrder(email, amount) {
+        const result = this.gateway.charge(amount);
+
+        if (!result.ok) {
+            return "Payment failed";
+        }
+
+        this.mailer.send(email, `Thanks! You paid ${amount}`);
+        return "Order placed";
+    }
+}
+```
+
+**Step 2: the fakes.** No network, no real money:
+
+```js
+// A fake gateway that says yes or no, whichever the test asks for.
 class FakeGateway {
-  constructor(ok) { this.ok = ok; }
-  charge() { return { ok: this.ok }; }
-}
-class FakeMailer {
-  sent = [];
-  send(to, text) { this.sent.push({ to, text }); }
+    constructor(ok) {
+        this.ok = ok;
+    }
+
+    charge(amount) {
+        return { ok: this.ok };
+    }
 }
 
+// A fake mailer that only writes down the emails it was asked to send.
+class FakeMailer {
+    constructor() {
+        this.sent = [];
+    }
+
+    send(to, text) {
+        this.sent.push({ to: to, text: text });
+    }
+}
+```
+
+**Step 3: the tests.** Each test passes in the fakes it needs:
+
+```js
+// Node's built-in assert. assert.equal(a, b) throws an error if a and b differ.
+import assert from "node:assert/strict";
+
+// Test 1: the payment goes through, so one email is sent.
 const mailer = new FakeMailer();
 const service = new OrderService(new FakeGateway(true), mailer);
-assert.equal(service.placeOrder('asha@example.com', 30), 'Order placed');
+const result = service.placeOrder("asha@example.com", 30);
+assert.equal(result, "Order placed");
 assert.equal(mailer.sent.length, 1);
 
+// Test 2: the payment is declined.
 const declined = new OrderService(new FakeGateway(false), new FakeMailer());
-assert.equal(declined.placeOrder('asha@example.com', 30), 'Payment failed');
-console.log('All tests passed'); // All tests passed
+const declinedResult = declined.placeOrder("asha@example.com", 30);
+assert.equal(declinedResult, "Payment failed");
+
+console.log("All tests passed"); // All tests passed
 ```
 
 `OrderService` doesn't know or care whether it got Stripe or a fake. It just calls `charge()` and `send()`.
@@ -127,8 +170,10 @@ Someone still has to call `new StripeGateway()`. Do it in **one place**, at the 
 ```js
 // main.js (not runnable on its own: StripeGateway and SmtpMailer are not defined here)
 const gateway = new StripeGateway(process.env.STRIPE_KEY);
-const mailer = new SmtpMailer('mail.example.com');
-const orders = new OrderService(gateway, mailer); // wire it all once
+const mailer = new SmtpMailer("mail.example.com");
+
+// Wire it all together, once.
+const orders = new OrderService(gateway, mailer);
 startServer(orders);
 ```
 

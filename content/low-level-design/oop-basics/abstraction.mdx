@@ -18,19 +18,21 @@ The car below has one public method, `start()`. The steps it takes are private m
 
 ```js
 class Car {
-  start() {
-    this.#checkFuel();
-    this.#startEngine();
-    console.log('Car is ready to drive.');
-  }
+    // The simple outside: the one method a driver calls
+    start() {
+        this.#checkFuel();
+        this.#startEngine();
+        console.log("Car is ready to drive.");
+    }
 
-  #checkFuel() { // private method: a hidden step
-    console.log('Fuel is OK');
-  }
+    // The busy inside: private steps that only Car can call
+    #checkFuel() {
+        console.log("Fuel is OK");
+    }
 
-  #startEngine() {
-    console.log('Engine started');
-  }
+    #startEngine() {
+        console.log("Engine started");
+    }
 }
 
 const car = new Car();
@@ -46,38 +48,57 @@ The driver calls one method. Tomorrow you can add a `#checkBattery()` step, and 
 
 Abstraction also works at the design level. A shop's checkout only needs to know that a payment method **can pay**. It doesn't care whether it's a card or a wallet, or how each one works.
 
+**Step 1: The interface.** It says WHAT a payment can do, with no real code:
+
 ```js
-class PaymentMethod { // interface: WHAT a payment can do
-  pay(amount) { throw new Error('not implemented'); }
+class PaymentMethod {
+    pay(amount) {
+        throw new Error("not implemented");
+    }
+}
+```
+
+**Step 2: Two ways to pay.** Each class says HOW it pays, and keeps its own steps private:
+
+```js
+class Card extends PaymentMethod {
+    pay(amount) {
+        this.#askBank(amount);
+        return `Paid ${amount} by card`;
+    }
+
+    // A hidden step
+    #askBank(amount) {
+        // Check the card, talk to the bank...
+    }
 }
 
-class Card extends PaymentMethod { // HOW a card pays
-  pay(amount) {
-    this.#askBank(amount);
-    return `Paid ${amount} by card`;
-  }
+class Wallet extends PaymentMethod {
+    #balance = 100;
 
-  #askBank(amount) { /* check the card, talk to the bank... */ }
+    pay(amount) {
+        this.#balance -= amount;
+        return `Paid ${amount} from wallet, ${this.#balance} left`;
+    }
 }
+```
 
-class Wallet extends PaymentMethod { // HOW a wallet pays
-  #balance = 100;
+**Step 3: The shop.** It only knows "it can pay", so any payment method works:
 
-  pay(amount) {
-    this.#balance -= amount;
-    return `Paid ${amount} from wallet, ${this.#balance} left`;
-  }
-}
-
+```js
 class Shop {
-  checkout(total, payment) {
-    console.log(payment.pay(total)); // only knows "it can pay"
-  }
+    checkout(total, payment) {
+        const message = payment.pay(total);
+        console.log(message);
+    }
 }
 
 const shop = new Shop();
-shop.checkout(40, new Card()); // Paid 40 by card
-shop.checkout(40, new Wallet()); // Paid 40 from wallet, 60 left
+const card = new Card();
+const wallet = new Wallet();
+
+shop.checkout(40, card); // Paid 40 by card
+shop.checkout(40, wallet); // Paid 40 from wallet, 60 left
 ```
 
 `PaymentMethod` is an **interface**: a promise of methods, with no code. JavaScript has no `interface` keyword, so we write a base class whose methods throw. See [Interfaces and Abstract Classes in JavaScript](./interfaces-abstract-classes.mdx).

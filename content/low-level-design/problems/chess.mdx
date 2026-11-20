@@ -194,278 +194,615 @@ flowchart TB
 
 ## Step 5: Code
 
-Run all the parts together as one `.mjs` file.
+The code is split into small parts. Run all of them together, in order, as one `.mjs` file.
 
-**Part 1: enums and small classes.** `Square` turns `"e2"` into numbers and back.
+### Part 1: Enums, squares and players
+
+The enums are plain objects with fixed values.
 
 ```js
-const Color = Object.freeze({ WHITE: 'WHITE', BLACK: 'BLACK' });
-const GameStatus = Object.freeze({ ACTIVE: 'ACTIVE', CHECKMATE: 'CHECKMATE', STALEMATE: 'STALEMATE' });
+const Color = {
+    WHITE: "WHITE",
+    BLACK: "BLACK",
+};
 
-class Square { // file 0-7 is a-h, rank 0-7 is 1-8
-  constructor(file, rank) {
-    this.file = file;
-    this.rank = rank;
-  }
-  static at(name) { // "e2" -> Square
-    if (!/^[a-h][1-8]$/.test(name)) throw new Error(`Bad square: ${name}`);
-    return new Square(name.charCodeAt(0) - 97, Number(name[1]) - 1);
-  }
-  static all() {
-    const squares = [];
-    for (let rank = 0; rank < 8; rank++) for (let file = 0; file < 8; file++) squares.push(new Square(file, rank));
-    return squares;
-  }
-  toString() { return String.fromCharCode(97 + this.file) + (this.rank + 1); }
+const GameStatus = {
+    ACTIVE: "ACTIVE",
+    CHECKMATE: "CHECKMATE",
+    STALEMATE: "STALEMATE",
+};
+```
+
+`Square` turns `"e2"` into two numbers. `static` means you call the method on the class itself: `Square.at("e2")`.
+
+```js
+// One spot on the board.
+// file 0-7 means the columns a-h. rank 0-7 means the rows 1-8.
+class Square {
+    constructor(file, rank) {
+        this.file = file;
+        this.rank = rank;
+    }
+
+    // Turn a name like "e2" into a Square.
+    static at(name) {
+        // A letter from a to h, then a digit from 1 to 8.
+        if (!/^[a-h][1-8]$/.test(name)) {
+            throw new Error(`Bad square: ${name}`);
+        }
+
+        // "a" becomes 0, "b" becomes 1, and so on. 97 is the code of "a".
+        const file = name.charCodeAt(0) - 97;
+        // "1" becomes 0, "2" becomes 1, and so on.
+        const rank = Number(name[1]) - 1;
+        return new Square(file, rank);
+    }
+```
+
+The rest of `Square` lists all 64 squares and turns a square back into its name. Then a small `Player` class.
+
+```js
+    // All 64 squares, row by row.
+    static all() {
+        const squares = [];
+        for (let rank = 0; rank < 8; rank++) {
+            for (let file = 0; file < 8; file++) {
+                squares.push(new Square(file, rank));
+            }
+        }
+        return squares;
+    }
+
+    // Turn the square back into a name like "e2".
+    // JavaScript calls this when a square is put in a string, like `${square}`.
+    toString() {
+        const letter = String.fromCharCode(97 + this.file);
+        const number = this.rank + 1;
+        return letter + number;
+    }
 }
 
 class Player {
-  constructor(name, color) {
-    this.name = name;
-    this.color = color;
-  }
+    constructor(name, color) {
+        this.name = name;
+        this.color = color;
+    }
 }
 ```
 
-**Part 2: the pieces.** One abstract class and six small ones. Each `canMove` is only the piece's own rule.
+### Part 2: The pieces
+
+One abstract class and six small ones. Each `canMove` is only the piece's own rule.
 
 ```js
+// The base for all pieces. "Abstract": you only make the six real pieces.
 class Piece {
-  constructor(color) {
-    if (new.target === Piece) throw new Error('Piece is abstract');
-    this.color = color;
-  }
-  get letter() { throw new Error('not implemented'); } // "K", "Q", ... and "" for a pawn
-  // The piece's own movement rule. The Game checks turns, own pieces and check.
-  canMove(board, from, to) { throw new Error('not implemented'); }
+    constructor(color) {
+        if (this.constructor === Piece) {
+            throw new Error("Piece is abstract");
+        }
+        this.color = color;
+    }
+
+    // The letter used in move names: "K", "Q", ... and "" for a pawn.
+    getLetter() {
+        throw new Error("not implemented");
+    }
+
+    // The piece's own movement rule.
+    // The Game checks turns, own pieces and check.
+    canMove(board, from, to) {
+        throw new Error("not implemented");
+    }
 }
 
-const steps = (from, to) => ({ df: to.file - from.file, dr: to.rank - from.rank });
+// How far a move goes.
+// files: steps left (-) or right (+). ranks: steps down (-) or up (+).
+function getDistance(from, to) {
+    return {
+        files: to.file - from.file,
+        ranks: to.rank - from.rank,
+    };
+}
+```
 
+The king and the knight only care about the shape of the move. The knight jumps, so pieces in the way don't matter.
+
+```js
 class King extends Piece {
-  get letter() { return 'K'; }
-  canMove(board, from, to) {
-    const { df, dr } = steps(from, to);
-    return Math.max(Math.abs(df), Math.abs(dr)) === 1; // one square, any way
-  }
-}
+    getLetter() {
+        return "K";
+    }
 
-class Queen extends Piece {
-  get letter() { return 'Q'; }
-  canMove(board, from, to) {
-    const { df, dr } = steps(from, to);
-    const line = df === 0 || dr === 0 || Math.abs(df) === Math.abs(dr);
-    return line && board.isPathClear(from, to);
-  }
-}
-
-class Rook extends Piece {
-  get letter() { return 'R'; }
-  canMove(board, from, to) {
-    const { df, dr } = steps(from, to);
-    return (df === 0 || dr === 0) && board.isPathClear(from, to);
-  }
-}
-
-class Bishop extends Piece {
-  get letter() { return 'B'; }
-  canMove(board, from, to) {
-    const { df, dr } = steps(from, to);
-    return Math.abs(df) === Math.abs(dr) && board.isPathClear(from, to);
-  }
+    // One square in any direction.
+    canMove(board, from, to) {
+        const distance = getDistance(from, to);
+        const filesMoved = Math.abs(distance.files);
+        const ranksMoved = Math.abs(distance.ranks);
+        return Math.max(filesMoved, ranksMoved) === 1;
+    }
 }
 
 class Knight extends Piece {
-  get letter() { return 'N'; }
-  canMove(board, from, to) {
-    const { df, dr } = steps(from, to);
-    return Math.abs(df * dr) === 2; // an L: 1 x 2 or 2 x 1, and it jumps
-  }
-}
-
-class Pawn extends Piece {
-  get letter() { return ''; }
-  canMove(board, from, to) {
-    const { df, dr } = steps(from, to);
-    const dir = this.color === Color.WHITE ? 1 : -1; // white goes up, black goes down
-    const startRank = this.color === Color.WHITE ? 1 : 6;
-    const target = board.pieceAt(to);
-    if (df === 0 && dr === dir) return !target; // one step forward
-    if (df === 0 && dr === 2 * dir && from.rank === startRank) { // two steps from the start
-      return !target && !board.pieceAt(new Square(from.file, from.rank + dir));
+    getLetter() {
+        return "N";
     }
-    if (Math.abs(df) === 1 && dr === dir) return target !== null && target.color !== this.color; // capture
-    return false;
-  }
+
+    // An L shape: 1 by 2, or 2 by 1.
+    canMove(board, from, to) {
+        const distance = getDistance(from, to);
+        const filesMoved = Math.abs(distance.files);
+        const ranksMoved = Math.abs(distance.ranks);
+        return filesMoved * ranksMoved === 2;
+    }
 }
 ```
 
-**Part 3: the board, the move and the game.** `Board` answers "is the path clear?" and "is this king in check?".
-`Move` can undo itself. `Game` holds the shared rules.
+The rook and the bishop slide, so the path must be clear. The shape is checked first, because `isPathClear` only works on straight lines and diagonals.
 
 ```js
+class Rook extends Piece {
+    getLetter() {
+        return "R";
+    }
+
+    // A straight line, with nothing in the way.
+    canMove(board, from, to) {
+        const distance = getDistance(from, to);
+        const straight = distance.files === 0 || distance.ranks === 0;
+        if (!straight) {
+            return false;
+        }
+        return board.isPathClear(from, to);
+    }
+}
+
+class Bishop extends Piece {
+    getLetter() {
+        return "B";
+    }
+
+    // A diagonal, with nothing in the way.
+    canMove(board, from, to) {
+        const distance = getDistance(from, to);
+        const diagonal = Math.abs(distance.files) === Math.abs(distance.ranks);
+        if (!diagonal) {
+            return false;
+        }
+        return board.isPathClear(from, to);
+    }
+}
+```
+
+The queen moves like a rook or a bishop:
+
+```js
+class Queen extends Piece {
+    getLetter() {
+        return "Q";
+    }
+
+    // A straight line or a diagonal, with nothing in the way.
+    canMove(board, from, to) {
+        const distance = getDistance(from, to);
+        const straight = distance.files === 0 || distance.ranks === 0;
+        const diagonal = Math.abs(distance.files) === Math.abs(distance.ranks);
+        if (!straight && !diagonal) {
+            return false;
+        }
+        return board.isPathClear(from, to);
+    }
+}
+```
+
+The pawn has the most rules. It moves forward, but captures diagonally.
+
+```js
+class Pawn extends Piece {
+    getLetter() {
+        return "";
+    }
+
+    canMove(board, from, to) {
+        const distance = getDistance(from, to);
+        const target = board.pieceAt(to);
+
+        // White moves up the board (+1) and starts on rank 1.
+        // Black moves down (-1) and starts on rank 6.
+        let forward = -1;
+        let startRank = 6;
+        if (this.color === Color.WHITE) {
+            forward = 1;
+            startRank = 1;
+        }
+
+        // One step forward, onto an empty square.
+        if (distance.files === 0 && distance.ranks === forward) {
+            return target === null;
+        }
+
+        // Two steps forward from the start. Both squares must be empty.
+        if (distance.files === 0 && distance.ranks === 2 * forward && from.rank === startRank) {
+            const middle = new Square(from.file, from.rank + forward);
+            return target === null && board.pieceAt(middle) === null;
+        }
+
+        // A capture: one step diagonally forward, onto an enemy piece.
+        if (Math.abs(distance.files) === 1 && distance.ranks === forward) {
+            return target !== null && target.color !== this.color;
+        }
+
+        return false;
+    }
+}
+```
+
+### Part 3: The board
+
+`Board` holds an 8×8 grid. It answers "is the path clear?" and "is this king in check?". First, the grid itself:
+
+```js
+// The 8×8 grid of pieces. Each cell is a Piece or null.
 class Board {
-  #grid = Array.from({ length: 8 }, () => Array(8).fill(null)); // [rank][file]
-
-  static standard() { // a factory method: the starting position
-    const board = new Board();
-    const back = [Rook, Knight, Bishop, Queen, King, Bishop, Knight, Rook];
-    for (let file = 0; file < 8; file++) {
-      board.place(new Square(file, 0), new back[file](Color.WHITE));
-      board.place(new Square(file, 1), new Pawn(Color.WHITE));
-      board.place(new Square(file, 6), new Pawn(Color.BLACK));
-      board.place(new Square(file, 7), new back[file](Color.BLACK));
+    constructor() {
+        // grid[rank][file]: 8 rows of 8 empty cells.
+        this.grid = [];
+        for (let rank = 0; rank < 8; rank++) {
+            const row = new Array(8).fill(null);
+            this.grid.push(row);
+        }
     }
-    return board;
-  }
-  pieceAt(sq) { return this.#grid[sq.rank][sq.file]; }
-  place(sq, piece) { this.#grid[sq.rank][sq.file] = piece; }
 
-  isPathClear(from, to) { // the squares between from and to are empty
-    const df = Math.sign(to.file - from.file);
-    const dr = Math.sign(to.rank - from.rank);
-    let file = from.file + df;
-    let rank = from.rank + dr;
-    while (file !== to.file || rank !== to.rank) {
-      if (this.#grid[rank][file]) return false;
-      file += df;
-      rank += dr;
+    pieceAt(square) {
+        return this.grid[square.rank][square.file];
     }
-    return true;
-  }
 
-  isInCheck(color) { // can any enemy piece reach this king?
-    const squares = Square.all();
-    const kingSq = squares.find((sq) => {
-      const p = this.pieceAt(sq);
-      return p instanceof King && p.color === color;
-    });
-    return squares.some((sq) => {
-      const p = this.pieceAt(sq);
-      return p !== null && p.color !== color && p.canMove(this, sq, kingSq);
-    });
-  }
+    place(square, piece) {
+        this.grid[square.rank][square.file] = piece;
+    }
+```
+
+`standard()` is a factory method. It builds the starting position in one place.
+
+```js
+    static standard() {
+        const board = new Board();
+
+        // The back row, from file a to file h.
+        const backRow = [Rook, Knight, Bishop, Queen, King, Bishop, Knight, Rook];
+
+        for (let file = 0; file < 8; file++) {
+            // backRow[file] is a class, so "new PieceClass(...)" makes that kind of piece.
+            const PieceClass = backRow[file];
+
+            board.place(new Square(file, 0), new PieceClass(Color.WHITE));
+            board.place(new Square(file, 1), new Pawn(Color.WHITE));
+            board.place(new Square(file, 6), new Pawn(Color.BLACK));
+            board.place(new Square(file, 7), new PieceClass(Color.BLACK));
+        }
+
+        return board;
+    }
+```
+
+`isPathClear` walks one square at a time from `from` towards `to`. It stops just before `to`.
+
+```js
+    // True if every square between "from" and "to" is empty.
+    isPathClear(from, to) {
+        // The direction of one step: -1, 0 or +1 for each.
+        const fileStep = Math.sign(to.file - from.file);
+        const rankStep = Math.sign(to.rank - from.rank);
+
+        // Start one step after "from".
+        let file = from.file + fileStep;
+        let rank = from.rank + rankStep;
+
+        while (file !== to.file || rank !== to.rank) {
+            if (this.grid[rank][file] !== null) {
+                return false;
+            }
+            file += fileStep;
+            rank += rankStep;
+        }
+
+        return true;
+    }
+```
+
+`isInCheck` finds the king, then asks every enemy piece "can you move to the king's square?". It reuses `canMove`, so there is no extra rule per piece.
+
+```js
+    isInCheck(color) {
+        const squares = Square.all();
+
+        // First, find this color's king. "instanceof King" means "is it a King?".
+        let kingSquare;
+        for (const square of squares) {
+            const piece = this.pieceAt(square);
+            if (piece instanceof King && piece.color === color) {
+                kingSquare = square;
+                break;
+            }
+        }
+
+        // Then ask every enemy piece if it can reach the king.
+        for (const square of squares) {
+            const piece = this.pieceAt(square);
+            const isEnemy = piece !== null && piece.color !== color;
+            if (isEnemy && piece.canMove(this, square, kingSquare)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }
+```
 
-class Move { // a Command: it can do itself and undo itself
-  constructor(board, from, to) {
-    this.board = board;
-    this.from = from;
-    this.to = to;
-    this.piece = board.pieceAt(from);
-    this.captured = board.pieceAt(to); // null if the square was empty
-  }
-  execute() {
-    this.board.place(this.to, this.piece);
-    this.board.place(this.from, null);
-  }
-  undo() {
-    this.board.place(this.from, this.piece);
-    this.board.place(this.to, this.captured);
-  }
-  toString() { return `${this.piece.letter}${this.from}${this.captured ? 'x' : '-'}${this.to}`; }
+### Part 4: The move
+
+`Move` is a [Command](../design-patterns/command.mdx). It remembers the captured piece, so it can undo itself.
+
+```js
+class Move {
+    constructor(board, from, to) {
+        this.board = board;
+        this.from = from;
+        this.to = to;
+        this.piece = board.pieceAt(from);
+
+        // The piece that was on "to", or null if the square was empty.
+        this.captured = board.pieceAt(to);
+    }
+
+    execute() {
+        this.board.place(this.to, this.piece);
+        this.board.place(this.from, null);
+    }
+
+    // Put the piece back, and put back any captured piece.
+    undo() {
+        this.board.place(this.from, this.piece);
+        this.board.place(this.to, this.captured);
+    }
+
+    // The move as text, like "Qh5xf7". "x" means a capture.
+    toString() {
+        let separator = "-";
+        if (this.captured !== null) {
+            separator = "x";
+        }
+        return `${this.piece.getLetter()}${this.from}${separator}${this.to}`;
+    }
 }
+```
 
+### Part 5: The game
+
+`Game` holds the turns, the history and the rules shared by every piece.
+
+```js
 class Game {
-  #history = []; // executed moves, for undo
-  #turn = 0; // index into players
+    // If no board is given, the game starts from the normal position.
+    constructor(white, black, board = Board.standard()) {
+        this.players = [white, black];
+        this.board = board;
+        this.status = GameStatus.ACTIVE;
 
-  constructor(white, black, board = Board.standard()) {
-    this.players = [white, black];
-    this.board = board;
-    this.status = GameStatus.ACTIVE;
-  }
-  get current() { return this.players[this.#turn]; }
-  get history() { return this.#history.map(String); }
+        // The moves made so far, so we can undo them.
+        this.history = [];
 
-  move(fromName, toName) {
-    if (this.status !== GameStatus.ACTIVE) throw new Error(`Game over: ${this.status}`);
-    const from = Square.at(fromName);
-    const to = Square.at(toName);
-    const piece = this.board.pieceAt(from);
-    if (!piece) throw new Error(`No piece on ${from}`);
-    if (piece.color !== this.current.color) throw new Error(`It is ${this.current.name}'s turn`);
-    if (this.board.pieceAt(to)?.color === piece.color) throw new Error('You cannot take your own piece');
-    if (!piece.canMove(this.board, from, to)) {
-      throw new Error(`${piece.constructor.name} can't move from ${from} to ${to}`);
+        // Whose turn it is: 0 is white, 1 is black.
+        this.turn = 0;
     }
-    const move = new Move(this.board, from, to);
-    move.execute();
-    if (this.board.isInCheck(piece.color)) {
-      move.undo(); // try it, and take it back if it leaves our king in check
-      throw new Error('That move leaves your king in check');
+
+    getCurrentPlayer() {
+        return this.players[this.turn];
     }
-    this.#history.push(move);
-    this.#turn = 1 - this.#turn;
-    this.#updateStatus();
-    return move;
-  }
 
-  undo() {
-    const move = this.#history.pop();
-    if (!move) throw new Error('Nothing to undo');
-    move.undo();
-    this.#turn = 1 - this.#turn;
-    this.status = GameStatus.ACTIVE;
-  }
+    // The moves as text, like ["e2-e4", "e7-e5"].
+    getMoveNames() {
+        const names = [];
+        for (const move of this.history) {
+            names.push(move.toString());
+        }
+        return names;
+    }
+```
 
-  #updateStatus() { // the player to move: in check with no way out = checkmate
-    const color = this.current.color;
-    if (this.#hasLegalMove(color)) return;
-    this.status = this.board.isInCheck(color) ? GameStatus.CHECKMATE : GameStatus.STALEMATE;
-  }
+`move` checks the rules, then tries the move. If the move leaves your own king in check, it takes it back.
 
-  #hasLegalMove(color) { // try every move of every piece, and undo it
-    const squares = Square.all();
-    for (const from of squares) {
-      const piece = this.board.pieceAt(from);
-      if (!piece || piece.color !== color) continue;
-      for (const to of squares) {
-        if (this.board.pieceAt(to)?.color === color || !piece.canMove(this.board, from, to)) continue;
+```js
+    move(fromName, toName) {
+        if (this.status !== GameStatus.ACTIVE) {
+            throw new Error(`Game over: ${this.status}`);
+        }
+
+        const from = Square.at(fromName);
+        const to = Square.at(toName);
+        const piece = this.board.pieceAt(from);
+        this.checkRules(piece, from, to);
+
+        // Try the move, and take it back if it leaves our king in check.
         const move = new Move(this.board, from, to);
         move.execute();
-        const safe = !this.board.isInCheck(color);
-        move.undo();
-        if (safe) return true;
-      }
+        if (this.board.isInCheck(piece.color)) {
+            move.undo();
+            throw new Error("That move leaves your king in check");
+        }
+
+        this.history.push(move);
+
+        // Switch the turn: 0 becomes 1, and 1 becomes 0.
+        this.turn = 1 - this.turn;
+        this.updateStatus();
+        return move;
     }
-    return false;
-  }
+```
+
+`checkRules` holds the rules before a move. Only the last one depends on the piece.
+
+```js
+    checkRules(piece, from, to) {
+        if (!piece) {
+            throw new Error(`No piece on ${from}`);
+        }
+
+        const player = this.getCurrentPlayer();
+        if (piece.color !== player.color) {
+            throw new Error(`It is ${player.name}'s turn`);
+        }
+
+        const target = this.board.pieceAt(to);
+        if (target !== null && target.color === piece.color) {
+            throw new Error("You cannot take your own piece");
+        }
+
+        // The piece's own rule. "constructor.name" is the class name, like "Rook".
+        if (!piece.canMove(this.board, from, to)) {
+            throw new Error(`${piece.constructor.name} can't move from ${from} to ${to}`);
+        }
+    }
+```
+
+`undo` takes back the last move. `updateStatus` runs after every move and looks for checkmate or stalemate.
+
+```js
+    undo() {
+        const move = this.history.pop();
+        if (!move) {
+            throw new Error("Nothing to undo");
+        }
+
+        move.undo();
+        this.turn = 1 - this.turn;
+        this.status = GameStatus.ACTIVE;
+    }
+
+    updateStatus() {
+        const color = this.getCurrentPlayer().color;
+        if (this.hasLegalMove(color)) {
+            return;
+        }
+
+        // No legal move. In check: checkmate. Not in check: stalemate (a draw).
+        if (this.board.isInCheck(color)) {
+            this.status = GameStatus.CHECKMATE;
+        } else {
+            this.status = GameStatus.STALEMATE;
+        }
+    }
+```
+
+`hasLegalMove` tries every move of every piece of one color. It stops at the first move that keeps the king safe.
+
+```js
+    hasLegalMove(color) {
+        const squares = Square.all();
+
+        for (const from of squares) {
+            // Skip empty squares and the other player's pieces.
+            const piece = this.board.pieceAt(from);
+            const isOurs = piece !== null && piece.color === color;
+            if (!isOurs) {
+                continue;
+            }
+
+            for (const to of squares) {
+                if (this.isSafeMove(piece, from, to)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+```
+
+Last, `isSafeMove` checks one move: do it, look for check, then undo it.
+
+```js
+    isSafeMove(piece, from, to) {
+        const target = this.board.pieceAt(to);
+        if (target !== null && target.color === piece.color) {
+            return false;
+        }
+        if (!piece.canMove(this.board, from, to)) {
+            return false;
+        }
+
+        const move = new Move(this.board, from, to);
+        move.execute();
+        const kingIsSafe = !this.board.isInCheck(piece.color);
+        move.undo();
+        return kingIsSafe;
+    }
 }
 ```
 
-**Part 4: try it.** Some moves that break the rules, then "Scholar's mate", a famous four-move checkmate, then undo.
+### Part 6: Try it
+
+Some moves that break the rules, then "Scholar's mate", a famous four-move checkmate, then undo. `tryMove` prints the error message when a move is refused.
 
 ```js
-const game = new Game(new Player('Asha', Color.WHITE), new Player('Ben', Color.BLACK));
-const tryMove = (from, to) => {
-  try {
-    game.move(from, to);
-  } catch (e) {
-    console.log(e.message);
-  }
-};
+const asha = new Player("Asha", Color.WHITE);
+const ben = new Player("Ben", Color.BLACK);
+const game = new Game(asha, ben);
 
-// 1. Moves the rules don't allow. (The rook is blocked by its own pawn on a2.)
-tryMove('a1', 'a3'); // Rook can't move from a1 to a3
-tryMove('e7', 'e5'); // It is Asha's turn
-tryMove('g1', 'g3'); // Knight can't move from g1 to g3
+function tryMove(from, to) {
+    try {
+        game.move(from, to);
+    } catch (error) {
+        console.log(error.message);
+    }
+}
+```
 
-// 2. Scholar's mate. Moves that work print nothing.
-tryMove('e2', 'e4');
-tryMove('e7', 'e5');
-tryMove('d1', 'h5');
-tryMove('f7', 'f6'); // That move leaves your king in check
-tryMove('b8', 'c6'); // (a knight jumps over pieces)
-tryMove('f1', 'c4');
-tryMove('g8', 'f6');
-tryMove('h5', 'f7'); // (the queen takes the pawn on f7)
-console.log(game.history.join(' ')); // e2-e4 e7-e5 Qd1-h5 Nb8-c6 Bf1-c4 Ng8-f6 Qh5xf7
+First, moves the rules don't allow:
+
+```js
+// The rook is blocked by its own pawn on a2.
+tryMove("a1", "a3"); // Rook can't move from a1 to a3
+
+// White moves first.
+tryMove("e7", "e5"); // It is Asha's turn
+
+// Not an L shape.
+tryMove("g1", "g3"); // Knight can't move from g1 to g3
+```
+
+Then Scholar's mate. Moves that work print nothing.
+
+```js
+tryMove("e2", "e4");
+tryMove("e7", "e5");
+tryMove("d1", "h5");
+
+// The pawn on f7 is pinned (see below).
+tryMove("f7", "f6"); // That move leaves your king in check
+
+// A knight jumps over pieces.
+tryMove("b8", "c6");
+tryMove("f1", "c4");
+tryMove("g8", "f6");
+
+// The queen takes the pawn on f7.
+tryMove("h5", "f7");
+
+const moveNames = game.getMoveNames();
+console.log(moveNames.join(" ")); // e2-e4 e7-e5 Qd1-h5 Nb8-c6 Bf1-c4 Ng8-f6 Qh5xf7
 console.log(game.status, game.board.isInCheck(Color.BLACK)); // CHECKMATE true
+```
 
-// 3. Undo the last move: the queen goes back, the pawn comes back.
+Last, undo the final move. The queen goes back, and the pawn comes back.
+
+```js
 game.undo();
-console.log(game.status, game.current.name, game.board.pieceAt(Square.at('f7')).constructor.name); // ACTIVE Asha Pawn
+
+const player = game.getCurrentPlayer();
+const pieceOnF7 = game.board.pieceAt(Square.at("f7"));
+console.log(game.status, player.name, pieceOnF7.constructor.name); // ACTIVE Asha Pawn
 ```
 
 - **Why is `f7` to `f6` refused?** The pawn on f7 is the only thing between the queen on h5 and the black king on
@@ -513,22 +850,46 @@ factory method that picks which `Move` class to create.
 
 ```js
 // Builds on the Step 5 code.
-class PromotionMove extends Move { // the pawn becomes a queen
-  #queen = null;
-  execute() {
-    super.execute();
-    this.#queen ??= new Queen(this.piece.color);
-    this.board.place(this.to, this.#queen);
-  }
-  // undo() from Move already puts the pawn back on "from", and any captured piece back on "to".
+// A move where the pawn becomes a queen.
+class PromotionMove extends Move {
+    constructor(board, from, to) {
+        super(board, from, to);
+        this.queen = null;
+    }
+
+    execute() {
+        // First, a normal move: the pawn goes to "to".
+        super.execute();
+
+        // Make the queen only once. If the move is done again
+        // after an undo, the same queen comes back.
+        if (this.queen === null) {
+            this.queen = new Queen(this.piece.color);
+        }
+
+        // Swap the pawn for the queen.
+        this.board.place(this.to, this.queen);
+    }
+
+    // undo() comes from Move. It already puts the pawn back on "from",
+    // and any captured piece back on "to".
 }
+```
+
+Try it on an empty board with one white pawn:
+
+```js
 const board = new Board();
-board.place(Square.at('a7'), new Pawn(Color.WHITE));
-const promo = new PromotionMove(board, Square.at('a7'), Square.at('a8'));
-promo.execute();
-console.log(board.pieceAt(Square.at('a8')).constructor.name); // Queen
-promo.undo();
-console.log(board.pieceAt(Square.at('a7')).constructor.name, board.pieceAt(Square.at('a8'))); // Pawn null
+board.place(Square.at("a7"), new Pawn(Color.WHITE));
+
+const promotion = new PromotionMove(board, Square.at("a7"), Square.at("a8"));
+promotion.execute();
+console.log(board.pieceAt(Square.at("a8")).constructor.name); // Queen
+
+promotion.undo();
+const onA7 = board.pieceAt(Square.at("a7"));
+const onA8 = board.pieceAt(Square.at("a8"));
+console.log(onA7.constructor.name, onA8); // Pawn null
 ```
 
 **2. Castling.** The king moves two squares and the rook jumps over it. Add a `CastleMove` command that moves both

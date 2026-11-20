@@ -52,8 +52,11 @@ sequenceDiagram
 
 ```js
 async function updatePrice(id, price) {
-  await db.query('UPDATE products SET price = $1 WHERE id = $2', [price, id]);
-  await redis.del(`product:${id}`);
+    // 1. Update the database first
+    await db.query("UPDATE products SET price = $1 WHERE id = $2", [price, id]);
+
+    // 2. Then delete the cached copy. The next read loads the new price.
+    await redis.del(`product:${id}`);
 }
 ```
 
@@ -114,8 +117,12 @@ Ask three questions:
 **Add a little randomness (jitter).** If you load 10,000 keys at the same moment, all with a TTL of 600 seconds, they will all expire at the same moment too, and the database gets 10,000 misses at once. Add a few random seconds to each TTL to spread them out:
 
 ```js
-const ttl = 600 + Math.floor(Math.random() * 60); // 10 to 11 minutes
-await redis.set(key, value, 'EX', ttl);
+// 600 seconds (10 minutes), plus 0 to 59 random seconds
+const extraSeconds = Math.floor(Math.random() * 60);
+const ttl = 600 + extraSeconds;
+
+// "EX" means the next number is the TTL, in seconds
+await redis.set(key, value, "EX", ttl);
 ```
 
 More on this in [Cache Problems](./cache-problems.mdx).

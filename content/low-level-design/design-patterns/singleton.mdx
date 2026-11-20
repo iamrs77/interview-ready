@@ -19,17 +19,24 @@ Some things should exist only once: the app's settings, the logger, the database
 
 ```js
 class Config {
-  constructor() {
-    console.log('Reading config file...');
-    this.settings = { apiUrl: 'https://api.shop.com', retries: 3 };
-  }
+    constructor() {
+        // Pretend this reads a file from disk, which is slow.
+        console.log("Reading config file...");
+
+        this.settings = {
+            apiUrl: "https://api.shop.com",
+            retries: 3,
+        };
+    }
 }
 
-const configInOrders = new Config();   // Reading config file...
+const configInOrders = new Config(); // Reading config file...
 const configInPayments = new Config(); // Reading config file...
 
 configInOrders.settings.retries = 5;
-console.log(configInPayments.settings.retries); // 3  (the two copies disagree)
+
+// The two copies disagree.
+console.log(configInPayments.settings.retries); // 3
 ```
 
 The file is read twice, and a change in one place is not seen in the other.
@@ -57,42 +64,44 @@ Underlined members are **static**: they belong to the class itself, not to each 
 
 ```js
 class Logger {
-  static #instance = null;
-  static #creating = false;
-  #lines = [];
+    // The one shared logger. "static" means it is kept on the class itself.
+    static instance = null;
 
-  constructor() {
-    if (!Logger.#creating) throw new Error('Use Logger.getInstance()');
-  }
-
-  static getInstance() {
-    if (!Logger.#instance) {
-      Logger.#creating = true;
-      Logger.#instance = new Logger();
-      Logger.#creating = false;
+    constructor() {
+        this.lines = [];
     }
-    return Logger.#instance;
-  }
 
-  log(message) {
-    this.#lines.push(message);
-    console.log(`[LOG] ${message}`);
-  }
+    static getInstance() {
+        // First call: create the logger and save it.
+        if (Logger.instance === null) {
+            Logger.instance = new Logger();
+        }
 
-  get count() { return this.#lines.length; }
+        // Every call: return the saved logger.
+        return Logger.instance;
+    }
+
+    log(message) {
+        this.lines.push(message);
+        console.log(`[LOG] ${message}`);
+    }
 }
-
-const a = Logger.getInstance();
-const b = Logger.getInstance();
-a.log('Order placed'); // [LOG] Order placed
-b.log('Payment done'); // [LOG] Payment done
-console.log(a === b);  // true
-console.log(b.count);  // 2
-
-try { new Logger(); } catch (e) { console.log(e.message); } // Use Logger.getInstance()
 ```
 
-**Java in one line:** Java makes the constructor `private`, so only `getInstance()` can call `new`. JavaScript has no private constructors, so the `#creating` flag blocks `new Logger()` from outside.
+Every caller asks `getInstance()`, and every caller gets the same logger:
+
+```js
+const logger1 = Logger.getInstance();
+const logger2 = Logger.getInstance();
+
+logger1.log("Order placed"); // [LOG] Order placed
+logger2.log("Payment done"); // [LOG] Payment done
+
+console.log(logger1 === logger2); // true
+console.log(logger2.lines); // [ 'Order placed', 'Payment done' ]
+```
+
+**Java in one line:** Java makes the constructor `private`, so only `getInstance()` can call `new`. JavaScript has no private constructors, so here we simply agree to always use `getInstance()`.
 
 ### The JavaScript way: a module
 
@@ -101,34 +110,39 @@ In JavaScript you rarely need that class trick. A **module** (a file with `expor
 ```js
 // logger.js
 class Logger {
-  #lines = [];
-  log(message) {
-    this.#lines.push(message);
-    console.log(`[LOG] ${message}`);
-  }
-  get count() { return this.#lines.length; }
+    constructor() {
+        this.lines = [];
+    }
+
+    log(message) {
+        this.lines.push(message);
+        console.log(`[LOG] ${message}`);
+    }
 }
 
-export const logger = new Logger(); // the one shared logger
+// The one shared logger. This line runs only once.
+export const logger = new Logger();
 ```
 
 ```js
 // orders.js
-import { logger } from './logger.js';
+import { logger } from "./logger.js";
 
 export function placeOrder(id) {
-  logger.log(`Order ${id} placed`);
+    logger.log(`Order ${id} placed`);
 }
 ```
 
 ```js
 // app.js
-import { logger } from './logger.js';
-import { placeOrder } from './orders.js';
+import { logger } from "./logger.js";
+import { placeOrder } from "./orders.js";
 
-placeOrder(42);               // [LOG] Order 42 placed
-logger.log('Server started'); // [LOG] Server started
-console.log(logger.count);    // 2  (both files used the same logger)
+placeOrder(42); // [LOG] Order 42 placed
+logger.log("Server started"); // [LOG] Server started
+
+// Both files used the same logger.
+console.log(logger.lines); // [ 'Order 42 placed', 'Server started' ]
 ```
 
 ## When to use it
@@ -158,14 +172,27 @@ Singleton is the easiest pattern to learn, so people use it too often.
 
 ```js
 class OrderService {
-  constructor(logger) {
-    this.logger = logger; // passed in, not grabbed
-  }
-  place(id) { this.logger.log(`Order ${id} placed`); }
+    constructor(logger) {
+        // The logger is passed in, not grabbed with getInstance().
+        this.logger = logger;
+    }
+
+    place(id) {
+        this.logger.log(`Order ${id} placed`);
+    }
 }
 
-const fakeLogger = { lines: [], log(msg) { this.lines.push(msg); } };
-new OrderService(fakeLogger).place(7);
+// In a test, pass in a fake logger that only remembers the messages.
+const fakeLogger = {
+    lines: [],
+    log(message) {
+        this.lines.push(message);
+    },
+};
+
+const orderService = new OrderService(fakeLogger);
+orderService.place(7);
+
 console.log(fakeLogger.lines); // [ 'Order 7 placed' ]
 ```
 
@@ -177,16 +204,28 @@ console.log(fakeLogger.lines); // [ 'Order 7 placed' ]
   let dbPromise = null;
 
   function getDb() {
-    dbPromise ??= connect(); // stored at once, before any await
-    return dbPromise;
+      // Save the promise at once, before any await.
+      // A second caller then gets the same promise, not a new connection.
+      if (dbPromise === null) {
+          dbPromise = connect();
+      }
+
+      return dbPromise;
   }
 
   async function connect() {
-    console.log('Connecting...'); // printed only once
-    return { name: 'main-db' };
+      // Pretend this is a slow connection to the database.
+      console.log("Connecting...");
+      return { name: "main-db" };
   }
 
-  const [db1, db2] = await Promise.all([getDb(), getDb()]);
+  // Two callers ask for the database at the same time.
+  const promise1 = getDb(); // Connecting...
+  const promise2 = getDb(); // (prints nothing: it gets the same promise)
+
+  const db1 = await promise1;
+  const db2 = await promise2;
+
   console.log(db1 === db2); // true
   ```
 

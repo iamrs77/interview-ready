@@ -59,18 +59,25 @@ flowchart TB
 
 Most database libraries have a pool built in. In Node.js, with the `pg` library:
 
-```ts
-import { Pool } from 'pg';
+```js
+import { Pool } from "pg";
 
 const pool = new Pool({
-  host: 'db.internal',
-  max: 10,                        // at most 10 open connections
-  idleTimeoutMillis: 30_000,      // close a connection unused for 30 seconds
-  connectionTimeoutMillis: 2_000, // wait at most 2 seconds for a free one
+    host: "db.internal",
+
+    // At most 10 open connections
+    max: 10,
+
+    // Close a connection that sits unused for 30 seconds
+    idleTimeoutMillis: 30000,
+
+    // Wait at most 2 seconds for a free connection
+    connectionTimeoutMillis: 2000,
 });
 
-// Borrows a connection, runs the query, and gives it back
-const { rows } = await pool.query('SELECT * FROM orders WHERE user_id = $1', [7]);
+// pool.query borrows a connection, runs the query, and gives the connection back
+const result = await pool.query("SELECT * FROM orders WHERE user_id = $1", [7]);
+const orders = result.rows;
 ```
 
 **Always give connections back.** If code borrows a connection and forgets to return it (for example, on an error path), the pool slowly runs dry. This is called a **connection leak**. Soon every request is waiting, and the app looks frozen even though the database is idle.

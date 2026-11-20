@@ -18,12 +18,33 @@ A **Decorator** adds behavior to an object by wrapping it in another object with
 Use subclasses for the extras, and the number of classes explodes:
 
 ```js
-class Coffee { cost() { return 3; } }
-class CoffeeWithMilk extends Coffee { cost() { return 4; } }
-class CoffeeWithSugar extends Coffee { cost() { return 3.5; } }
-class CoffeeWithMilkAndSugar extends Coffee { cost() { return 4.5; } }
+class Coffee {
+    cost() {
+        return 3;
+    }
+}
 
-console.log(new CoffeeWithMilkAndSugar().cost()); // 4.5
+class CoffeeWithMilk extends Coffee {
+    cost() {
+        return 4;
+    }
+}
+
+class CoffeeWithSugar extends Coffee {
+    cost() {
+        return 3.5;
+    }
+}
+
+class CoffeeWithMilkAndSugar extends Coffee {
+    cost() {
+        return 4.5;
+    }
+}
+
+const order = new CoffeeWithMilkAndSugar();
+console.log(order.cost()); // 4.5
+
 // Add caramel? 8 classes. Add cream too? 16. Double milk? Yet more.
 ```
 
@@ -64,42 +85,96 @@ classDiagram
 
 The key line is the last one: an `AddOn` **is** a `Coffee`, and it also **holds** a `Coffee`. So you can wrap a wrapper, as many times as you like.
 
+### Step 1: The interface and the plain coffee
+
+Every coffee, plain or wrapped, has `cost()` and `description()`.
+
 ```js
-class Coffee { // interface
-  cost() { throw new Error('not implemented'); }
-  description() { throw new Error('not implemented'); }
+// The shared interface.
+class Coffee {
+    cost() {
+        throw new Error("not implemented");
+    }
+
+    description() {
+        throw new Error("not implemented");
+    }
 }
 
 class SimpleCoffee extends Coffee {
-  cost() { return 3; }
-  description() { return 'Coffee'; }
-}
+    cost() {
+        return 3;
+    }
 
-class AddOn extends Coffee { // abstract decorator
-  constructor(inner) {
-    super();
-    if (new.target === AddOn) throw new Error('AddOn is abstract');
-    this.inner = inner; // the coffee being wrapped
-  }
+    description() {
+        return "Coffee";
+    }
 }
+```
 
+### Step 2: The base wrapper
+
+`AddOn` is a `Coffee` that holds another `Coffee` inside it.
+
+```js
+// Abstract: we only make a Milk or a Sugar, never a plain AddOn.
+class AddOn extends Coffee {
+    constructor(inner) {
+        super();
+
+        // this.constructor is the class that "new" was called with.
+        if (this.constructor === AddOn) {
+            throw new Error("AddOn is abstract");
+        }
+
+        // The coffee being wrapped.
+        this.inner = inner;
+    }
+}
+```
+
+### Step 3: The extras
+
+Each extra asks the coffee inside first, then adds its own part.
+
+```js
 class Milk extends AddOn {
-  cost() { return this.inner.cost() + 1; }
-  description() { return `${this.inner.description()} + milk`; }
+    cost() {
+        const innerCost = this.inner.cost();
+        return innerCost + 1;
+    }
+
+    description() {
+        return `${this.inner.description()} + milk`;
+    }
 }
 
 class Sugar extends AddOn {
-  cost() { return this.inner.cost() + 0.5; }
-  description() { return `${this.inner.description()} + sugar`; }
-}
+    cost() {
+        const innerCost = this.inner.cost();
+        return innerCost + 0.5;
+    }
 
+    description() {
+        return `${this.inner.description()} + sugar`;
+    }
+}
+```
+
+### Step 4: Build an order
+
+Start with a plain coffee, and wrap it once for each extra.
+
+```js
 let order = new SimpleCoffee();
 order = new Milk(order);
 order = new Sugar(order);
-order = new Milk(order); // double milk: just wrap again
+
+// Double milk: just wrap again.
+order = new Milk(order);
 
 console.log(order.description()); // Coffee + milk + sugar + milk
-console.log(order.cost());        // 5.5
+console.log(order.cost()); // 5.5
 ```
 
 `inner` would be `protected` in Java (only subclasses can see it). JavaScript has no `protected`, and a `#private` field is not visible in subclasses, so `inner` is a normal field here.
@@ -127,16 +202,24 @@ A new extra, like caramel, is **one new class**. No old class changes. That is t
 In JavaScript, functions are values, so a decorator is often just a function that takes a function and returns a new one with the **same call shape**:
 
 ```js
-function withLogging(fn) {
-  return function (...args) {
-    console.log(`Calling ${fn.name}(${args.join(', ')})`);
-    return fn.apply(this, args);
-  };
+// Takes a function, and gives back a new function that logs first.
+function withLogging(originalFunction) {
+    // "...args" collects all the arguments into one array.
+    return function (...args) {
+        const argumentList = args.join(", ");
+        console.log(`Calling ${originalFunction.name}(${argumentList})`);
+
+        // Call the original. Here "...args" spreads the array back out: add(2, 3).
+        return originalFunction(...args);
+    };
 }
 
-function add(a, b) { return a + b; }
+function add(first, second) {
+    return first + second;
+}
 
 const loggedAdd = withLogging(add);
+
 console.log(loggedAdd(2, 3));
 // Calling add(2, 3)
 // 5

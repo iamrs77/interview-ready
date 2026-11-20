@@ -26,34 +26,58 @@ Each class is a box with three parts:
 2. **Fields** in the middle: `visibility name type`.
 3. **Methods** at the bottom: `visibility name(params) returnType`.
 
-Here is a JavaScript `Book` and its box, side by side. The comments show how each line is drawn:
+Here is a JavaScript `Book` and its box, side by side. The comment above each line shows how it is drawn. In JavaScript, `#` means private and `static` means it belongs to the class, not to one book:
 
 ```js
 class Book {
-  static #nextId = 1; // static + private -> -nextId number$ (underlined)
-  #isbn;              // private          -> -isbn string
-  title;              // public           -> +title string
-  copies = [];        // public           -> +copies BookCopy[]
+    // static + private  ->  -nextId number$ (underlined)
+    static #nextId = 1;
 
-  constructor(isbn, title) {
-    this.id = Book.#nextId++;
-    this.#isbn = isbn;
-    this.title = title;
-  }
-  addCopy(barcode) {  // public method    -> +addCopy(barcode) BookCopy
-    const copy = { barcode, book: this };
-    this.copies.push(copy);
-    return copy;
-  }
-  static fromLine(text) { // static method -> +fromLine(text)$ Book (underlined)
-    const [isbn, title] = text.split(';');
-    return new Book(isbn, title);
-  }
+    // private  ->  -isbn string
+    #isbn;
+
+    // public  ->  +title string
+    title;
+
+    // public  ->  +copies BookCopy[]
+    copies = [];
+
+    constructor(isbn, title) {
+        // public  ->  +id number (each book gets the next id: 1, 2, 3...)
+        this.id = Book.#nextId;
+        Book.#nextId = Book.#nextId + 1;
+
+        this.#isbn = isbn;
+        this.title = title;
+    }
+
+    // public method  ->  +addCopy(barcode) BookCopy
+    addCopy(barcode) {
+        const copy = { barcode: barcode, book: this };
+        this.copies.push(copy);
+        return copy;
+    }
+
+    // static method  ->  +fromLine(text)$ Book (underlined)
+    static fromLine(text) {
+        // "978-0;The Hobbit" becomes ["978-0", "The Hobbit"]
+        const parts = text.split(";");
+        const isbn = parts[0];
+        const title = parts[1];
+
+        return new Book(isbn, title);
+    }
 }
+```
 
-const hobbit = Book.fromLine('978-0;The Hobbit');
-console.log(hobbit.title, hobbit.id);      // The Hobbit 1
-console.log(hobbit.addCopy('C1').barcode); // C1
+**Use it.** A static method is called on the class, a normal method on one book:
+
+```js
+const hobbit = Book.fromLine("978-0;The Hobbit");
+console.log(hobbit.title, hobbit.id); // The Hobbit 1
+
+const copy = hobbit.addCopy("C1");
+console.log(copy.barcode); // C1
 ```
 
 The Mermaid text for the box:

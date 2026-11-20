@@ -14,32 +14,52 @@ The parent is also called the **base class** or **superclass**. The child is als
 
 ## `extends`: build on a parent
 
+**Step 1: The parent.** A normal toy car:
+
 ```js
 class ToyCar {
-  constructor(color, wheels) {
-    this.color = color;
-    this.wheels = wheels;
-  }
+    constructor(color, wheels) {
+        this.color = color;
+        this.wheels = wheels;
+    }
 
-  drive() {
-    console.log(`Vroom! The ${this.color} car is driving.`);
-  }
+    drive() {
+        console.log(`Vroom! The ${this.color} car is driving.`);
+    }
 }
+```
 
+**Step 2: The child.** `extends` makes `RaceCar` build on `ToyCar`:
+
+```js
 class RaceCar extends ToyCar {
-  constructor(color, wheels, speed) {
-    super(color, wheels); // run ToyCar's constructor first
-    this.speed = speed; // new property
-  }
+    constructor(color, wheels, speed) {
+        // Run ToyCar's constructor first
+        super(color, wheels);
 
-  turboBoost() { // new action
-    console.log(`Turbo boost at speed ${this.speed}!`);
-  }
+        // A new property
+        this.speed = speed;
+    }
+
+    // A new action
+    turboBoost() {
+        console.log(`Turbo boost at speed ${this.speed}!`);
+    }
 }
+```
 
-const myRaceCar = new RaceCar('yellow', 4, 200);
-myRaceCar.drive(); // Vroom! The yellow car is driving.  (from ToyCar)
-myRaceCar.turboBoost(); // Turbo boost at speed 200!  (new in RaceCar)
+**Step 3: Use it.** The race car can do both old and new things:
+
+```js
+const myRaceCar = new RaceCar("yellow", 4, 200);
+
+// drive() comes from ToyCar
+myRaceCar.drive(); // Vroom! The yellow car is driving.
+
+// turboBoost() is new in RaceCar
+myRaceCar.turboBoost(); // Turbo boost at speed 200!
+
+// instanceof checks: is this object a ToyCar?
 console.log(myRaceCar instanceof ToyCar); // true
 ```
 
@@ -71,28 +91,31 @@ Java uses `extends` too. In both languages, a class can extend **only one** clas
 
 ```js
 class Animal {
-  constructor(name) {
-    this.name = name;
-  }
+    constructor(name) {
+        this.name = name;
+    }
 
-  speak() {
-    console.log(`${this.name} makes a sound`);
-  }
+    speak() {
+        console.log(`${this.name} makes a sound`);
+    }
 }
 
 class Dog extends Animal {
-  constructor(name, breed) {
-    super(name); // must come first
-    this.breed = breed;
-  }
+    constructor(name, breed) {
+        // super() must come first
+        super(name);
+        this.breed = breed;
+    }
 
-  speak() { // override: replace the parent's speak()...
-    super.speak(); // ...but still run the parent's version first
-    console.log(`${this.name} the ${this.breed} barks`);
-  }
+    // Override: replace the parent's speak()...
+    speak() {
+        // ...but still run the parent's version first
+        super.speak();
+        console.log(`${this.name} the ${this.breed} barks`);
+    }
 }
 
-const dog = new Dog('Rex', 'Labrador');
+const dog = new Dog("Rex", "Labrador");
 dog.speak();
 // Rex makes a sound
 // Rex the Labrador barks
@@ -106,21 +129,26 @@ If the child has **no constructor**, JavaScript adds one for you. It passes ever
 
 ```js
 class Animal {
-  constructor(name) {
-    this.name = name;
-  }
+    constructor(name) {
+        this.name = name;
+    }
 }
 
 class Cat extends Animal {
-  // No constructor here. JavaScript adds this one for you:
-  // constructor(...args) { super(...args); }
+    // No constructor here. JavaScript adds this one for you.
+    // "...args" means "all the arguments, whatever they are":
+    //
+    // constructor(...args) {
+    //     super(...args);
+    // }
 
-  meow() {
-    console.log(`${this.name} says meow`);
-  }
+    meow() {
+        console.log(`${this.name} says meow`);
+    }
 }
 
-new Cat('Tom').meow(); // Tom says meow
+const cat = new Cat("Tom");
+cat.meow(); // Tom says meow
 ```
 
 So you only write a constructor in the child when it needs something extra, like `breed`.
@@ -131,23 +159,24 @@ If the child **does** have a constructor, it must call `super()` before it touch
 
 ```js
 class Animal {
-  constructor(name) {
-    this.name = name;
-  }
+    constructor(name) {
+        this.name = name;
+    }
 }
 
 class Bird extends Animal {
-  constructor(name) {
-    this.canFly = true; // wrong: uses `this` before super()
-    super(name);
-  }
+    constructor(name) {
+        // Wrong: this line uses `this` before super()
+        this.canFly = true;
+        super(name);
+    }
 }
 
 try {
-  new Bird('Tweety');
-} catch (err) {
-  console.log(err.message);
-  // Must call super constructor in derived class before accessing 'this' or returning from derived constructor
+    new Bird("Tweety");
+} catch (error) {
+    console.log(error.message);
+    // Must call super constructor in derived class before accessing 'this' or returning from derived constructor
 }
 ```
 
@@ -170,37 +199,46 @@ If the sentence is "has a", the class should **hold** the other object as a part
 
 **1. Deep trees.** `Toy → Vehicle → Car → ElectricCar → SelfDrivingCar`. To understand the bottom class you must read five classes, and a change at the top ripples all the way down. Keep trees one or two levels deep.
 
-**2. Fragile parents.** A child can break because of a hidden detail inside its parent:
+**2. Fragile parents.** A child can break because of a hidden detail inside its parent.
+
+First, the parent. Notice that `addMany()` calls `this.add()` for each item:
 
 ```js
 class Basket {
-  #items = [];
+    items = [];
 
-  add(item) {
-    this.#items.push(item);
-  }
+    add(item) {
+        this.items.push(item);
+    }
 
-  addMany(items) {
-    for (const item of items) this.add(item); // calls this.add()
-  }
+    addMany(items) {
+        for (const item of items) {
+            // The hidden detail: addMany() uses add()
+            this.add(item);
+        }
+    }
 }
+```
 
+Now a child that counts the items:
+
+```js
 class CountingBasket extends Basket {
-  count = 0;
+    count = 0;
 
-  add(item) {
-    this.count++;
-    super.add(item);
-  }
+    add(item) {
+        this.count++;
+        super.add(item);
+    }
 
-  addMany(items) {
-    this.count += items.length;
-    super.addMany(items);
-  }
+    addMany(items) {
+        this.count += items.length;
+        super.addMany(items);
+    }
 }
 
 const basket = new CountingBasket();
-basket.addMany(['apple', 'milk']);
+basket.addMany(["apple", "milk"]);
 console.log(basket.count); // 4 (we expected 2!)
 ```
 

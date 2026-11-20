@@ -16,25 +16,28 @@ Each child class writes its own version of a parent's method. This is called **o
 
 ```js
 class Toy {
-  move() {
-    console.log('The toy moves');
-  }
+    move() {
+        console.log("The toy moves");
+    }
 }
 
 class ToyCar extends Toy {
-  move() {
-    console.log('The car drives fast!');
-  }
+    move() {
+        console.log("The car drives fast!");
+    }
 }
 
 class Robot extends Toy {
-  move() {
-    console.log('The robot walks!');
-  }
+    move() {
+        console.log("The robot walks!");
+    }
 }
 
 const toys = [new ToyCar(), new Robot(), new Toy()];
-for (const toy of toys) toy.move();
+
+for (const toy of toys) {
+    toy.move();
+}
 // The car drives fast!
 // The robot walks!
 // The toy moves
@@ -51,42 +54,73 @@ Here is the problem polymorphism solves. Without it, code checks the type by han
 ```js
 // Without polymorphism: every new shape means editing this function
 function area(shape) {
-  if (shape.type === 'circle') return Math.PI * shape.radius ** 2;
-  if (shape.type === 'rectangle') return shape.width * shape.height;
-  throw new Error('Unknown shape');
+    if (shape.type === "circle") {
+        return Math.PI * shape.radius * shape.radius;
+    }
+
+    if (shape.type === "rectangle") {
+        return shape.width * shape.height;
+    }
+
+    throw new Error("Unknown shape");
 }
 ```
 
-Add a triangle, and you must open this function and add another `if`. With polymorphism, each shape knows its own area:
+Add a triangle, and you must open this function and add another `if`. With polymorphism, each shape knows its own area.
+
+**Step 1: The shapes.** `Shape` is the interface. Each child writes its own `area()`:
 
 ```js
-class Shape { // interface
-  area() { throw new Error('not implemented'); }
+class Shape {
+    area() {
+        throw new Error("not implemented");
+    }
 }
 
 class Circle extends Shape {
-  constructor(radius) {
-    super();
-    this.radius = radius;
-  }
-  area() { return Math.PI * this.radius ** 2; }
+    constructor(radius) {
+        // A child class must call super() before it uses this
+        super();
+        this.radius = radius;
+    }
+
+    area() {
+        return Math.PI * this.radius * this.radius;
+    }
 }
 
 class Rectangle extends Shape {
-  constructor(width, height) {
-    super();
-    this.width = width;
-    this.height = height;
-  }
-  area() { return this.width * this.height; }
-}
+    constructor(width, height) {
+        super();
+        this.width = width;
+        this.height = height;
+    }
 
+    area() {
+        return this.width * this.height;
+    }
+}
+```
+
+**Step 2: Add up the areas.** The function just calls `area()` on each shape:
+
+```js
 function totalArea(shapes) {
-  // No "if circle... else if rectangle...". Each shape knows its own area.
-  return shapes.reduce((sum, shape) => sum + shape.area(), 0);
+    let total = 0;
+
+    // No "if circle... else if rectangle...". Each shape knows its own area.
+    for (const shape of shapes) {
+        total += shape.area();
+    }
+
+    return total;
 }
 
-console.log(totalArea([new Circle(1), new Rectangle(2, 3)]).toFixed(2)); // 9.14
+const shapes = [new Circle(1), new Rectangle(2, 3)];
+const total = totalArea(shapes);
+
+// toFixed(2) rounds to 2 decimal places
+console.log(total.toFixed(2)); // 9.14
 ```
 
 ```mermaid
@@ -115,21 +149,31 @@ A new `Triangle` class needs **no change** to `totalArea`. That's the [Open/Clos
 
 "If it walks like a duck and quacks like a duck, it's a duck."
 
-JavaScript doesn't check classes before it calls a method. **Any** object that has an `area()` method works, even a plain object:
+JavaScript doesn't check classes before it calls a method. **Any** object that has an `area()` method works, even a plain object. This uses the same `totalArea()` from above:
 
 ```js
-function totalArea(shapes) {
-  return shapes.reduce((sum, shape) => sum + shape.area(), 0);
-}
+// Plain objects, no class at all. Each one just has an area() method.
+const square = {
+    area() {
+        return 4;
+    },
+};
 
-const square = { area: () => 4 }; // a plain object, no class at all
-const triangle = { area: () => (3 * 4) / 2 };
+const triangle = {
+    area() {
+        return (3 * 4) / 2;
+    },
+};
+
 console.log(totalArea([square, triangle])); // 10
 
+// This object has no area() method, so the call fails
+const blob = { name: "blob" };
+
 try {
-  totalArea([{ name: 'blob' }]); // no area() method
-} catch (err) {
-  console.log(err.message); // shape.area is not a function
+    totalArea([blob]);
+} catch (error) {
+    console.log(error.message); // shape.area is not a function
 }
 ```
 
@@ -141,32 +185,40 @@ The good part: it's flexible. The risk: a missing method is found only when the 
 
 ```js
 class Greeter {
-  greet(name) {
-    return `Hello, ${name}`;
-  }
+    greet(name) {
+        return `Hello, ${name}`;
+    }
 
-  greet(age) { // same name: this REPLACES the greet() above
-    return `You are ${age} years old`;
-  }
+    // Same name: this REPLACES the greet() above
+    greet(age) {
+        return `You are ${age} years old`;
+    }
 }
 
-console.log(new Greeter().greet('Rohit')); // You are Rohit years old
+const greeter = new Greeter();
+console.log(greeter.greet("Rohit")); // You are Rohit years old
 ```
 
 The JavaScript way: write **one** method that checks its arguments, and use default values for optional ones:
 
 ```js
 class Greeter {
-  greet(value, greeting = 'Hello') { // default value for an optional argument
-    if (typeof value === 'number') return `You are ${value} years old`;
-    return `${greeting}, ${value}`;
-  }
+    // greeting = "Hello" is a default value.
+    // It is used when the caller leaves greeting out.
+    greet(value, greeting = "Hello") {
+        // A number means an age
+        if (typeof value === "number") {
+            return `You are ${value} years old`;
+        }
+
+        return `${greeting}, ${value}`;
+    }
 }
 
-const g = new Greeter();
-console.log(g.greet('Rohit')); // Hello, Rohit
-console.log(g.greet('Rohit', 'Hi')); // Hi, Rohit
-console.log(g.greet(27)); // You are 27 years old
+const greeter = new Greeter();
+console.log(greeter.greet("Rohit")); // Hello, Rohit
+console.log(greeter.greet("Rohit", "Hi")); // Hi, Rohit
+console.log(greeter.greet(27)); // You are 27 years old
 ```
 
 In Java, `greet(String name)` and `greet(int age)` can both exist; you can't overload by return type alone. TypeScript lets you write overload signatures, but there is still one body that checks the arguments, like above.

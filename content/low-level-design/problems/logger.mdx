@@ -131,17 +131,28 @@ Every class needs to log. There are two common ways to give them a logger:
 
 // 1. Singleton: one object, reached from anywhere.
 class AppLogger {
-  static #instance;
-  static get() { return (AppLogger.#instance ??= new Logger({ name: 'app' })); }
+    static getInstance() {
+        // Make the logger the first time only. Later calls get the same one.
+        if (!AppLogger.instance) {
+            AppLogger.instance = new Logger({ name: "app" });
+        }
+
+        return AppLogger.instance;
+    }
 }
-// In JavaScript, a module export does the same: a module runs once, so every import gets the same object.
-export const log = new Logger({ name: 'app' });
+
+// In JavaScript, a module export does the same job.
+// A module runs once, so every import gets the same object.
+export const log = new Logger({ name: "app" });
 
 // 2. Dependency injection: the class gets the logger from outside.
 class OrderService {
-  constructor(logger) { this.logger = logger; }
+    constructor(logger) {
+        this.logger = logger;
+    }
 }
-new OrderService(log.child('orders'));
+
+const orderService = new OrderService(log.child("orders"));
 ```
 
 | | Singleton | Dependency injection |
@@ -182,164 +193,374 @@ sequenceDiagram
 
 ## Step 5: Code
 
-**Part 1: the level enum, the record and the formatters.** The file uses `import` and top-level `await`, so save it as `logger.mjs`.
+The code uses `import` and top-level `await`, so save all the parts together as one file, `logger.mjs`. Long classes come in a few pieces. Paste the pieces in order and they make the whole class.
+
+### Part 1: Levels, the record and the formatters
+
+**The levels.** A list keeps them in order, so "WARN and up" is one comparison.
 
 ```js
-import { appendFile, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { appendFile, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-const LogLevel = Object.freeze({ DEBUG: 'DEBUG', INFO: 'INFO', WARN: 'WARN', ERROR: 'ERROR' });
-const LEVEL_ORDER = [LogLevel.DEBUG, LogLevel.INFO, LogLevel.WARN, LogLevel.ERROR]; // least to most serious
-const isAtLeast = (level, minimum) => LEVEL_ORDER.indexOf(level) >= LEVEL_ORDER.indexOf(minimum);
+const LogLevel = {
+    DEBUG: "DEBUG",
+    INFO: "INFO",
+    WARN: "WARN",
+    ERROR: "ERROR",
+};
 
+// From least to most serious.
+const LEVEL_ORDER = [LogLevel.DEBUG, LogLevel.INFO, LogLevel.WARN, LogLevel.ERROR];
+
+// True if `level` is as serious as `minimum`, or more serious.
+function isAtLeast(level, minimum) {
+    const levelRank = LEVEL_ORDER.indexOf(level);
+    const minimumRank = LEVEL_ORDER.indexOf(minimum);
+
+    return levelRank >= minimumRank;
+}
+```
+
+**The record.** One log event, with all its data in one object.
+
+```js
 class LogRecord {
-  constructor(level, message, loggerName, time, fields) {
-    this.level = level;
-    this.message = message;
-    this.loggerName = loggerName;
-    this.time = time;
-    this.fields = fields; // extra data, like { orderId: 42 }
-  }
-}
-
-class Formatter { // interface
-  format(record) { throw new Error('not implemented'); }
-}
-class TextFormatter extends Formatter { // for people: short and easy to scan
-  format(r) {
-    const time = r.time.toISOString().slice(11, 23); // just the time of day
-    const fields = Object.entries(r.fields).map(([key, value]) => ` ${key}=${value}`).join('');
-    return `${time} ${r.level.padEnd(5)} [${r.loggerName}] ${r.message}${fields}`;
-  }
-}
-class JsonFormatter extends Formatter { // for machines: one JSON object per line
-  format(r) {
-    return JSON.stringify({ time: r.time.toISOString(), level: r.level, logger: r.loggerName, message: r.message, ...r.fields });
-  }
+    constructor(level, message, loggerName, time, fields) {
+        this.level = level;
+        this.message = message;
+        this.loggerName = loggerName;
+        this.time = time;
+        // Extra data, like { orderId: 42 }.
+        this.fields = fields;
+    }
 }
 ```
 
-**Part 2: the appenders.** `FileAppender` only adds the line to a buffer. One background loop writes waiting lines in batches, in order.
+**The text formatter.** Every formatter has the same `format(record)` method. This one makes a short line for people.
 
 ```js
-class Appender { // abstract: filter and format here, then each output fills in write(line)
-  constructor(formatter, minLevel = LogLevel.DEBUG) {
-    if (new.target === Appender) throw new Error('Appender is abstract');
-    this.formatter = formatter;
-    this.minLevel = minLevel;
-  }
-  append(record) {
-    if (isAtLeast(record.level, this.minLevel)) this.write(this.formatter.format(record));
-  }
-  write(line) { throw new Error('not implemented'); }
-}
-
-class ConsoleAppender extends Appender {
-  write(line) { console.log(line); }
-}
-
-class MemoryAppender extends Appender { // keeps lines in an array: handy in tests
-  lines = [];
-  write(line) { this.lines.push(line); }
-}
-
-class FileAppender extends Appender { // async: write() returns at once, the disk work happens later
-  #buffer = [];
-  #writing = null; // the background write loop, while it runs
-  dropped = 0;
-  constructor(path, formatter, minLevel) {
-    super(formatter, minLevel);
-    this.path = path;
-  }
-  write(line) {
-    this.#buffer.push(line);
-    this.#writing ??= this.#drain(); // start one writer, only if none is running
-  }
-  async #drain() {
-    while (this.#buffer.length > 0) {
-      const batch = this.#buffer.splice(0); // take every waiting line in one go
-      try {
-        await appendFile(this.path, batch.join('\n') + '\n');
-      } catch {
-        this.dropped += batch.length; // a full disk must never crash the app
-      }
+// The interface: a formatter turns a record into one line of text.
+class Formatter {
+    format(record) {
+        throw new Error("not implemented");
     }
-    this.#writing = null;
-  }
-  async flush() { await this.#writing; } // wait until every line is on disk, e.g. before the app exits
+}
+
+// For people: short and easy to scan.
+class TextFormatter extends Formatter {
+    format(record) {
+        // Keep just the time of day, like "09:00:00.000".
+        const time = record.time.toISOString().slice(11, 23);
+
+        // padEnd(5) makes "INFO" as wide as "ERROR", so the lines line up.
+        const level = record.level.padEnd(5);
+
+        // Turn { port: 3000 } into " port=3000".
+        let fieldsText = "";
+        for (const key of Object.keys(record.fields)) {
+            fieldsText += ` ${key}=${record.fields[key]}`;
+        }
+
+        return `${time} ${level} [${record.loggerName}] ${record.message}${fieldsText}`;
+    }
 }
 ```
 
-**Part 3: the logger.** It drops low levels first, then tells every appender. A broken appender can't break the app.
+**The JSON formatter.** One JSON object per line, for machines.
+
+```js
+class JsonFormatter extends Formatter {
+    format(record) {
+        const data = {
+            time: record.time.toISOString(),
+            level: record.level,
+            logger: record.loggerName,
+            message: record.message,
+        };
+
+        // Add the extra fields at the end, like orderId and total.
+        Object.assign(data, record.fields);
+
+        return JSON.stringify(data);
+    }
+}
+```
+
+### Part 2: The appenders
+
+**The base class.** It checks the level and formats the line. Each output fills in only `write(line)`.
+
+```js
+// Abstract: it filters and formats, then each output fills in write(line).
+class Appender {
+    constructor(formatter, minLevel = LogLevel.DEBUG) {
+        // Only subclasses, like ConsoleAppender, may be created.
+        if (this.constructor === Appender) {
+            throw new Error("Appender is abstract");
+        }
+
+        this.formatter = formatter;
+        this.minLevel = minLevel;
+    }
+
+    append(record) {
+        // Each output can skip levels below its own minimum.
+        if (!isAtLeast(record.level, this.minLevel)) {
+            return;
+        }
+
+        const line = this.formatter.format(record);
+        this.write(line);
+    }
+
+    write(line) {
+        throw new Error("not implemented");
+    }
+}
+```
+
+**The console and memory outputs.** The console prints the line. Memory keeps it in an array, which is handy in tests.
+
+```js
+class ConsoleAppender extends Appender {
+    write(line) {
+        console.log(line);
+    }
+}
+
+class MemoryAppender extends Appender {
+    constructor(formatter, minLevel) {
+        super(formatter, minLevel);
+        this.lines = [];
+    }
+
+    write(line) {
+        this.lines.push(line);
+    }
+}
+```
+
+**The file output, piece 1.** `write(line)` only adds the line to a buffer and returns at once. If no writer is running, it starts one.
+
+```js
+class FileAppender extends Appender {
+    constructor(path, formatter, minLevel) {
+        super(formatter, minLevel);
+        this.path = path;
+        // Lines waiting to be written.
+        this.buffer = [];
+        // The background write loop while it runs, or null.
+        this.writing = null;
+        // Lines lost because the disk failed.
+        this.dropped = 0;
+    }
+
+    write(line) {
+        this.buffer.push(line);
+
+        // Start one writer, only if none is running.
+        if (this.writing === null) {
+            this.writing = this.drain();
+        }
+    }
+```
+
+**The file output, piece 2.** These methods finish the `FileAppender` class. `drain()` writes the waiting lines in one batch, then checks for more.
+
+```js
+    async drain() {
+        while (this.buffer.length > 0) {
+            // Take every waiting line. New lines go into a fresh buffer.
+            const batch = this.buffer;
+            this.buffer = [];
+
+            const text = batch.join("\n") + "\n";
+            try {
+                await appendFile(this.path, text);
+            } catch (error) {
+                // A full disk must never crash the app. Count the lost lines.
+                this.dropped += batch.length;
+            }
+        }
+
+        this.writing = null;
+    }
+
+    // Wait until every line is on disk, for example before the app exits.
+    async flush() {
+        await this.writing;
+    }
+}
+```
+
+How it works:
+
+- `write` never waits. It only adds the line to `buffer`.
+- `writing` holds the running `drain()` loop. While it runs, new lines just join the buffer, so they stay in order.
+- `flush()` waits for that loop to end.
+
+### Part 3: The logger
+
+It drops low levels first, then tells every appender. A broken appender can't break the app.
+
+**Its settings.** The logger takes one options object. Any option you leave out gets a default.
 
 ```js
 class Logger {
-  constructor({ name = 'app', level = LogLevel.INFO, appenders = [], clock = () => new Date() } = {}) {
-    this.name = name;
-    this.level = level;
-    this.appenders = appenders;
-    this.clock = clock;
-  }
-  addAppender(appender) { this.appenders.push(appender); } // subscribe one more output
-
-  debug(message, fields) { this.log(LogLevel.DEBUG, message, fields); }
-  info(message, fields) { this.log(LogLevel.INFO, message, fields); }
-  warn(message, fields) { this.log(LogLevel.WARN, message, fields); }
-  error(message, fields) { this.log(LogLevel.ERROR, message, fields); }
-
-  log(level, message, fields = {}) {
-    if (!isAtLeast(level, this.level)) return; // filtered out early, so it costs almost nothing
-    const record = new LogRecord(level, message, this.name, this.clock(), fields);
-    for (const appender of this.appenders) {
-      try {
-        appender.append(record); // tell every output (Observer)
-      } catch {
-        // one broken output must not stop the others, or the app
-      }
+    // Pass an object like { name: "app", level: LogLevel.INFO }.
+    // An option you leave out gets the value after "=".
+    // The "= {}" at the end lets you call new Logger() with no options at all.
+    constructor({
+        name = "app",
+        level = LogLevel.INFO,
+        appenders = [],
+        clock = () => new Date(),
+    } = {}) {
+        this.name = name;
+        this.level = level;
+        this.appenders = appenders;
+        // A function that returns the time now. Tests pass a fixed one.
+        this.clock = clock;
     }
-  }
 
-  child(name) { // same outputs and settings, a new name
-    return new Logger({ name, level: this.level, appenders: this.appenders, clock: this.clock });
-  }
+    // Subscribe one more output.
+    addAppender(appender) {
+        this.appenders.push(appender);
+    }
+```
+
+**The level shortcuts.** Each one calls `log` with its own level.
+
+```js
+    debug(message, fields) {
+        this.log(LogLevel.DEBUG, message, fields);
+    }
+
+    info(message, fields) {
+        this.log(LogLevel.INFO, message, fields);
+    }
+
+    warn(message, fields) {
+        this.log(LogLevel.WARN, message, fields);
+    }
+
+    error(message, fields) {
+        this.log(LogLevel.ERROR, message, fields);
+    }
+```
+
+**`log` and `child`.** These finish the `Logger` class.
+
+```js
+    log(level, message, fields = {}) {
+        // Drop it early, so a filtered log costs almost nothing.
+        if (!isAtLeast(level, this.level)) {
+            return;
+        }
+
+        const time = this.clock();
+        const record = new LogRecord(level, message, this.name, time, fields);
+
+        // Tell every output (Observer).
+        for (const appender of this.appenders) {
+            try {
+                appender.append(record);
+            } catch (error) {
+                // One broken output must not stop the others, or the app.
+            }
+        }
+    }
+
+    // Same outputs and settings, but a new name.
+    child(name) {
+        return new Logger({
+            name: name,
+            level: this.level,
+            appenders: this.appenders,
+            clock: this.clock,
+        });
+    }
 }
 ```
 
-**Part 4: try it.** Three outputs: the console (text), memory (WARN and up) and a file (JSON). `OrderService` gets its logger by dependency injection.
+### Part 4: Try it
+
+Three outputs: the console (text), memory (WARN and up) and a file (JSON). `OrderService` gets its logger by dependency injection.
+
+**A service that logs.**
 
 ```js
 class OrderService {
-  constructor(logger) { this.logger = logger; } // the logger is passed in: dependency injection
-  placeOrder(orderId, total) {
-    this.logger.info('Order placed', { orderId, total });
-  }
+    // The logger is passed in: dependency injection.
+    constructor(logger) {
+        this.logger = logger;
+    }
+
+    placeOrder(orderId, total) {
+        this.logger.info("Order placed", { orderId: orderId, total: total });
+    }
+}
+```
+
+**Set up the outputs and the logger.** A fixed clock makes the output the same on every run.
+
+```js
+const path = join(tmpdir(), "logger-demo.log");
+// Start with an empty file on every run.
+await rm(path, { force: true });
+
+const consoleOutput = new ConsoleAppender(new TextFormatter());
+// Memory keeps only WARN and ERROR lines.
+const memory = new MemoryAppender(new TextFormatter(), LogLevel.WARN);
+// The file gets every level the logger lets through.
+const file = new FileAppender(path, new JsonFormatter());
+
+function fixedClock() {
+    return new Date("2026-01-01T09:00:00Z");
 }
 
-const path = join(tmpdir(), 'logger-demo.log');
-await rm(path, { force: true }); // start with an empty file on every run
-
-const memory = new MemoryAppender(new TextFormatter(), LogLevel.WARN); // only WARN and ERROR
-const file = new FileAppender(path, new JsonFormatter()); // every level the logger lets through
 const log = new Logger({
-  name: 'app',
-  level: LogLevel.INFO,
-  appenders: [new ConsoleAppender(new TextFormatter()), memory, file],
-  clock: () => new Date('2026-01-01T09:00:00Z'), // a fixed clock, so the output is the same on every run
+    name: "app",
+    level: LogLevel.INFO,
+    appenders: [consoleOutput, memory, file],
+    clock: fixedClock,
 });
+```
 
-log.debug('Cache warmed'); // below INFO: dropped, prints nothing
-log.info('Server started', { port: 3000 }); // prints: 09:00:00.000 INFO  [app] Server started port=3000
-new OrderService(log.child('orders')).placeOrder(42, 99.5); // prints: 09:00:00.000 INFO  [orders] Order placed orderId=42 total=99.5
-log.warn('Disk almost full', { usedPercent: 91 }); // prints: 09:00:00.000 WARN  [app] Disk almost full usedPercent=91
-log.error('Payment failed', { orderId: 42 }); // prints: 09:00:00.000 ERROR [app] Payment failed orderId=42
+**Log some lines.** Each comment shows what the console prints.
 
+```js
+// Below INFO: dropped, prints nothing.
+log.debug("Cache warmed");
+
+log.info("Server started", { port: 3000 });
+// prints: 09:00:00.000 INFO  [app] Server started port=3000
+
+const orderService = new OrderService(log.child("orders"));
+orderService.placeOrder(42, 99.5);
+// prints: 09:00:00.000 INFO  [orders] Order placed orderId=42 total=99.5
+
+log.warn("Disk almost full", { usedPercent: 91 });
+// prints: 09:00:00.000 WARN  [app] Disk almost full usedPercent=91
+
+log.error("Payment failed", { orderId: 42 });
+// prints: 09:00:00.000 ERROR [app] Payment failed orderId=42
+```
+
+**Check memory and the file.** The file lines were written in the background, so wait for `flush()` first.
+
+```js
 console.log(memory.lines.length); // 2
 
-await file.flush(); // the file lines were written in the background
-const fileLines = (await readFile(path, 'utf8')).trim().split('\n');
+await file.flush();
+
+const fileText = await readFile(path, "utf8");
+const fileLines = fileText.trim().split("\n");
 console.log(fileLines.length); // 4
-console.log(fileLines[1]); // {"time":"2026-01-01T09:00:00.000Z","level":"INFO","logger":"orders","message":"Order placed","orderId":42,"total":99.5}
+console.log(fileLines[1]);
+// {"time":"2026-01-01T09:00:00.000Z","level":"INFO","logger":"orders","message":"Order placed","orderId":42,"total":99.5}
 ```
 
 The first line went to disk alone. The next three arrived while that write was running, so they waited in the buffer and went in one batch.
@@ -367,11 +588,12 @@ The real race is in the **async file write**. If every line started its own writ
 ```js
 // NOT SAFE. A fragment, not runnable on its own.
 write(line) {
-  appendFile(this.path, line + '\n'); // each line starts its own write; they can finish in any order
+    // Each line starts its own write. They can finish in any order.
+    appendFile(this.path, line + "\n");
 }
 ```
 
-`FileAppender` avoids this with **one writer at a time**. `#writing` holds the running loop. New lines only join the buffer, and the loop writes them in order. It is a small form of [Producer-Consumer](../concurrency/producer-consumer.mdx): the app produces lines, and one loop consumes them.
+`FileAppender` avoids this with **one writer at a time**. `writing` holds the running loop. New lines only join the buffer, and the loop writes them in order. It is a small form of [Producer-Consumer](../concurrency/producer-consumer.mdx): the app produces lines, and one loop consumes them.
 
 - **Many processes or servers:** don't let them write to the same file. Each one writes to its own output (often just the console), and a log tool gathers the lines in one place.
 - **In Java,** many threads log at once. Log4j 2 offers async loggers: threads put events in a queue, and a background thread writes them.

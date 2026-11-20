@@ -157,14 +157,18 @@ Alice ends with `CHT` and Bob with `CHA`. **The copies are different**, and Alic
 
 ```js
 // Adjust a delete so it still removes the same letter after someone else's insert
-function transformDelete(del, ins) {
-  if (ins.at <= del.at) {
-    return { ...del, at: del.at + ins.text.length };
-  }
-  return del;
+function transformDelete(deleteEdit, insertEdit) {
+    // The insert came before (or at) our spot: move right by the inserted text's length
+    if (insertEdit.at <= deleteEdit.at) {
+        const newPosition = deleteEdit.at + insertEdit.text.length;
+        return { at: newPosition };
+    }
+
+    // The insert came after our spot: nothing changes
+    return deleteEdit;
 }
 
-transformDelete({ at: 2 }, { at: 1, text: 'H' }); // → { at: 3 }
+console.log(transformDelete({ at: 2 }, { at: 1, text: "H" })); // { at: 3 }
 ```
 
 Here is how the server uses it. Both edits were based on version 1287. The server picks Alice's first, so Bob's edit must be transformed against it:

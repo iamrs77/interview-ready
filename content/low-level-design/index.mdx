@@ -77,39 +77,76 @@ Most LLD books and answers use Java. Here everything is written in plain, modern
 | `protected` | Nothing: JavaScript has no protected. `_name` is only a naming habit | none |
 | `enum` | A frozen object | `Object.freeze({ SMALL: 'SMALL' })` |
 
-All of them in one small example:
+All of them in one small example. The parts below run together as one file.
+
+**Step 1: An enum and an interface.** The enum is a fixed list of sizes. The interface says every payment can `pay()`:
 
 ```js
-const SpotSize = Object.freeze({ SMALL: 'SMALL', LARGE: 'LARGE' }); // enum
+// enum: Object.freeze locks the object, so no one can add or change a size
+const SpotSize = Object.freeze({
+    SMALL: "SMALL",
+    LARGE: "LARGE",
+});
 
-class PaymentMethod { // interface
-  pay(amount) { throw new Error('not implemented'); }
+// interface: every method throws until a child class writes its own
+class PaymentMethod {
+    pay(amount) {
+        throw new Error("not implemented");
+    }
 }
 
 class Card extends PaymentMethod {
-  pay(amount) { return `Paid ${amount} by card`; }
+    pay(amount) {
+        return `Paid ${amount} by card`;
+    }
 }
+```
 
-class Vehicle { // abstract
-  #plate; // private field
+**Step 2: An abstract class with a private field.** `Vehicle` can't be made directly, and its plate is private:
 
-  constructor(plate) {
-    if (new.target === Vehicle) throw new Error('Vehicle is abstract');
-    this.#plate = plate;
-  }
+```js
+// abstract: you can't make a plain Vehicle, only a child like Car
+class Vehicle {
+    // private field: the # means only Vehicle's own code can use it
+    #plate;
 
-  get plate() { return this.#plate; }
-  size() { throw new Error('not implemented'); } // each vehicle must say its size
+    constructor(plate) {
+        // new.target is the class that `new` was called with
+        if (new.target === Vehicle) {
+            throw new Error("Vehicle is abstract");
+        }
+
+        this.#plate = plate;
+    }
+
+    getPlate() {
+        return this.#plate;
+    }
+
+    // Each vehicle must say its own size
+    size() {
+        throw new Error("not implemented");
+    }
 }
+```
 
+**Step 3: A child class, and use it.** `Car` fills in `size()`:
+
+```js
 class Car extends Vehicle {
-  size() { return SpotSize.SMALL; }
+    size() {
+        return SpotSize.SMALL;
+    }
 }
 
-const car = new Car('KA-01-1234');
-console.log(car.plate, car.size()); // KA-01-1234 SMALL
-console.log(new Card().pay(50)); // Paid 50 by card
-// new Vehicle('X-1'); // would throw: Error: Vehicle is abstract
+const car = new Car("KA-01-1234");
+console.log(car.getPlate(), car.size()); // KA-01-1234 SMALL
+
+const card = new Card();
+console.log(card.pay(50)); // Paid 50 by card
+
+// This line would throw "Vehicle is abstract":
+// new Vehicle("X-1");
 ```
 
 In class diagrams, each kind of class has its own color: green for interfaces, purple for abstract classes, blue for normal classes, and orange for enums.

@@ -148,16 +148,21 @@ The **N+1 problem** deserves a closer look, because it hides in friendly-looking
 
 ```js
 // N+1: 1 query for the orders, then 1 more query PER order
-const { rows: orders } = await db.query('SELECT * FROM orders WHERE user_id = $1', [userId]);
+const ordersResult = await db.query("SELECT * FROM orders WHERE user_id = $1", [userId]);
+const orders = ordersResult.rows;
+
 for (const order of orders) {
-  const { rows } = await db.query('SELECT * FROM order_items WHERE order_id = $1', [order.id]);
-  order.items = rows;
+    const itemsResult = await db.query("SELECT * FROM order_items WHERE order_id = $1", [order.id]);
+    order.items = itemsResult.rows;
 }
+
 // 50 orders = 51 queries
 
 // Fix: 2 queries in total, no matter how many orders
-const ids = orders.map((o) => o.id);
-const { rows: items } = await db.query('SELECT * FROM order_items WHERE order_id = ANY($1)', [ids]);
+const orderIds = orders.map((order) => order.id);
+
+const allItemsResult = await db.query("SELECT * FROM order_items WHERE order_id = ANY($1)", [orderIds]);
+const items = allItemsResult.rows;
 ```
 
 Each query may take only 2 ms, but 51 of them in a row is over 100 ms.

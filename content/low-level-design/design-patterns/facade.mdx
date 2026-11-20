@@ -20,13 +20,20 @@ Placing an order needs four steps in the right order: reserve the stock, charge 
 ```js
 // Not runnable: a fragment. The same steps are copied into the web app,
 // the mobile API and the admin tool.
-if (!inventory.reserve(item, qty)) throw new Error('Out of stock');
-try {
-  payments.charge(user, price * qty);
-} catch (err) {
-  inventory.release(item, qty); // easy to forget in one of the copies
-  throw err;
+const reserved = inventory.reserve(item, quantity);
+
+if (!reserved) {
+    throw new Error("Out of stock");
 }
+
+try {
+    payments.charge(user, price * quantity);
+} catch (error) {
+    // Easy to forget in one of the copies.
+    inventory.release(item, quantity);
+    throw error;
+}
+
 const label = shipping.createLabel(address);
 ```
 
@@ -65,52 +72,108 @@ classDiagram
   OrderFacade --> Shipping
 ```
 
+### Step 1: The stock
+
+`Inventory` takes items off the shelf, and puts them back.
+
 ```js
 class Inventory {
-  #stock = { book: 2 };
-  reserve(item, qty) {
-    if ((this.#stock[item] ?? 0) < qty) return false;
-    this.#stock[item] -= qty;
-    return true;
-  }
-  release(item, qty) { this.#stock[item] += qty; }
-}
+    constructor() {
+        // We start with 2 books.
+        this.stock = { book: 2 };
+    }
 
+    // Takes items off the shelf. Returns false if there are not enough.
+    reserve(item, quantity) {
+        const inStock = this.stock[item];
+
+        if (inStock === undefined || inStock < quantity) {
+            return false;
+        }
+
+        this.stock[item] = inStock - quantity;
+        return true;
+    }
+
+    // Puts items back on the shelf.
+    release(item, quantity) {
+        this.stock[item] = this.stock[item] + quantity;
+    }
+}
+```
+
+### Step 2: Payments and shipping
+
+Two more small classes, each with one job.
+
+```js
 class Payments {
-  charge(user, amount) {
-    if (amount > 100) throw new Error('card declined');
-    return `PAY-${user}`;
-  }
+    charge(user, amount) {
+        // Pretend the card is declined for anything over 100.
+        if (amount > 100) {
+            throw new Error("card declined");
+        }
+
+        return `PAY-${user}`;
+    }
 }
 
 class Shipping {
-  createLabel(address) { return `LABEL-${address}`; }
-}
-
-class OrderFacade {
-  #inventory = new Inventory();
-  #payments = new Payments();
-  #shipping = new Shipping();
-
-  placeOrder({ user, item, qty, price, address }) {
-    if (!this.#inventory.reserve(item, qty)) return 'Out of stock';
-    try {
-      this.#payments.charge(user, price * qty);
-    } catch (err) {
-      this.#inventory.release(item, qty); // undo, in one place only
-      return `Payment failed: ${err.message}`;
+    createLabel(address) {
+        return `LABEL-${address}`;
     }
-    return `Order placed, ${this.#shipping.createLabel(address)}`;
-  }
 }
+```
 
+### Step 3: The facade
+
+`placeOrder()` calls the three classes in the right order, and undoes the reservation if the payment fails.
+
+```js
+class OrderFacade {
+    constructor() {
+        this.inventory = new Inventory();
+        this.payments = new Payments();
+        this.shipping = new Shipping();
+    }
+
+    placeOrder(order) {
+        // 1. Reserve the stock.
+        const reserved = this.inventory.reserve(order.item, order.quantity);
+        if (!reserved) {
+            return "Out of stock";
+        }
+
+        // 2. Charge the card. If that fails, put the stock back (undo, in one place only).
+        const total = order.price * order.quantity;
+        try {
+            this.payments.charge(order.user, total);
+        } catch (error) {
+            this.inventory.release(order.item, order.quantity);
+            return `Payment failed: ${error.message}`;
+        }
+
+        // 3. Create the shipping label.
+        const label = this.shipping.createLabel(order.address);
+        return `Order placed, ${label}`;
+    }
+}
+```
+
+### Step 4: Use the facade
+
+Callers only know `placeOrder()`.
+
+```js
 const shop = new OrderFacade();
-console.log(shop.placeOrder({ user: 'asha', item: 'book', qty: 1, price: 20, address: 'Pune' }));
-// Order placed, LABEL-Pune
-console.log(shop.placeOrder({ user: 'ben', item: 'book', qty: 1, price: 500, address: 'Leeds' }));
-// Payment failed: card declined
-console.log(shop.placeOrder({ user: 'cara', item: 'book', qty: 3, price: 20, address: 'Oslo' }));
-// Out of stock
+
+const ashaOrder = { user: "asha", item: "book", quantity: 1, price: 20, address: "Pune" };
+const benOrder = { user: "ben", item: "book", quantity: 1, price: 500, address: "Leeds" };
+const caraOrder = { user: "cara", item: "book", quantity: 3, price: 20, address: "Oslo" };
+
+console.log(shop.placeOrder(ashaOrder)); // Order placed, LABEL-Pune
+console.log(shop.placeOrder(benOrder)); // Payment failed: card declined
+console.log(shop.placeOrder(caraOrder)); // Out of stock
 ```
 
 The second order fails at payment, so its book goes back on the shelf. One book is left, so the third order (3 books) is out of stock.

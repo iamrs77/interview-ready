@@ -81,57 +81,102 @@ A `Loan` works out a fine with a `FinePolicy`, but only during the `fine()` call
 
 ## The four in JavaScript
 
+**Step 1: Composition.** A book makes its own copies and keeps them private (`#` means private in JavaScript):
+
 ```js
 class BookCopy {
-  constructor(barcode) { this.barcode = barcode; }
-}
-class Book {
-  #copies = [];
-  constructor(title) { this.title = title; }
-  addCopy(barcode) {           // composition: the book makes its own copies
-    const copy = new BookCopy(barcode);
-    this.#copies.push(copy);
-    return copy;
-  }
-}
-class Member {
-  constructor(name) { this.name = name; }
-}
-class Library {
-  #books = [];
-  #members = [];
-  addBook(title) {             // composition: the library makes its own books
-    const book = new Book(title);
-    this.#books.push(book);
-    return book;
-  }
-  join(member) {               // aggregation: the member is made outside, passed in
-    this.#members.push(member);
-  }
-}
-class PerDayFine {
-  fine(daysLate) { return daysLate * 1; }
-}
-class Loan {
-  constructor(member, copy) {  // association: keeps both in fields
-    this.member = member;
-    this.copy = copy;
-  }
-  fine(daysLate, policy) {     // dependency: the policy is only a parameter
-    return policy.fine(daysLate);
-  }
+    constructor(barcode) {
+        this.barcode = barcode;
+    }
 }
 
-const ana = new Member('Ana'); // exists before any library
+class Book {
+    #copies = [];
+
+    constructor(title) {
+        this.title = title;
+    }
+
+    // Composition: the book makes its own copies
+    addCopy(barcode) {
+        const copy = new BookCopy(barcode);
+        this.#copies.push(copy);
+        return copy;
+    }
+}
+```
+
+**Step 2: Aggregation.** A library makes its own books, but members are made outside and passed in:
+
+```js
+class Member {
+    constructor(name) {
+        this.name = name;
+    }
+}
+
+class Library {
+    #books = [];
+    #members = [];
+
+    // Composition: the library makes its own books
+    addBook(title) {
+        const book = new Book(title);
+        this.#books.push(book);
+        return book;
+    }
+
+    // Aggregation: the member is made outside and passed in
+    join(member) {
+        this.#members.push(member);
+    }
+}
+```
+
+**Step 3: Association and dependency.** A loan keeps the member and the copy, but only borrows the fine policy for one call:
+
+```js
+class PerDayFine {
+    fine(daysLate) {
+        return daysLate * 1;
+    }
+}
+
+class Loan {
+    // Association: the loan keeps both in its fields
+    constructor(member, copy) {
+        this.member = member;
+        this.copy = copy;
+    }
+
+    // Dependency: the policy is only a parameter. The loan does not keep it.
+    fine(daysLate, policy) {
+        return policy.fine(daysLate);
+    }
+}
+```
+
+**Step 4: Use them.** One member joins two libraries, then borrows a copy:
+
+```js
+// Ana exists before any library
+const ana = new Member("Ana");
+
 const city = new Library();
 const school = new Library();
-city.join(ana);
-school.join(ana);              // shared: one member, two libraries
 
-const copy = city.addBook('The Hobbit').addCopy('C1');
+// Shared: one member, two libraries
+city.join(ana);
+school.join(ana);
+
+const book = city.addBook("The Hobbit");
+const copy = book.addCopy("C1");
+
 const loan = new Loan(ana, copy);
 console.log(loan.member.name, loan.copy.barcode); // Ana C1
-console.log(loan.fine(3, new PerDayFine()));      // 3
+
+const policy = new PerDayFine();
+console.log(loan.fine(3, policy)); // 3
 ```
 
 ## The "does the part die with the whole?" test

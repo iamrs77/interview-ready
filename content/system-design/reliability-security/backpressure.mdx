@@ -90,15 +90,27 @@ flowchart LR
 **Node.js streams.** When you write to a stream faster than it can flush the data, `write()` returns `false`. That is the signal to stop and wait for the `drain` event:
 
 ```js
+// Copy everything from one stream to another, without filling up memory
 function copy(source, destination) {
-  source.on("data", (chunk) => {
-    const ok = destination.write(chunk);
-    if (!ok) {
-      source.pause();                                   // stop reading
-      destination.once("drain", () => source.resume()); // go on when there is room
-    }
-  });
-  source.on("end", () => destination.end());
+    // Runs each time a piece of data (a chunk) is read
+    source.on("data", (chunk) => {
+        const hasRoom = destination.write(chunk);
+
+        // The destination is full: stop reading for now
+        if (!hasRoom) {
+            source.pause();
+
+            // "drain" fires once there is room again: go on reading
+            destination.once("drain", () => {
+                source.resume();
+            });
+        }
+    });
+
+    // All data is read: close the destination
+    source.on("end", () => {
+        destination.end();
+    });
 }
 ```
 

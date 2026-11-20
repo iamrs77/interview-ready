@@ -52,15 +52,45 @@ You can't fix a hot key until you know which key it is. Ways to find it:
 - **Split the counter.** Keep 10 small counters instead of one. Each write adds 1 to a random one. To read, add all 10 together.
 - **Buffer and batch.** Count likes in memory for a second, then write "+500" once, instead of 500 separate writes.
 
-```js
-// Write: add 1 to one of 10 sub-counters, picked at random
-const n = Math.floor(Math.random() * 10);
-await redis.incr(`likes:post123:${n}`);
+**Write:** add 1 to one of the 10 sub-counters, picked at random.
 
-// Read: get all 10 sub-counters and add them up
-const keys = Array.from({ length: 10 }, (_, i) => `likes:post123:${i}`);
-const values = await Promise.all(keys.map((k) => redis.get(k)));
-const total = values.reduce((sum, v) => sum + Number(v ?? 0), 0);
+```js
+const COUNTER_COUNT = 10;
+
+async function addLike() {
+    // A random number from 0 to 9
+    const counterNumber = Math.floor(Math.random() * COUNTER_COUNT);
+
+    await redis.incr(`likes:post123:${counterNumber}`);
+}
+```
+
+**Read:** ask for all 10 sub-counters at the same time, then add them up.
+
+```js
+async function countLikes() {
+    // Start all 10 reads without waiting for each one
+    const requests = [];
+
+    for (let i = 0; i < COUNTER_COUNT; i++) {
+        const request = redis.get(`likes:post123:${i}`);
+        requests.push(request);
+    }
+
+    // Promise.all waits until all 10 answers are back
+    const values = await Promise.all(requests);
+
+    // A sub-counter that was never written comes back as null: skip it
+    let total = 0;
+
+    for (const value of values) {
+        if (value !== null) {
+            total = total + Number(value);
+        }
+    }
+
+    return total;
+}
 ```
 
 The 10 sub-keys usually land on different machines, so the writes are shared. Reads get a little more costly, which is fine when writes are the problem.

@@ -31,26 +31,33 @@ The first version keeps the mode in a string and checks it in every method:
 
 ```js
 class VendingMachine {
-  state = 'IDLE';
-  balance = 0;
-
-  insertMoney(amount) {
-    if (this.state === 'IDLE') {
-      this.balance += amount;
-      this.state = 'HAS_MONEY';
-    } else if (this.state === 'HAS_MONEY') {
-      this.balance += amount;
-    } else if (this.state === 'DISPENSING') {
-      console.log('Busy, please wait');
+    constructor() {
+        this.state = "IDLE";
+        this.balance = 0;
     }
-  }
 
-  selectItem(code) {
-    if (this.state === 'IDLE') console.log('Insert money first');
-    else if (this.state === 'HAS_MONEY') { /* check price, start dispensing... */ }
-    else if (this.state === 'DISPENSING') console.log('Busy, please wait');
-  }
-  // dispense() has the same three branches again...
+    insertMoney(amount) {
+        if (this.state === "IDLE") {
+            this.balance += amount;
+            this.state = "HAS_MONEY";
+        } else if (this.state === "HAS_MONEY") {
+            this.balance += amount;
+        } else if (this.state === "DISPENSING") {
+            console.log("Busy, please wait");
+        }
+    }
+
+    selectItem(code) {
+        if (this.state === "IDLE") {
+            console.log("Insert money first");
+        } else if (this.state === "HAS_MONEY") {
+            // check the price, start dispensing...
+        } else if (this.state === "DISPENSING") {
+            console.log("Busy, please wait");
+        }
+    }
+
+    // dispense() has the same three branches again...
 }
 ```
 
@@ -100,85 +107,149 @@ classDiagram
   VendingState <|-- DispensingState
 ```
 
-**Part 1:** the states. The base class says "no" by default, so each state only writes the actions it allows.
+The code comes in six small steps. Paste them in order into one file to run it.
+
+**Step 1: the base state.** It says "not now" to every action by default, so each state only writes the actions it allows.
 
 ```js
-class VendingState { // abstract: each state overrides only what it allows
-  constructor(machine) {
-    if (new.target === VendingState) throw new Error('VendingState is abstract');
-    this.machine = machine;
-  }
-  insertMoney(amount) { console.log('Busy, please wait'); }
-  selectItem(code) { console.log('Busy, please wait'); }
-  dispense() { console.log('Nothing to dispense'); }
-}
-
-class IdleState extends VendingState {
-  insertMoney(amount) {
-    this.machine.balance += amount;
-    console.log(`Balance: ${this.machine.balance}`);
-    this.machine.setState(new HasMoneyState(this.machine));
-  }
-  selectItem(code) { console.log('Insert money first'); }
-}
-
-class HasMoneyState extends VendingState {
-  insertMoney(amount) {
-    this.machine.balance += amount;
-    console.log(`Balance: ${this.machine.balance}`);
-  }
-  selectItem(code) {
-    const price = this.machine.prices[code];
-    if (price === undefined) return console.log('No such item');
-    if (this.machine.balance < price) {
-      return console.log(`Need ${price - this.machine.balance} more`);
+// The base state. Don't create it directly: create one of the states below.
+class VendingState {
+    constructor(machine) {
+        this.machine = machine;
     }
-    this.machine.balance -= price;
-    console.log(`Dispensing ${code}...`);
-    this.machine.setState(new DispensingState(this.machine, code));
-  }
-}
 
-class DispensingState extends VendingState {
-  #code;
-  constructor(machine, code) { super(machine); this.#code = code; }
-  dispense() {
-    console.log(`Here is ${this.#code}. Change: ${this.machine.balance}`);
-    this.machine.balance = 0;
-    this.machine.setState(new IdleState(this.machine));
-  }
+    insertMoney(amount) {
+        console.log("Busy, please wait");
+    }
+
+    selectItem(code) {
+        console.log("Busy, please wait");
+    }
+
+    dispense() {
+        console.log("Nothing to dispense");
+    }
 }
 ```
 
-**Part 2:** the machine, and a try-out.
+**Step 2: the idle state.** No money is in yet.
 
 ```js
-// Part 2: runs together with Part 1 above, as one file.
-class VendingMachine { // the context: it hands every call to its current state
-  #state = new IdleState(this);
-  balance = 0;
-  constructor(prices) { this.prices = prices; }
+class IdleState extends VendingState {
+    insertMoney(amount) {
+        this.machine.balance += amount;
+        console.log(`Balance: ${this.machine.balance}`);
 
-  setState(state) { this.#state = state; }
-  insertMoney(amount) { this.#state.insertMoney(amount); }
-  selectItem(code) { this.#state.selectItem(code); }
-  dispense() { this.#state.dispense(); } // called by the machine when the item drops
+        // Money is in now, so move to the next state.
+        const nextState = new HasMoneyState(this.machine);
+        this.machine.setState(nextState);
+    }
+
+    selectItem(code) {
+        console.log("Insert money first");
+    }
 }
+```
 
+**Step 3: the has-money state.** The user can add more money or pick an item.
+
+```js
+class HasMoneyState extends VendingState {
+    insertMoney(amount) {
+        this.machine.balance += amount;
+        console.log(`Balance: ${this.machine.balance}`);
+    }
+
+    selectItem(code) {
+        const price = this.machine.prices[code];
+
+        if (price === undefined) {
+            console.log("No such item");
+            return;
+        }
+
+        if (this.machine.balance < price) {
+            const missing = price - this.machine.balance;
+            console.log(`Need ${missing} more`);
+            return;
+        }
+
+        this.machine.balance -= price;
+        console.log(`Dispensing ${code}...`);
+
+        const nextState = new DispensingState(this.machine, code);
+        this.machine.setState(nextState);
+    }
+}
+```
+
+**Step 4: the dispensing state.** An item is dropping. This state remembers which item.
+
+```js
+class DispensingState extends VendingState {
+    constructor(machine, code) {
+        super(machine);
+        this.code = code;
+    }
+
+    dispense() {
+        console.log(`Here is ${this.code}. Change: ${this.machine.balance}`);
+        this.machine.balance = 0;
+
+        // Back to the start, ready for the next customer.
+        const nextState = new IdleState(this.machine);
+        this.machine.setState(nextState);
+    }
+}
+```
+
+**Step 5: the machine.** This is the context. It hands every call to its current state.
+
+```js
+class VendingMachine {
+    constructor(prices) {
+        this.prices = prices;
+        this.balance = 0;
+        this.state = new IdleState(this);
+    }
+
+    setState(state) {
+        this.state = state;
+    }
+
+    insertMoney(amount) {
+        this.state.insertMoney(amount);
+    }
+
+    selectItem(code) {
+        this.state.selectItem(code);
+    }
+
+    // The machine calls this itself when the item drops.
+    dispense() {
+        this.state.dispense();
+    }
+}
+```
+
+**Step 6: try it.**
+
+```js
 const machine = new VendingMachine({ A1: 70, B2: 40 });
-machine.selectItem('A1');  // Insert money first
+
+machine.selectItem("A1");  // Insert money first
 machine.insertMoney(50);   // Balance: 50
-machine.selectItem('A1');  // Need 20 more
+machine.selectItem("A1");  // Need 20 more
 machine.insertMoney(50);   // Balance: 100
-machine.selectItem('A1');  // Dispensing A1...
+machine.selectItem("A1");  // Dispensing A1...
 machine.insertMoney(10);   // Busy, please wait
 machine.dispense();        // Here is A1. Change: 30
-machine.selectItem('B2');  // Insert money first
+machine.selectItem("B2");  // Insert money first
 ```
 
 What changed:
 
-- `VendingMachine` has **no if/else on the mode**. It forwards each call to `#state`.
+- `VendingMachine` has **no if/else on the mode**. It forwards each call to `this.state`.
 - Each state class holds **all the rules for one mode** in one place.
 - The **states choose the next state** with `machine.setState(...)`.
 - A new "out of stock" mode is **one new class**; the other states barely change.
@@ -188,26 +259,33 @@ What changed:
 If the modes only decide **which mode comes next**, and don't do much work, a plain object is enough:
 
 ```js
-const transitions = { // state -> action -> next state
-  IDLE: { insertMoney: 'HAS_MONEY' },
-  HAS_MONEY: { insertMoney: 'HAS_MONEY', selectItem: 'DISPENSING' },
-  DISPENSING: { dispense: 'IDLE' },
+// For each state: which action leads to which next state.
+const transitions = {
+    IDLE: { insertMoney: "HAS_MONEY" },
+    HAS_MONEY: { insertMoney: "HAS_MONEY", selectItem: "DISPENSING" },
+    DISPENSING: { dispense: "IDLE" },
 };
 
 function next(state, action) {
-  const to = transitions[state][action];
-  if (!to) throw new Error(`Can't ${action} while ${state}`);
-  return to;
+    const nextState = transitions[state][action];
+
+    // Not in the table means the action is not allowed right now.
+    if (!nextState) {
+        throw new Error(`Can't ${action} while ${state}`);
+    }
+
+    return nextState;
 }
 
-let state = 'IDLE';
-state = next(state, 'insertMoney');
-state = next(state, 'selectItem');
+let state = "IDLE";
+state = next(state, "insertMoney");
+state = next(state, "selectItem");
 console.log(state); // DISPENSING
+
 try {
-  next(state, 'insertMoney');
+    next(state, "insertMoney");
 } catch (error) {
-  console.log(error.message); // Can't insertMoney while DISPENSING
+    console.log(error.message); // Can't insertMoney while DISPENSING
 }
 ```
 

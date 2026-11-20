@@ -40,20 +40,35 @@ Both say 700. But the first table has **forgotten how** it got there. Was it one
 
 To get the current state, start from nothing and apply each event in order:
 
-```ts
-type AccountEvent =
-  | { type: 'AccountOpened' }
-  | { type: 'MoneyDeposited'; amount: number }
-  | { type: 'MoneyWithdrawn'; amount: number };
+```js
+function balanceOf(events) {
+    let balance = 0;
 
-function balanceOf(events: AccountEvent[]) {
-  let balance = 0;
-  for (const e of events) {
-    if (e.type === 'MoneyDeposited') balance += e.amount;
-    if (e.type === 'MoneyWithdrawn') balance -= e.amount;
-  }
-  return balance;
+    for (const event of events) {
+        if (event.type === "MoneyDeposited") {
+            balance = balance + event.amount;
+        }
+
+        if (event.type === "MoneyWithdrawn") {
+            balance = balance - event.amount;
+        }
+    }
+
+    return balance;
 }
+```
+
+With the four events from the table above:
+
+```js
+const events = [
+    { type: "AccountOpened" },
+    { type: "MoneyDeposited", amount: 1000 },
+    { type: "MoneyWithdrawn", amount: 500 },
+    { type: "MoneyDeposited", amount: 200 },
+];
+
+console.log(balanceOf(events)); // 700
 ```
 
 To make a **new** change, the service loads the events, rebuilds the state, checks the rules, and appends one new event:

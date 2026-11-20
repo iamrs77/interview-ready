@@ -53,19 +53,29 @@ Deep checks find more problems, but they have a trap. Say the shared database ge
 
 **Rule of thumb:** the check that decides traffic should test only what the server itself owns. Don't fail it because a shared dependency, like the database, is slow. Watch shared parts with monitoring and alerts instead.
 
-```js
-// Express (Node.js)
-let started = false;      // set to true when startup work is done
-let shuttingDown = false; // set to true when a deploy stops this server
+Here are two health pages in Express (Node.js):
 
-app.get('/health/live', (req, res) => {
-  res.status(200).send('ok'); // the program is running
+```js
+// Set to true when startup work is done
+let started = false;
+
+// Set to true when a deploy stops this server
+let shuttingDown = false;
+
+// Live: the program is running
+app.get("/health/live", (req, res) => {
+    res.status(200).send("ok");
 });
 
-app.get('/health/ready', (req, res) => {
-  // Only things this server owns. Not the shared database.
-  const ready = started && !shuttingDown;
-  res.status(ready ? 200 : 503).send(ready ? 'ready' : 'not ready');
+// Ready: the server can take traffic.
+// It checks only things this server owns. Not the shared database.
+app.get("/health/ready", (req, res) => {
+    if (started && !shuttingDown) {
+        res.status(200).send("ready");
+        return;
+    }
+
+    res.status(503).send("not ready");
 });
 ```
 

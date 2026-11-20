@@ -36,35 +36,56 @@ A shop `Invoice` that adds up the total, **and** prints itself, **and** saves it
 
 ```js
 class Invoice {
-  constructor(customer, items) {
-    this.customer = customer;
-    this.items = items; // [{ name, price, qty }]
-  }
+    constructor(customer, items) {
+        this.customer = customer;
+        // Each item looks like { name, price, qty }
+        this.items = items;
+    }
 
-  total() {
-    return this.items.reduce((sum, item) => sum + item.price * item.qty, 0);
-  }
+    // Job 1: work out the total
+    total() {
+        let sum = 0;
+        for (const item of this.items) {
+            sum = sum + item.price * item.qty;
+        }
+        return sum;
+    }
 
-  print() {
-    const lines = this.items.map((i) => `${i.name} x${i.qty} = ${i.price * i.qty}`);
-    console.log([`Invoice for ${this.customer}`, ...lines, `Total: ${this.total()}`].join('\n'));
-  }
+    // Job 2: print the invoice
+    print() {
+        const lines = [`Invoice for ${this.customer}`];
+        for (const item of this.items) {
+            const lineTotal = item.price * item.qty;
+            lines.push(`${item.name} x${item.qty} = ${lineTotal}`);
+        }
+        lines.push(`Total: ${this.total()}`);
 
-  save(db) {
-    db.set(this.customer, { items: this.items, total: this.total() });
-    console.log(`Saved invoice for ${this.customer}`);
-  }
+        console.log(lines.join("\n"));
+    }
+
+    // Job 3: save the invoice
+    save(db) {
+        const record = { items: this.items, total: this.total() };
+        db.set(this.customer, record);
+        console.log(`Saved invoice for ${this.customer}`);
+    }
 }
+```
 
-const invoice = new Invoice('Asha', [
-  { name: 'Pen', price: 2, qty: 3 },
-  { name: 'Notebook', price: 5, qty: 2 },
+Now print and save one invoice:
+
+```js
+const invoice = new Invoice("Asha", [
+    { name: "Pen", price: 2, qty: 3 },
+    { name: "Notebook", price: 5, qty: 2 },
 ]);
+
 invoice.print();
 // Invoice for Asha
 // Pen x3 = 6
 // Notebook x2 = 10
 // Total: 16
+
 invoice.save(new Map()); // Saved invoice for Asha
 ```
 
@@ -107,39 +128,76 @@ classDiagram
 
 The dashed arrow means "uses for a moment". The hollow diamond means "holds, but doesn't own". All the arrows are explained in [Association, Aggregation and Composition](../modeling-uml/relationships.mdx).
 
+**Step 1: the invoice.** It only holds the items and works out the total:
+
 ```js
 class Invoice {
-  constructor(customer, items) {
-    this.customer = customer;
-    this.items = items;
-  }
-  total() {
-    return this.items.reduce((sum, item) => sum + item.price * item.qty, 0);
-  }
-}
+    constructor(customer, items) {
+        this.customer = customer;
+        this.items = items;
+    }
 
+    total() {
+        let sum = 0;
+        for (const item of this.items) {
+            sum = sum + item.price * item.qty;
+        }
+        return sum;
+    }
+}
+```
+
+**Step 2: the printer.** It turns an invoice into text, and does nothing else:
+
+```js
 class InvoicePrinter {
-  format(invoice) {
-    const lines = invoice.items.map((i) => `${i.name} x${i.qty} = ${i.price * i.qty}`);
-    return [`Invoice for ${invoice.customer}`, ...lines, `Total: ${invoice.total()}`].join('\n');
-  }
-}
+    format(invoice) {
+        const lines = [`Invoice for ${invoice.customer}`];
+        for (const item of invoice.items) {
+            const lineTotal = item.price * item.qty;
+            lines.push(`${item.name} x${item.qty} = ${lineTotal}`);
+        }
+        lines.push(`Total: ${invoice.total()}`);
 
+        return lines.join("\n");
+    }
+}
+```
+
+**Step 3: the repository.** It saves and finds invoices. Here a `Map` stands in for a real database:
+
+```js
 class InvoiceRepository {
-  #db = new Map();
-  save(invoice) { this.#db.set(invoice.customer, invoice); }
-  find(customer) { return this.#db.get(customer); }
-}
+    constructor() {
+        this.db = new Map();
+    }
 
-const invoice = new Invoice('Asha', [
-  { name: 'Pen', price: 2, qty: 3 },
-  { name: 'Notebook', price: 5, qty: 2 },
+    save(invoice) {
+        this.db.set(invoice.customer, invoice);
+    }
+
+    find(customer) {
+        return this.db.get(customer);
+    }
+}
+```
+
+**Step 4: use them together.** Each class does its own part:
+
+```js
+const invoice = new Invoice("Asha", [
+    { name: "Pen", price: 2, qty: 3 },
+    { name: "Notebook", price: 5, qty: 2 },
 ]);
+
 const repo = new InvoiceRepository();
 repo.save(invoice);
 
-console.log(repo.find('Asha').total()); // 16
-console.log(new InvoicePrinter().format(invoice));
+const savedInvoice = repo.find("Asha");
+console.log(savedInvoice.total()); // 16
+
+const printer = new InvoicePrinter();
+console.log(printer.format(invoice));
 // Invoice for Asha
 // Pen x3 = 6
 // Notebook x2 = 10
