@@ -10,7 +10,7 @@ import { defineDocs } from 'fumadocs-mdx/macro';
 import { applyMdxPreset } from 'fumadocs-mdx/config';
 import { learnRoute } from './shared';
 
-// Every track (system-design, low-level-design, later dsa) is a folder inside /content.
+// Every track (system-design, low-level-design, dsa) is a folder inside /content.
 const content = defineDocs({
   dir: 'content',
   docs: {
@@ -51,7 +51,7 @@ export const source = loader({
 });
 
 /** The tracks, in the order of content/meta.json. Each is a root folder: /learn/<key>. */
-export const TRACKS = ['system-design', 'low-level-design'] as const;
+export const TRACKS = ['system-design', 'low-level-design', 'dsa'] as const;
 export type Track = (typeof TRACKS)[number];
 
 /** The track of a page, from its slugs (['low-level-design', 'oop-basics', ...]) or its URL. */
