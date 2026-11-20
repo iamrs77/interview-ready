@@ -7,7 +7,7 @@ icon: FolderSync
 <Callout title="About this question">
   **Difficulty:** Medium. **Patterns used:** [File Upload and Download](../advanced-components/file-upload-download.mdx),
   [Object, Block and File Storage](../advanced-components/storage-types.mdx), [CDN](../caching/cdn.mdx),
-  [Polling, WebSockets and SSE](../foundations/polling-websockets-sse.mdx), [Locks](../databases/locking.mdx).
+  [Polling, WebSockets and SSE](../foundations/polling-websockets-sse.mdx), [Locks and Deadlocks](../databases/locking.mdx).
 </Callout>
 
 ## Understand the problem
@@ -55,20 +55,22 @@ A **hash** (like SHA-256) is a fingerprint of some data. The same bytes always g
 
 ```http
 POST /files
+Idempotency-Key: 5b2e8c1a-7d4f-4a9e-b3c6-1f0e2d9a8b7c
 { "name": "holiday.mp4", "folderId": "fld_1", "chunks": ["hash_a1", "hash_b2", "hash_c3"] }
 
 → 201 Created
 {
   "fileId": "f_77",
+  "uploadId": "up_91",
   "uploads": [{ "chunk": "hash_b2", "url": "https://storage.example.com/u_42/hash_b2?signature=..." }]
 }
 ```
 
-The server returns upload links only for chunks that **this user's account** does not already have. (Not chunks that *anyone* has: see deep dive 1 for why.) The client then sends each chunk straight to storage, and tells the server when it is done:
+The server returns upload links only for chunks that **this user's account** does not already have. (Not chunks that *anyone* has: see deep dive 1 for why.) The **`Idempotency-Key`** is made once by the app and sent again on every retry, so a lost reply never creates a second file (see [Idempotency](../messaging/idempotency.mdx)). The **`uploadId`** names this one save. The client then sends each chunk straight to storage, and tells the server when it is done:
 
 ```http
 POST /files/{fileId}/complete
-{ "baseVersion": 0 }
+{ "uploadId": "up_91", "baseVersion": 0 }
 
 → 200 OK
 { "fileId": "f_77", "version": 1 }
@@ -77,7 +79,9 @@ POST /files/{fileId}/complete
 { "currentVersion": 6 }
 ```
 
-**Saving a change** to a file works the same way. `POST /files/{fileId}/versions` with the new chunk list returns upload links for the new chunks. Then `complete` sends **`baseVersion`**: the version the change started from (`0` for a brand-new file). If another device saved a newer version in the meantime, the server answers `409 Conflict` (deep dive 4).
+**Saving a change** to a file works the same way. `POST /files/{fileId}/versions` with the new chunk list returns a new `uploadId` and upload links for the new chunks. Then `complete` sends **`baseVersion`**: the version the change started from (`0` for a brand-new file). If another device saved a newer version in the meantime, the server answers `409 Conflict` (deep dive 4).
+
+**A retry gets the first answer.** If `complete` worked but its reply was lost, the app sends it again. The server sees that `up_91` is already saved, and answers `200` with that version again, not a conflict.
 
 ```http
 GET /files/{fileId}
@@ -94,6 +98,11 @@ GET /changes?cursor=c41
 
 → 200 OK
 { "changes": [{ "fileId": "f_77", "version": 2 }], "cursor": "c42" }
+
+GET /changes/poll?cursor=c42          (long poll: waits up to about a minute)
+
+→ 200 OK
+{ "changes": true }
 ```
 
 ## Step 4: High-level design
@@ -111,9 +120,9 @@ flowchart LR
 
 1. The app cuts the file into 4 MB chunks and computes each chunk's hash.
 2. It sends the file name and the list of hashes to the File Service.
-3. The File Service saves the file info with status `uploading`. It returns a **presigned URL** for each chunk that this user's account does not have yet. A presigned URL is a link to storage with a signature in it. It lets the holder upload (or download) one object for a short time, without our servers in the middle.
+3. The File Service saves the file info with status `uploading`, and makes an `uploadId` for this save. It returns a **presigned URL** for each chunk that this user's account does not have yet. A presigned URL is a link to storage with a signature in it. It lets the holder upload (or download) one object for a short time, without our servers in the middle.
 4. The app uploads the chunks **straight to object storage**, several at a time. Storage checks that each chunk's bytes really match its hash (deep dive 1).
-5. The app calls `complete` with `baseVersion: 0`. The File Service checks that every chunk is there, saves version 1, and marks the file `ready`.
+5. The app calls `complete` with its `uploadId` and `baseVersion: 0`. The File Service checks that every chunk is there, saves version 1, and marks the file `ready`.
 
 **Download a file:**
 
@@ -165,7 +174,7 @@ sequenceDiagram
   F-->>C: URLs for chunks this account lacks
   C->>S: Upload chunks (in parallel)
   Note over S: Rejects a chunk whose bytes<br/>do not match its hash
-  C->>F: Upload complete, baseVersion 0
+  C->>F: Complete with uploadId, baseVersion 0
   F->>S: Check all chunks exist
   F-->>C: Saved as version 1
 ```
@@ -183,7 +192,7 @@ Sync has two directions.
 
 **From the cloud to the other devices:** every change is written to a **change log** for that user: change 41, change 42, and so on. Each device keeps a **cursor**: a bookmark that says "I have seen everything up to change 41".
 
-After saving a change, the File Service also sends a small "user 42 has changes" event to **Kafka**. The Notification Service reads Kafka and nudges that user's devices. Kafka keeps the two services apart: if the Notification Service is slow or restarting, events wait in Kafka instead of slowing down saves. (If a nudge event is ever lost, nothing breaks: the change log is the truth, and the device's next long poll finds the change.)
+After saving a change, the File Service also sends a small "user 42 has changes" event to **Kafka**. The Notification Service reads Kafka and nudges that user's devices. Kafka keeps the two services apart: if the Notification Service is slow or restarting, events wait in Kafka instead of slowing down saves. (If a nudge event is ever lost, nothing breaks: the change log is the truth. The device's next long poll carries its cursor, so it finds the change, at most about a minute later.)
 
 <Callout title="Not great: ask for the full file list every few seconds" type="error">
   Every device downloads the info of all 1,000 files, again and again, to spot what changed. Huge waste, and our
@@ -203,6 +212,8 @@ After saving a change, the File Service also sends a small "user 42 has changes"
 
 **Long polling** means the device asks "any changes?", and the server keeps the request open until there is a change, or until about a minute passes. Then the device asks again. It works through almost any network, and is simpler than WebSockets.
 
+The long poll must carry the device's **cursor** (`GET /changes/poll?cursor=c42`). The Notification Service first checks the change log: if it is already past `c42`, it answers **right away**. Why? Say a change happens after the device called `/changes`, but before it opened its next long poll. The nudge for it finds no open request and is gone. Without the cursor, the device would wait until something else changed. (The Dropbox API's `list_folder/longpoll` takes a cursor for the same reason.)
+
 ```mermaid
 sequenceDiagram
   participant A as Laptop
@@ -210,7 +221,7 @@ sequenceDiagram
   participant K as Kafka
   participant N as Notification Service
   participant B as Desktop
-  B->>N: Any changes? (long poll)
+  B->>N: Any changes after c41? (long poll)
   A->>F: Save report.docx v6
   F->>K: User 42 has changes
   K->>N: User 42 has changes
@@ -235,7 +246,7 @@ Main metadata tables:
 | Table | What it holds |
 | --- | --- |
 | `files` | `fileId`, `ownerId`, `parentFolderId`, `name`, `currentVersion` |
-| `file_versions` | `fileId`, `version`, the ordered list of chunk hashes |
+| `file_versions` | `fileId`, `version`, the ordered list of chunk hashes, `uploadId` (the save that made it, unique per file) |
 | `chunks` | `ownerId`, `hash`, `size`, `refCount` (how many versions or unfinished uploads use it), `state` (`live` or `deleting`), `lastUsedAt` |
 | `shares` | `fileId`, `userId`, `permission` (split by the file owner's ID) |
 | `shared_with_me` | `userId`, `fileId` (split by the **recipient's** ID, for the "Shared with me" list) |
@@ -254,7 +265,11 @@ The fix: both sides change the **same row** with a conditional update, so only o
 -- Upload reuses a chunk: take a reference only if the chunk is still live.
 UPDATE chunks SET ref_count = ref_count + 1, last_used_at = now()
 WHERE owner_id = 'u_42' AND hash = 'hash_b2' AND state = 'live';
--- 0 rows changed: treat the chunk as missing, and hand out an upload link for it.
+-- 0 rows changed: no live chunk. Add its row, and hand out an upload link.
+INSERT INTO chunks (owner_id, hash, ref_count, state, last_used_at)
+VALUES ('u_42', 'hash_b2', 1, 'live', now())
+ON CONFLICT (owner_id, hash) DO NOTHING;
+-- Still 0 rows: the row is there, maybe 'deleting'. Wait a moment, then try both again.
 
 -- Cleanup claims a chunk: only if unused, and unused for at least a day.
 UPDATE chunks SET state = 'deleting'
@@ -264,6 +279,8 @@ WHERE owner_id = 'u_42' AND hash = 'hash_b2'
 ```
 
 The upload takes its reference when `POST /files` answers, not at `complete`, so a chunk can't be deleted while an upload still needs it. Uploads that are never completed release their references after a day. The one-day wait is an extra safety margin for slow uploads and retries.
+
+**Why wait when a chunk is `deleting`?** A fresh upload of `hash_b2` would use the same storage key, `u_42/hash_b2`, and the same row. Cleanup could delete the new bytes right after they land. So the upload waits until cleanup has deleted the old bytes and then the row (usually well under a second), and only then adds a new row. If cleanup crashes after claiming a chunk, its next run finishes every `deleting` row (deleting the same bytes twice is harmless). In that rare case, the upload waits until then.
 
 ### 4. Two devices change the same file. Who wins?
 
@@ -284,16 +301,24 @@ Ana edits `report.docx` on her laptop during a flight, with no internet. At the 
   `report (Ana's conflicted copy).docx`. Nothing is lost, and a human decides how to combine them.
 </Callout>
 
-Ana's app sends `baseVersion: 5` in its `complete` call. The File Service runs:
+Both apps send `baseVersion: 5` in their `complete` call. For each save, the File Service runs:
 
 ```sql
--- Ana's app says: "my change is based on version 5".
-UPDATE files SET current_version = 7
+BEGIN;
+-- "My change is based on version 5." Move on only if 5 is still current.
+UPDATE files SET current_version = current_version + 1   -- 5 becomes 6
 WHERE file_id = 'f_77' AND current_version = 5;
--- 0 rows changed: version 5 is not current anymore (Ben saved version 6). Conflict!
+-- 0 rows changed: 5 is not current anymore. ROLLBACK. Conflict!
+-- 1 row changed: this save won. Add version 6 in the same transaction.
+INSERT INTO file_versions (file_id, version, chunk_hashes, upload_id)
+VALUES ('f_77', 6, ARRAY['hash_a1', 'hash_d4'], 'up_93');
+-- Also in this transaction: the change log row and the outbox event.
+COMMIT;
 ```
 
-The server answers `409 Conflict`, and Ana's app saves her file as the conflicted copy.
+Ben's save runs first: 1 row changes, and it becomes version 6. Ana's save runs later: 0 rows change, so the server answers `409 Conflict`, and Ana's app saves her file as the conflicted copy.
+
+**Is it a real conflict, or my own retry?** Say Ben's `complete` worked, but the reply was lost, and his app sends it again with `baseVersion: 5`. The update changes 0 rows, because of Ben's **own** save. Without care, Ben's app would make a conflicted copy of itself. So before answering `409`, the server looks for a version with this `uploadId`. `up_93` is already version 6, so it answers `200` with version 6 again. A retry gets the first answer. (`upload_id` is unique per file, so the same save can never become two versions.)
 
 This is **optimistic locking**: don't lock anything, just check the version when you save. See [Locks and Deadlocks](../databases/locking.mdx).
 
@@ -309,11 +334,13 @@ flowchart TB
   GW --> Notify["Notification Service<br/>(long poll / WebSocket)"]:::service
   FileSvc --> Cache[("Redis Cache<br/>file info, permissions")]:::cache
   FileSvc --> Meta[("Metadata DB<br/>split by user ID")]:::db
+  Notify -.->|"is the change log<br/>past this cursor?"| Meta
   FileSvc -->|"new change,<br/>share added (outbox)"| Kafka["Kafka"]:::queue
   Kafka -->|"nudge"| Notify
   Kafka --> ShareW["Share Worker"]:::service
   ShareW -->|"add to Shared with me"| Meta
   Client -->|"upload chunks<br/>(hash checked)"| Blob[("Object Storage<br/>chunks by owner + hash")]:::storage
+  FileSvc -->|"presigned URLs,<br/>check chunks exist"| Blob
   Client -->|"download chunks"| CDN["CDN"]:::storage
   CDN --> Blob
   GC["Cleanup Job"]:::service -->|"delete unused chunks"| Blob
@@ -370,7 +397,7 @@ Cache the answer to "can user X see file Y?" in Redis for a short time. When a s
 
 - Chunks with hashes: resumable uploads, upload only what changed, store each chunk once per account, and check the bytes match the hash.
 - Change log + cursor + a live nudge (through Kafka) for sync.
-- Version checks (`baseVersion` on save) and conflicted copies.
+- Version checks (`baseVersion` on save) and conflicted copies, and a retried save that is not mistaken for a conflict (`uploadId`).
 - Split metadata by user ID, with a "Shared with me" copy split by the recipient.
 
 </Tab>
@@ -388,7 +415,7 @@ Cache the answer to "can user X see file Y?" in Redis for a short time. When a s
   - **Bytes in object storage, file info in a database.** Never put big files in a database.
   - **Chunks + hashes** give resumable uploads, upload-only-what-changed, and deduplication. Dedupe only inside one account, and check the bytes match the hash.
   - **Presigned URLs:** the app talks to storage directly. Our servers only hand out links.
-  - **Sync = change log + cursor**, plus a **nudge** (long poll or WebSocket) so devices know when to look.
-  - **Conflicts:** the save sends its `baseVersion`. If it is old, keep both copies. Never lose work silently.
+  - **Sync = change log + cursor**, plus a **nudge** (long poll or WebSocket) so devices know when to look. The long poll carries the cursor, so no change waits for a lost nudge.
+  - **Conflicts:** the save sends its `baseVersion`. If it is old, keep both copies. Never lose work silently. A retried `complete` with the same `uploadId` gets `200`, not a conflict.
   - Folders point to their **parent by ID**, so renames are cheap.
 </Callout>

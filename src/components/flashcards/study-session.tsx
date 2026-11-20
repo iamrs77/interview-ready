@@ -1,14 +1,23 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useEffectEvent, useId, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, CircleCheck, RotateCcw } from 'lucide-react';
-import type { Flashcard } from '@/lib/flashcards';
+import type { Flashcard, Lesson } from '@/lib/flashcards';
 import { deckStats, recordAnswer, resetCards, useFlashcardProgress, useNow } from '@/lib/flashcard-progress';
 import { cn } from '@/lib/cn';
+import { ConfirmDialog } from '../confirm-dialog';
+import { ProgressBar, percentOf } from '../progress-bar';
 import { RichText } from './rich-text';
 
 type Phase = 'intro' | 'study' | 'done';
+
+/** Keys pressed in these belong to them (typing, pressing a button or link, a dialog), not to the cards. */
+const OWN_KEYS = 'input, textarea, select, [contenteditable], button, a, [role="dialog"], dialog';
+/** While any dialog is open (search, a Yes/No question), the card keys are off. */
+const OPEN_DIALOG = 'dialog[open], [role="dialog"]:not(dialog), [role="alertdialog"]:not(dialog)';
+/** The answer buttons: 1, 2, ← and → still work while one of them has focus. */
+const ANSWER_KEYS = ['1', '2', 'ArrowLeft', 'ArrowRight'];
 
 function shuffle<T>(items: T[]): T[] {
   const copy = [...items];
@@ -36,7 +45,7 @@ function Stat({ label, value }: { label: string; value: number }) {
   );
 }
 
-export function StudySession({ cards }: { cards: Flashcard[] }) {
+export function StudySession({ cards, lessons }: { cards: Flashcard[]; lessons: Record<string, Lesson> }) {
   const progress = useFlashcardProgress();
   const now = useNow();
   const cardIds = useMemo(() => cards.map((card) => card.id), [cards]);
@@ -48,30 +57,41 @@ export function StudySession({ cards }: { cards: Flashcard[] }) {
   const [queue, setQueue] = useState<string[]>([]);
   const [position, setPosition] = useState(0);
   const [revealed, setRevealed] = useState(false);
-  const [result, setResult] = useState({ knew: 0, again: 0 });
+  // knew = cards known the first time they came up. missed = cards answered "Again" at least once (each counted once).
+  const [result, setResult] = useState<{ knew: number; missed: string[] }>({ knew: 0, missed: [] });
+  // Cards in this session. A missed card goes to the end of the queue again, but it is still one card.
+  const [sessionSize, setSessionSize] = useState(0);
+
+  const questionId = useId();
+  const showAnswerRef = useRef<HTMLButtonElement>(null);
+  const answersRef = useRef<HTMLDivElement>(null);
 
   // "due": cards ready for review (shuffled), then new cards in lesson order. "all": every card, shuffled.
+  // Uses the same `now` as the "Due now" count, so the Start button and the session agree.
   function start(mode: 'due' | 'all') {
-    const current = Date.now();
     const ids =
       mode === 'all'
         ? shuffle(cardIds)
         : [
-            ...shuffle(cardIds.filter((id) => progress[id] && progress[id].due <= current)),
+            ...shuffle(cardIds.filter((id) => progress[id] && progress[id].due <= now)),
             ...cardIds.filter((id) => !progress[id]),
           ];
     if (ids.length === 0) return;
     setQueue(ids);
+    setSessionSize(ids.length);
     setPosition(0);
     setRevealed(false);
-    setResult({ knew: 0, again: 0 });
+    setResult({ knew: 0, missed: [] });
     setPhase('study');
   }
 
   function answer(knewIt: boolean) {
     const id = queue[position];
     recordAnswer(id, knewIt);
-    setResult((r) => (knewIt ? { ...r, knew: r.knew + 1 } : { ...r, again: r.again + 1 }));
+    setResult((r) => {
+      if (r.missed.includes(id)) return r;
+      return knewIt ? { ...r, knew: r.knew + 1 } : { ...r, missed: [...r.missed, id] };
+    });
     // A missed card comes back at the end of this session too.
     const nextQueue = knewIt ? queue : [...queue, id];
     setQueue(nextQueue);
@@ -80,29 +100,42 @@ export function StudySession({ cards }: { cards: Flashcard[] }) {
     else setPosition(position + 1);
   }
 
-  function resetDeck() {
-    if (window.confirm('Reset your progress for these cards? They will all be new again.')) resetCards(cardIds);
-  }
+  const [askingReset, setAskingReset] = useState(false);
 
   // Keyboard: Space or Enter shows the answer. 1 (or ←) = Again, 2 (or →) = I knew it.
+  const onKey = useEffectEvent((event: KeyboardEvent) => {
+    if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    if (document.querySelector(OPEN_DIALOG)) return;
+    const target = event.target instanceof Element ? event.target : null;
+    const onAnswerButtons = ANSWER_KEYS.includes(event.key) && target?.closest('[data-card-keys]');
+    if (target?.closest(OWN_KEYS) && !onAnswerButtons) return;
+
+    if (!revealed && (event.key === ' ' || event.key === 'Enter')) {
+      event.preventDefault();
+      setRevealed(true);
+    } else if (revealed && (event.key === '1' || event.key === 'ArrowLeft')) {
+      event.preventDefault();
+      answer(false);
+    } else if (revealed && (event.key === '2' || event.key === 'ArrowRight')) {
+      event.preventDefault();
+      answer(true);
+    }
+  });
+
   useEffect(() => {
     if (phase !== 'study') return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.altKey || event.ctrlKey || event.metaKey) return;
-      if (!revealed && (event.key === ' ' || event.key === 'Enter')) {
-        event.preventDefault();
-        setRevealed(true);
-      } else if (revealed && (event.key === '1' || event.key === 'ArrowLeft')) {
-        event.preventDefault();
-        answer(false);
-      } else if (revealed && (event.key === '2' || event.key === 'ArrowRight')) {
-        event.preventDefault();
-        answer(true);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  });
+    const listener = (event: KeyboardEvent) => onKey(event);
+    window.addEventListener('keydown', listener);
+    return () => window.removeEventListener('keydown', listener);
+  }, [phase]);
+
+  // Focus follows the card: the "Click the card…" hint for a new card, the answer buttons once it is shown.
+  // (The answer buttons' group gets focus, not one button, so a second Space or Enter can't answer by mistake.)
+  useEffect(() => {
+    if (phase !== 'study') return;
+    (revealed ? answersRef : showAnswerRef).current?.focus({ preventScroll: true });
+  }, [phase, revealed, position]);
 
   if (phase === 'done') {
     return (
@@ -110,7 +143,7 @@ export function StudySession({ cards }: { cards: Flashcard[] }) {
         <CircleCheck className="mx-auto size-10 text-emerald-600" />
         <h2 className="mt-3 text-xl font-semibold">Session done</h2>
         <p className="mt-2 text-fd-muted-foreground">
-          You knew {result.knew}. {result.again} needed another try.
+          You knew {result.knew}. {result.missed.length} needed another try.
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-3">
           <button
@@ -133,29 +166,27 @@ export function StudySession({ cards }: { cards: Flashcard[] }) {
 
   if (phase === 'study') {
     const card = byId.get(queue[position])!;
-    const percent = Math.round((position / queue.length) * 100);
+    const lesson = lessons[card.lesson];
+    // Cards still to answer "I knew it" in this session (the one on screen included). It never goes up,
+    // so the bar never goes backwards when a missed card is queued again.
+    const left = queue.length - position;
     return (
       <div className="mt-8">
         <div className="mb-2 flex items-center justify-between text-sm text-fd-muted-foreground">
           <span>
-            Card {position + 1} of {queue.length}
+            {left} {left === 1 ? 'card' : 'cards'} left
           </span>
           <button type="button" onClick={() => setPhase('done')} className="hover:text-fd-foreground">
             End session
           </button>
         </div>
-        <div className="h-1.5 overflow-hidden rounded-full bg-fd-muted">
-          <div
-            className="h-full rounded-full bg-linear-to-r from-indigo-500 to-violet-500 transition-all"
-            style={{ width: `${percent}%` }}
-          />
-        </div>
+        <ProgressBar percent={percentOf(sessionSize - left, sessionSize)} label="Session progress" />
 
-        {/* Click (or tap) anywhere on the card to see the answer. */}
+        {/*
+          Click anywhere on the card to see the answer (the owner wants no "Show answer" button).
+          The hint below is a plain-looking button only so the keyboard and screen readers can reveal it too.
+        */}
         <div
-          role={revealed ? undefined : 'button'}
-          tabIndex={revealed ? undefined : 0}
-          aria-label={revealed ? undefined : 'Show the answer'}
           onClick={() => setRevealed(true)}
           className={cn(
             'mt-6 rounded-2xl border bg-fd-card p-6 shadow-sm transition md:p-8',
@@ -163,13 +194,19 @@ export function StudySession({ cards }: { cards: Flashcard[] }) {
           )}
         >
           <p className="text-xs font-medium uppercase tracking-wide text-fd-muted-foreground">Question</p>
-          <p className="mt-3 text-xl font-medium leading-relaxed md:text-2xl">
+          <p id={questionId} className="mt-3 text-xl font-medium leading-relaxed md:text-2xl">
             <RichText text={card.q} />
           </p>
           {!revealed && (
-            <p className="mt-6 text-sm text-fd-muted-foreground">
+            <button
+              ref={showAnswerRef}
+              type="button"
+              aria-describedby={questionId}
+              onClick={() => setRevealed(true)}
+              className="mt-6 text-sm text-fd-muted-foreground hover:text-fd-foreground"
+            >
               Click the card to see the answer <Kbd>Space</Kbd>
-            </p>
+            </button>
           )}
           {revealed && (
             <div className="mt-6 border-t pt-6" aria-live="polite">
@@ -177,18 +214,27 @@ export function StudySession({ cards }: { cards: Flashcard[] }) {
               <p className="mt-3 text-lg leading-relaxed">
                 <RichText text={card.a} />
               </p>
-              <Link
-                href={card.lessonUrl}
-                className="mt-4 inline-flex items-center gap-1 text-sm text-fd-primary hover:underline"
-              >
-                From the lesson: {card.lessonTitle} <ArrowRight className="size-3.5" />
-              </Link>
+              {lesson && (
+                <Link
+                  href={lesson.url}
+                  className="mt-4 inline-flex items-center gap-1 text-sm text-fd-primary hover:underline"
+                >
+                  From the lesson: {lesson.title} <ArrowRight className="size-3.5" />
+                </Link>
+              )}
             </div>
           )}
         </div>
 
         {revealed && (
-          <div className="mt-5 flex flex-wrap justify-center gap-3">
+          <div
+            ref={answersRef}
+            role="group"
+            aria-label="Did you know it?"
+            tabIndex={-1}
+            data-card-keys
+            className="mt-5 flex flex-wrap justify-center gap-3 outline-none"
+          >
             <button
               type="button"
               onClick={() => answer(false)}
@@ -242,12 +288,22 @@ export function StudySession({ cards }: { cards: Flashcard[] }) {
         </button>
         <button
           type="button"
-          onClick={resetDeck}
+          onClick={() => setAskingReset(true)}
           className="ml-auto text-sm text-fd-muted-foreground hover:text-fd-foreground"
         >
           Reset progress
         </button>
       </div>
+      <ConfirmDialog
+        open={askingReset}
+        title="Reset these cards?"
+        message="Your progress for these cards will be cleared. They will all be new again."
+        onYes={() => {
+          resetCards(cardIds);
+          setAskingReset(false);
+        }}
+        onNo={() => setAskingReset(false)}
+      />
     </div>
   );
 }

@@ -1,12 +1,33 @@
 // Rebuilds PROGRESS.md from the sidebar order (meta.json files) and each page's `planned` flag.
 // Run: npm run progress
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 
 const trackDir = join(process.cwd(), 'content', 'system-design');
+const warnings = [];
 
 function readMeta(dir) {
-  return JSON.parse(readFileSync(join(dir, 'meta.json'), 'utf8'));
+  const file = join(dir, 'meta.json');
+  let meta;
+  try {
+    meta = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (e) {
+    console.error(`Can't read ${relative(process.cwd(), file)}: ${e.message}`);
+    process.exit(1);
+  }
+  if (!meta || typeof meta !== 'object' || !Array.isArray(meta.pages)) {
+    console.error(`${relative(process.cwd(), file)}: "pages" must be a list`);
+    process.exit(1);
+  }
+  return meta;
+}
+
+/*
+ * Sidebar entries that are not lesson files: links like "[Brain][Flashcards](/learn/...)",
+ * separators ("---" or "---Title---"), "..." / "z...a" / "...folder" (rest and extract), and "!page" (hidden).
+ */
+function isPageEntry(entry) {
+  return typeof entry === 'string' && entry.trim() !== '' && !/^(\[|---|!)/.test(entry) && !entry.includes('...');
 }
 
 function readPage(file) {
@@ -21,11 +42,16 @@ const lines = [];
 let total = 0;
 let written = 0;
 
-function addPage(file) {
+/** Adds one page line. A missing file is skipped with a warning. */
+function pageLine(file) {
+  if (!existsSync(file)) {
+    warnings.push(`skipped ${relative(process.cwd(), file)}: no such file`);
+    return [];
+  }
   const page = readPage(file);
   total++;
   if (!page.planned) written++;
-  lines.push(`- ${page.planned ? '⬜' : '✅'} ${page.title}`);
+  return [`- ${page.planned ? '⬜' : '✅'} ${page.title}`];
 }
 
 const root = readMeta(trackDir);
@@ -33,16 +59,15 @@ lines.push('## Guide');
 const guidePages = [];
 
 for (const entry of root.pages) {
-  // Skip sidebar links like "[Brain][Flashcards](/learn/...)" and separators: they are not lesson files.
-  if (entry.startsWith('[') || entry.startsWith('---')) continue;
+  if (!isPageEntry(entry)) continue;
   const folder = join(trackDir, entry);
   if (existsSync(join(folder, 'meta.json'))) {
     const meta = readMeta(folder);
     lines.push('', `## ${meta.title}`);
     for (const item of meta.pages) {
-      const separator = item.match(/^---(.+)---$/);
+      const separator = typeof item === 'string' && item.match(/^---(.+)---$/);
       if (separator) lines.push('', `**${separator[1]}**`, '');
-      else addPage(join(folder, `${item}.mdx`));
+      else if (isPageEntry(item)) lines.push(...pageLine(join(folder, `${item}.mdx`)));
     }
   } else {
     // Top-level pages (Start Here, Interview Framework, Cheat Sheet) are listed under "Guide".
@@ -51,20 +76,22 @@ for (const entry of root.pages) {
 }
 
 // Insert the guide pages right after the "## Guide" heading.
-const guideLines = [];
-for (const entry of guidePages) {
-  const file = join(trackDir, `${entry}.mdx`);
-  const page = readPage(file);
-  total++;
-  if (!page.planned) written++;
-  guideLines.push(`- ${page.planned ? '⬜' : '✅'} ${page.title}`);
-}
+const guideLines = guidePages.flatMap((entry) => pageLine(join(trackDir, `${entry}.mdx`)));
 lines.splice(1, 0, ...guideLines);
 
-// Count the flashcards (src/data/flashcards/system-design/*.json).
+// Count the flashcards (src/data/flashcards/system-design/*.json). A file that can't be read is skipped.
 const cardDir = join(process.cwd(), 'src', 'data', 'flashcards', 'system-design');
 const cardFiles = existsSync(cardDir) ? readdirSync(cardDir).filter((name) => name.endsWith('.json')) : [];
-const cardData = cardFiles.map((name) => JSON.parse(readFileSync(join(cardDir, name), 'utf8')));
+const cardData = cardFiles.flatMap((name) => {
+  try {
+    const data = JSON.parse(readFileSync(join(cardDir, name), 'utf8'));
+    if (data && Array.isArray(data.cards)) return [data];
+    warnings.push(`skipped flashcards ${name}: no "cards" list`);
+  } catch (e) {
+    warnings.push(`skipped flashcards ${name}: ${e.message}`);
+  }
+  return [];
+});
 const flashcards = { cards: cardData.reduce((n, d) => n + d.cards.length, 0), decks: new Set(cardData.map((d) => d.deck)).size };
 
 const output = [
@@ -92,4 +119,5 @@ const output = [
 ].join('\n');
 
 writeFileSync(join(process.cwd(), 'PROGRESS.md'), output);
+for (const warning of warnings) console.warn(`Warning: ${warning}`);
 console.log(`PROGRESS.md updated: ${written} of ${total} written.`);

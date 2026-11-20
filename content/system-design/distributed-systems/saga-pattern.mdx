@@ -20,7 +20,8 @@ Unlike [two-phase commit](./distributed-transactions-2pc.mdx), nobody waits and 
 flowchart TB
   S1["1. Book flight"] --> S2["2. Book hotel"] --> S3["3. Charge card"] --> S4["4. Rent car"]
   S4 -->|"works"| Done["Trip confirmed"]
-  S4 -->|"fails"| C3["Undo: refund card"]
+  S4 -->|"fails or times out"| C4["Undo: cancel car<br/>(in case it went through)"]
+  C4 --> C3["Undo: refund card"]
   C3 --> C2["Undo: cancel hotel"]
   C2 --> C1["Undo: cancel flight"]
   C1 --> Cancelled["Trip cancelled"]
@@ -31,7 +32,7 @@ flowchart TB
 | 1 | Flight | Book a seat | Cancel the seat |
 | 2 | Hotel | Reserve a room | Cancel the reservation |
 | 3 | Payment | Charge the card | Refund the card |
-| 4 | Car | Rent a car | None needed: it's the last step |
+| 4 | Car | Rent a car | Cancel the car. Even the last step needs one: its reply can be lost |
 
 ## Undo steps (compensating actions)
 
@@ -39,7 +40,7 @@ The official name for an undo step is a **compensating action**. A few rules mak
 
 - **An undo is a new action, not an eraser.** You refund a payment, you don't delete it. Both records stay, which is good for audits.
 - **Undo steps must succeed in the end.** If a refund fails, retry it until it works. So undo steps must be **idempotent** (safe to run twice). See [Idempotency](../messaging/idempotency.mdx).
-- **Some things can't be undone.** You can't un-send an email or un-ship a parcel. Put those steps **last**, after everything that might fail.
+- **Some things can't be undone.** You can't un-send an email or un-ship a parcel. Put those steps **last**, after everything that might fail. Since there is no undo, retry them with an [idempotency key](../messaging/idempotency.mdx) until they work.
 - **Others can see the in-between state.** For a moment, a hotel room shows as taken, then becomes free again. Sagas don't give the "I" (isolation) of ACID. Use clear statuses like `PENDING`, `CONFIRMED` and `CANCELLED`, so screens can show "Booking in progress".
 
 ## Two ways to run a saga
@@ -128,6 +129,7 @@ async function bookTrip(trip: Trip) {
     undo.push(() => refundCard(trip));
     await chargeCard(trip);
 
+    undo.push(() => cancelCar(trip));      // the last step too: its reply can be lost
     await rentCar(trip);
   } catch (err) {
     for (const step of undo.reverse()) {  // undo in reverse order
@@ -140,7 +142,7 @@ async function bookTrip(trip: Trip) {
 
 Two details matter here:
 
-- **The undo is added before its step.** Say `chargeCard` works, but its reply is lost and the call times out. If the refund were only added after a successful call, it would never run, and the customer would pay for a cancelled trip. So each undo is added first, and every undo must be **safe even if its step never happened**: "refund the payment for trip 42" does nothing if there is no payment.
+- **The undo is added before its step.** Say `chargeCard` works, but its reply is lost and the call times out. If the refund were only added after a successful call, it would never run, and the customer would pay for a cancelled trip. So each undo is added first, and every undo must be **safe even if its step never happened**: "refund the payment for trip 42" does nothing if there is no payment. This holds for the **last** step too: if `rentCar` times out, the car may be rented, so `cancelCar` must be in the list.
 - **Each undo is retried until it works.** A plain `await step()` would stop at the first failing undo and leave the rest undone. Undo steps must succeed in the end, so they are retried, and they are idempotent, so retries are safe.
 
 ## In the real world
@@ -155,13 +157,14 @@ Two details matter here:
 
 Use a saga whenever one user action changes data in several services, like checkout or booking:
 
-> "Checkout is a saga run by an orchestrator: reserve stock, charge the card, create the shipment. If creating the shipment fails, the orchestrator refunds the card and releases the stock. Every step is idempotent, so retries after a crash are safe."
+> "Checkout is a saga run by an orchestrator: reserve stock, charge the card, create the shipment. If creating the shipment fails or times out, the orchestrator cancels the shipment in case it went through, refunds the card and releases the stock. Every step is idempotent, so retries after a crash are safe."
 
 <Callout title="Remember this" type="success">
   - A **saga** = a long flow split into local steps that each **commit right away**.
   - If a step fails, run **compensating actions** (undo steps) for earlier steps, in **reverse order**.
   - Undo is a **new action** (refund), not an eraser. It must be **idempotent** and retried until it works.
-  - Put steps that **can't be undone** (emails, shipping) **last**.
+  - Add each undo **before** its step runs, even for the last step: a lost reply doesn't mean it failed.
+  - Put steps that **can't be undone** (emails, shipping) **last**, and retry them until they work.
   - **Choreography** = services react to events. **Orchestration** = one conductor. Orchestration is easier to follow.
   - Tools: **Temporal**, AWS Step Functions, Conductor OSS (first built at Netflix).
 </Callout>

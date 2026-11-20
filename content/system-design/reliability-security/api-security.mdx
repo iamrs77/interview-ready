@@ -39,16 +39,17 @@ A schema library makes this short. Here with zod in TypeScript:
 ```ts
 import { z } from "zod";
 
-const CreateOrder = z.object({
-  productId: z.string().uuid(),
+// strictObject: reject any field we didn't list
+const CreateOrder = z.strictObject({
+  productId: z.uuid(),
   quantity: z.number().int().min(1).max(10),
   note: z.string().max(200).optional(),
-}).strict(); // reject any field we didn't list
+});
 
 const input = CreateOrder.parse(req.body); // throws if anything is wrong: return 400
 ```
 
-**Why `.strict()` matters: mass assignment.** Say your "update my profile" endpoint copies the whole request body into the user's record. An attacker adds `"role": "admin"` to the body and makes themselves an admin. Only accept the fields you listed.
+**Why `strictObject` matters: mass assignment.** Say your "update my profile" endpoint copies the whole request body into the user's record. An attacker adds `"role": "admin"` to the body and makes themselves an admin. Only accept the fields you listed.
 
 The same goes for what you send back. Don't return the whole user record, with its password hash and internal flags, and hope the app hides them. Choose the fields you return.
 
@@ -87,6 +88,8 @@ The fixes:
 - **Escape output.** When you show user content, turn special characters like `<` into harmless text (`&lt;`), so the browser shows them instead of running them. React and most modern frameworks do this by default. Be careful with features that skip it, like `dangerouslySetInnerHTML`.
 - **HttpOnly cookies.** JavaScript can't read these cookies, so a script can't steal the session (see [Cookies, Sessions and JWT](../foundations/cookies-sessions-jwt.mdx)).
 - **Content-Security-Policy (CSP).** A response header that tells the browser which scripts are allowed to run, so injected scripts are blocked.
+
+For a related attack, where another website makes the user's browser call your API with the user's cookies, see [CSRF and CORS](./csrf-cors.mdx).
 
 ## Rate limits and abuse
 

@@ -20,14 +20,15 @@ export function MarkAsDone({ pageUrl, nextLesson }: MarkAsDoneProps) {
         {done ? 'Nice work! You finished this page.' : 'Finished reading? Mark this page as done.'}
       </p>
       <div className="flex flex-wrap items-center gap-2">
+        {/* No aria-pressed: the label itself changes ("Mark as done" / "Done"), and both together confuse screen readers. */}
         <button
           type="button"
-          aria-pressed={done}
           onClick={() => setPageDone(pageUrl, !done)}
           className={cn(
             'inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+            // The same green as the sidebar tick, dark enough to read on its light tint.
             done
-              ? 'bg-fd-success/15 text-fd-success hover:bg-fd-success/25'
+              ? 'bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20'
               : 'bg-fd-primary text-fd-primary-foreground hover:bg-fd-primary/85',
           )}
         >

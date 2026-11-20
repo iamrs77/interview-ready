@@ -5,27 +5,9 @@ import { ArrowRight } from 'lucide-react';
 import type { DeckKey } from '@/lib/flashcards';
 import { deckStats, useFlashcardProgress, useNow } from '@/lib/flashcard-progress';
 import { sections } from '@/lib/sections';
+import { ProgressBar, percentOf } from '../progress-bar';
 
 type DeckSummary = { key: DeckKey; cardIds: string[] };
-
-function ProgressBar({ percent }: { percent: number }) {
-  return (
-    <div
-      className="h-1.5 overflow-hidden rounded-full bg-fd-muted"
-      role="progressbar"
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={percent}
-    >
-      <div
-        className="h-full rounded-full bg-linear-to-r from-indigo-500 to-violet-500 transition-all"
-        style={{ width: `${percent}%` }}
-      />
-    </div>
-  );
-}
-
-const percentOf = (part: number, total: number) => (total === 0 ? 0 : Math.round((part / total) * 100));
 
 export function DeckList({ decks }: { decks: DeckSummary[] }) {
   const progress = useFlashcardProgress();
@@ -37,6 +19,8 @@ export function DeckList({ decks }: { decks: DeckSummary[] }) {
   );
   const toStudy = all.due + all.fresh;
 
+  // prefetch={false} on the deck links: each deck page carries its cards (the "all" page carries every card),
+  // so a page loads only when it is opened, not every time this list is shown.
   return (
     <div className="mt-8">
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border bg-fd-card p-5 shadow-sm">
@@ -48,11 +32,12 @@ export function DeckList({ decks }: { decks: DeckSummary[] }) {
             {all.due} due for review · {all.fresh} new
           </p>
           <div className="mt-3 max-w-md">
-            <ProgressBar percent={percentOf(all.known, all.total)} />
+            <ProgressBar percent={percentOf(all.known, all.total)} label="Cards known, all decks" />
           </div>
         </div>
         <Link
           href="/learn/system-design/flashcards/all"
+          prefetch={false}
           className="inline-flex items-center gap-2 rounded-lg bg-fd-primary px-4 py-2.5 text-sm font-medium text-fd-primary-foreground transition-colors hover:bg-fd-primary/85"
         >
           {toStudy > 0 ? `Study all decks (${toStudy})` : 'Practice all decks'}
@@ -68,6 +53,7 @@ export function DeckList({ decks }: { decks: DeckSummary[] }) {
             <Link
               key={deck.key}
               href={`/learn/system-design/flashcards/${deck.key}`}
+              prefetch={false}
               className="group rounded-2xl border bg-fd-card p-5 shadow-sm transition hover:border-fd-primary/40 hover:shadow-md"
             >
               <div className="flex items-center gap-2">
@@ -83,7 +69,7 @@ export function DeckList({ decks }: { decks: DeckSummary[] }) {
                 {stats.total} cards · {stats.due} due · {stats.fresh} new
               </p>
               <div className="mt-3">
-                <ProgressBar percent={percentOf(stats.known, stats.total)} />
+                <ProgressBar percent={percentOf(stats.known, stats.total)} label={`Cards known, ${section.label}`} />
               </div>
               <p className="mt-1.5 text-xs text-fd-muted-foreground">{stats.known} known</p>
             </Link>

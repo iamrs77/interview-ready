@@ -125,7 +125,7 @@
       "id": "databases/schemas-and-keys-10",
       "lesson": "databases/schemas-and-keys",
       "q": "Why is `BIGINT` the safe default for ID columns?",
-      "a": "In 2018, Basecamp 3 went read-only for hours when a 32-bit integer ID column hit its largest value, 2,147,483,647. New rows could not get an ID."
+      "a": "It is 64-bit, with a largest value of about 9.2 × 10¹⁸, so it never runs out in practice. In 2018, Basecamp 3 went read-only for hours when a 32-bit ID column hit its largest value, 2,147,483,647, and new rows could not get an ID."
     },
     {
       "id": "databases/normalization-1",
@@ -203,7 +203,7 @@
       "id": "databases/indexes-3",
       "lesson": "databases/indexes",
       "q": "Which kinds of queries can a B-tree index help with?",
-      "a": "Exact matches, ranges (`>`, `BETWEEN`), sorting (`ORDER BY`), and starts-with text like `LIKE 'run%'`. Not `LIKE '%shoes'`."
+      "a": "Exact matches, ranges (`>`, `BETWEEN`), sorting (`ORDER BY`), and starts-with text like `LIKE 'run%'`. Not `LIKE '%shoes'`. In PostgreSQL, `LIKE 'run%'` needs the `C` collation or an index built with `text_pattern_ops`."
     },
     {
       "id": "databases/indexes-4",
@@ -270,6 +270,12 @@
       "lesson": "databases/indexes",
       "q": "How do you add an index to a big live table in PostgreSQL?",
       "a": "Use `CREATE INDEX CONCURRENTLY`, because building an index the normal way can block writes."
+    },
+    {
+      "id": "databases/indexes-15",
+      "lesson": "databases/indexes",
+      "q": "Does PostgreSQL index foreign-key columns for you?",
+      "a": "No. Primary keys and `UNIQUE` columns get an index, but a foreign key like `orders.user_id` doesn't. Without one, joins on it are slow, and deleting a user scans all of `orders`. MySQL's InnoDB adds this index for you."
     },
     {
       "id": "databases/transactions-acid-1",
@@ -467,7 +473,7 @@
       "id": "databases/locking-8",
       "lesson": "databases/locking",
       "q": "What does `FOR UPDATE SKIP LOCKED` do, and what is it used for?",
-      "a": "It skips rows that are locked and takes the next free one. Job queues on PostgreSQL (like pg-boss and Solid Queue) use it so that many workers each grab a different job."
+      "a": "It skips rows that are locked and takes the next free one. Job queues on PostgreSQL (like pg-boss and Graphile Worker) use it so that many workers each grab a different job."
     },
     {
       "id": "databases/locking-9",
@@ -572,6 +578,18 @@
       "a": "The old primary was only cut off, not dead, so now two machines think they are the primary and both take writes. Systems use majority votes to avoid it."
     },
     {
+      "id": "databases/replication-13",
+      "lesson": "databases/replication",
+      "q": "What went wrong in GitHub's database failover in October 2018?",
+      "a": "A 43-second network cut made Orchestrator promote primaries on the West Coast before some East Coast writes were copied there. Each side had writes the other lacked, and GitHub spent about a day degraded, making the copies match again."
+    },
+    {
+      "id": "databases/replication-14",
+      "lesson": "databases/replication",
+      "q": "In GitLab's January 2017 outage, why didn't the replica save the data?",
+      "a": "An engineer deleted the primary's data folder by mistake. The only replica had already been wiped to rebuild replication, and several backup methods weren't working, so GitLab restored a copy about six hours old and lost those hours of changes."
+    },
+    {
       "id": "databases/partitioning-sharding-1",
       "lesson": "databases/partitioning-sharding",
       "q": "Partitioning vs sharding?",
@@ -635,7 +653,7 @@
       "id": "databases/partitioning-sharding-11",
       "lesson": "databases/partitioning-sharding",
       "q": "Why create many small logical shards up front?",
-      "a": "Create many small logical shards (say, 1,000) and place several on each machine. To grow, move whole logical shards to new machines. No key ever changes shard."
+      "a": "So you can grow by moving whole logical shards to new machines, and no key ever changes shard. Create many (say, 1,000) up front, and place several on each machine."
     },
     {
       "id": "databases/partitioning-sharding-12",
@@ -785,7 +803,7 @@
       "id": "databases/how-a-query-runs-4",
       "lesson": "databases/how-a-query-runs",
       "q": "In a query plan, what does a big gap between guessed and actual rows mean?",
-      "a": "The planner's **statistics** are out of date, so it may pick a bad route. Refresh them with `ANALYZE`."
+      "a": "Often that the planner's **statistics** are out of date: refresh them with `ANALYZE`. It can also come from filtering on two columns that depend on each other. Either way, the planner may pick a bad route."
     },
     {
       "id": "databases/how-a-query-runs-5",
@@ -834,6 +852,66 @@
       "lesson": "databases/sql-fundamentals",
       "q": "What is an upsert?",
       "a": "\"Insert, or update if it already exists\". In PostgreSQL: `INSERT ... ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name`, where `EXCLUDED` is the row you tried to insert."
+    },
+    {
+      "id": "databases/postgresql-vs-mysql-1",
+      "lesson": "databases/postgresql-vs-mysql",
+      "q": "How does MySQL (InnoDB) store a table, and what does a secondary index point to?",
+      "a": "The rows live **inside the primary key's B-tree**, sorted by primary key: a **clustered index**. A secondary index (like one on `email`) stores the row's primary key, so a lookup walks two trees: email index, then primary key index."
+    },
+    {
+      "id": "databases/postgresql-vs-mysql-2",
+      "lesson": "databases/postgresql-vs-mysql",
+      "q": "How does PostgreSQL store rows and indexes?",
+      "a": "Rows go in a **heap**: pages of rows in no special order. Every index, including the primary key, is a separate tree that points to the row's **location** (page and slot). The primary key index is not special."
+    },
+    {
+      "id": "databases/postgresql-vs-mysql-3",
+      "lesson": "databases/postgresql-vs-mysql",
+      "q": "Why do random UUID primary keys hurt InnoDB inserts, and what do you use instead?",
+      "a": "Rows live in the primary key tree, so each new row lands at a random spot: pages split and are left half empty, and once the table outgrows memory, inserts wait on disk. Every secondary index also copies the key. Use a growing `BIGINT` or a time-ordered UUIDv7."
+    },
+    {
+      "id": "databases/postgresql-vs-mysql-4",
+      "lesson": "databases/postgresql-vs-mysql",
+      "q": "Where do PostgreSQL and MySQL keep old row versions, and what cleans them up?",
+      "a": "**PostgreSQL:** in the table, as dead rows, until **VACUUM** removes them (autovacuum runs it). If it falls behind, tables **bloat**. **InnoDB:** it changes the row in place and keeps the old version in the **undo log**, which **purge** cleans up."
+    },
+    {
+      "id": "databases/postgresql-vs-mysql-5",
+      "lesson": "databases/postgresql-vs-mysql",
+      "q": "What is write amplification in PostgreSQL, and what is a HOT update?",
+      "a": "An `UPDATE` writes a new row version at a new location, so every index needs a new entry: one small change, many writes. A **HOT update** skips the index changes when no indexed column changed and the new version fits on the same page."
+    },
+    {
+      "id": "databases/postgresql-vs-mysql-6",
+      "lesson": "databases/postgresql-vs-mysql",
+      "q": "Can you roll back a schema change (DDL) in PostgreSQL? In MySQL?",
+      "a": "**PostgreSQL:** yes, most DDL runs inside a transaction (but not `CREATE INDEX CONCURRENTLY`). **MySQL:** no. DDL causes an **implicit commit**, so a migration that fails halfway leaves its earlier steps done."
+    },
+    {
+      "id": "databases/postgresql-vs-mysql-7",
+      "lesson": "databases/postgresql-vs-mysql",
+      "q": "How do you index a value inside JSON in PostgreSQL vs MySQL?",
+      "a": "**PostgreSQL:** store it as `JSONB`, add a **GIN** index, and search with `@>`. **MySQL:** copy the value into a **generated column** (computed from other columns) and index that column."
+    },
+    {
+      "id": "databases/postgresql-vs-mysql-8",
+      "lesson": "databases/postgresql-vs-mysql",
+      "q": "How do MySQL upserts work, and how do you get a new row's ID without `RETURNING`?",
+      "a": "`INSERT ... ON DUPLICATE KEY UPDATE`, which fires on a clash with **any** unique key, including the primary key. MySQL has no `RETURNING`, so read a new auto-increment ID with `LAST_INSERT_ID()`."
+    },
+    {
+      "id": "databases/postgresql-vs-mysql-9",
+      "lesson": "databases/postgresql-vs-mysql",
+      "q": "PostgreSQL streaming vs logical replication?",
+      "a": "**Streaming** sends the WAL (low-level page changes): an exact, read-only copy of the whole server, on the same major version. **Logical** sends row changes for chosen tables, and the other side can run a newer version, so it helps with upgrades."
+    },
+    {
+      "id": "databases/postgresql-vs-mysql-10",
+      "lesson": "databases/postgresql-vs-mysql",
+      "q": "Why did Uber move from PostgreSQL to MySQL in 2016?",
+      "a": "Its engineering post named **write amplification** (changing one column could mean new entries in every index) and **replication** (the low-level WAL sent a lot of data between data centers and made upgrades hard)."
     }
   ]
 }

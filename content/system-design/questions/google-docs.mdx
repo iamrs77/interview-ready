@@ -71,8 +71,10 @@ Upgrade: websocket
 A message from the browser to the server, "I typed `H` at position 1, based on version 1287":
 
 ```json
-{ "type": "op", "opId": "alice-17", "baseVersion": 1287, "op": { "insert": "H", "at": 1 } }
+{ "type": "op", "opId": "c7f3a-17", "baseVersion": 1287, "op": { "insert": "H", "at": 1 } }
 ```
+
+The `opId` is this tab's own random **client ID** (`c7f3a`) plus a counter. A user ID alone is not enough: Alice may have the same document open in two tabs.
 
 A message from the server to everyone else, and a cursor update:
 
@@ -99,11 +101,11 @@ flowchart LR
 
 **Edit:**
 
-1. Alice types. Her browser **shows the change right away**. It doesn't wait for the server. Until the server confirms it, the op sits in the browser's **pending** list.
-2. The browser sends the op to the Document Service.
+1. Alice types. Her browser **shows the change right away**. It doesn't wait for the server. Until the server confirms it, the op is **pending**.
+2. The browser sends the op to the Document Service. It keeps only **one op in flight**: anything Alice types before the server confirms that op waits in a **buffer** in the browser (deep dive 1 shows why).
 3. The server puts the op **in order** with all other ops for this document, gives it the next version number, and saves it to the operations log.
-4. The server sends the op to everyone else in the document. Each browser first **adjusts the op against its own pending ops**, then applies it (deep dive 1 shows why).
-5. The server tells Alice "saved as version 1288".
+4. The server sends the op to everyone else in the document. Each browser first **adjusts the op against its own pending ops** (the one in flight, then the buffer), then applies it.
+5. The server tells Alice "saved as version 1288". Her browser then sends the buffer, combined into one op, based on version 1288.
 
 Notice we save **ops**, not the whole document after each keystroke. Each op is tiny, and the list of ops is the full history.
 
@@ -151,6 +153,7 @@ Alice ends with `CHT` and Bob with `CHA`. **The copies are different**, and Alic
 - If someone **inserted** text **before** my position, move my position **right** by that many characters.
 - If someone **deleted** text **before** my position, move my position **left**.
 - If their change is **after** my position, change nothing.
+- **Same spot.** Two inserts at the same position: a fixed rule picks which goes first, for example the lower client ID. Every copy uses the same rule, so they agree. Two deletes of the same letter: the second becomes a **no-op** (it does nothing), because the letter is already gone.
 
 ```js
 // Adjust a delete so it still removes the same letter after someone else's insert
@@ -189,7 +192,11 @@ Bob receives Alice's insert, but his own delete is still **pending**: it is on h
 - **Wrong:** Bob's browser applies "insert `H` at 1" as it came. `AT` becomes `AHT`. Bob's copy is now different.
 - **Right:** Bob's browser transforms it against his pending delete first. A letter **before** position 1 was deleted, so the insert moves left, to position 0. `AT` becomes `HAT`.
 
-The rule: before applying an op from the server, the browser transforms it against **every op it has sent but not yet seen confirmed**, and updates those pending ops the same way. The server transforms incoming ops against what it already has; each browser does the same against what it has typed.
+The rule: before applying an op from the server, the browser transforms it against **all its pending ops** (the one in flight, then the buffer), and updates those pending ops the same way. The server transforms incoming ops against what it already has; each browser does the same against what it has typed.
+
+**Why only one op in flight?** Say Alice types `H` at 1, then `E` at 2 (`CAT` → `CHAT` → `CHEAT`), and sends both at once, before the server confirms either. Both say "based on 1287". The server saves `H` as 1288. Then it transforms `E` against 1288, which is Alice's **own** `H`. An insert came before position 2, so `E` moves to 3, and the server stores `CHAET`. But Alice had already counted her `H` when she typed `E`. The copies now differ.
+
+So the browser sends **one op at a time**. While `H` is in flight, `E` waits in the buffer (more typing joins the buffer too). When the server confirms `H` as 1288, the browser sends `E` based on 1288. Now the server transforms `E` only against **other people's** ops, never against Alice's own earlier ones. Google Wave and the open-source ot.js library work this way.
 
 **The other approach: CRDTs.** A **CRDT** (Conflict-free Replicated Data Type) avoids positions completely. Every character gets a **unique ID that never changes**:
 
@@ -200,7 +207,7 @@ The rule: before applying an op from the server, the browser transforms it again
 - Alice's edit becomes "insert `H` **after `c1`**".
 - Bob's edit becomes "delete **`t1`**".
 
-IDs don't move when other people type, so these edits can be applied **in any order**, on any copy, and the result is always `CHA`. If two people insert after the same character at the same moment, every copy sorts the two inserts the same way (for example, by user ID), so they still agree. Deleted characters are kept as hidden markers called **tombstones**, so later edits that point at them still work.
+IDs don't move when other people type, so these edits can be applied **in any order**, on any copy, and the result is always `CHA`. If two people insert after the same character at the same moment, every copy sorts the two inserts the same way (for example, by client ID), so they still agree. Deleted characters are kept as hidden markers called **tombstones**, so later edits that point at them still work.
 
 | | OT | CRDT |
 | --- | --- | --- |
@@ -237,7 +244,7 @@ flowchart LR
   ZK["Coordination service<br/>(list of servers)"]:::service -.-> LB
 ```
 
-**When an owner server dies:** its documents move to the next server on the ring. That server loads each document (snapshot plus recent ops, see the next deep dive). Browsers notice the dropped WebSocket, reconnect with `fromVersion` set to the last version they have, and **resend any ops the server never confirmed**. Each op has an ID like `alice-17`, so if the server already saved it, it simply ignores the copy. That is [idempotency](../messaging/idempotency.mdx).
+**When an owner server dies:** its documents move to the next server on the ring. That server loads each document (snapshot plus recent ops, see the next deep dive). Browsers notice the dropped WebSocket, reconnect with `fromVersion` set to the last version they have, and **resend the op the server never confirmed** (then the buffer, as usual). Each op has an ID like `c7f3a-17` (client ID plus counter), so if the server already saved it, it simply ignores the copy. That is [idempotency](../messaging/idempotency.mdx).
 
 **What if the old owner is not dead, just slow?** It may have lost contact with the coordination service for a few seconds while still serving its browsers. Now two servers think they own `d_42`. Both could save a different op as version 1288, and the document would split into two histories.
 
@@ -257,9 +264,9 @@ flowchart LR
 
 **Open a document** = load the latest snapshot, then replay only the ops after it.
 
-**When is an edit "saved"?** The server writes the op to the log **first**, and only then tells the author "saved". Until then, the browser keeps the op in a **pending** list and will resend it after a reconnect.
+**When is an edit "saved"?** The server writes the op to the log **first**, and only then tells the author "saved". Until then, the browser keeps the op as **pending** and will resend it after a reconnect.
 
-**Version history** is almost free. Each snapshot is an old version. To "restore" version 900, we don't delete anything. We add **new** ops that turn the current text back into version 900's text. History is never lost.
+**Version history** is almost free. Any old version can be rebuilt from the log: load the snapshot just before it, then replay ops up to it. Version 1,250 = the snapshot at 1,000 + ops 1,001 to 1,250. To "restore" version 1,250, we don't delete anything. We add **new** ops that turn the current text back into version 1,250's text. History is never lost.
 
 **Where it lives:** the ops log in a database that is good at fast appends and supports conditional writes (for the fence above), split by document ID. Snapshots in object storage like S3. Titles and owners in a normal SQL database. The Docs API reads the latest snapshot and the newer ops to answer `GET /docs/d_42`.
 
@@ -337,7 +344,7 @@ They are just more op types, like "make positions 5 to 10 bold". The same idea a
 </Tab>
 <Tab value="Senior">
 
-- Explain OT with a worked example, including why the browser transforms incoming ops against its pending ops, and how CRDTs differ, with tradeoffs.
+- Explain OT with a worked example, including why the browser transforms incoming ops against its pending ops and keeps only one op in flight, and how CRDTs differ, with tradeoffs.
 - Join and rejoin with `fromVersion`, so no op is missed.
 - Route all editors of a document to one owner server with consistent hashing.
 - Snapshots plus ops replay, "saved" only after the log write, and resending pending ops with IDs.
@@ -358,6 +365,7 @@ They are just more op types, like "make positions 5 to 10 bold". The same idea a
   - **The hard part is edits at the same time**, not scale.
   - **Positions shift** when others type. `CAT` example: Bob's "delete 2" must become "delete 3".
   - **OT:** a central server orders ops and transforms them. Each browser also transforms incoming ops against its own **pending** ops. Google Docs uses it.
+  - **One op in flight** per browser, the rest buffered. Then the server never transforms an op against the same browser's earlier ops.
   - **CRDT:** characters get fixed IDs, so any order works. Great for offline, uses more memory.
   - **One owner server per document**, chosen by consistent hashing on the doc ID. The log only accepts a version once, so two owners can't split the history.
   - **Ops log + snapshots:** open = latest snapshot + newer ops. "Saved" only after the log write.

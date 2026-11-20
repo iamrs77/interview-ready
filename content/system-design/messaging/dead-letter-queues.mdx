@@ -83,7 +83,7 @@ An alarm fires. An engineer looks at the message, fixes the cause, and **replays
 | Tool | How |
 | --- | --- |
 | **Amazon SQS** | Give the main queue a **redrive policy**: which queue is the DLQ, and `maxReceiveCount`, how many tries before a message moves there |
-| **RabbitMQ** | A **dead-letter exchange**. A message goes there when a consumer rejects it without putting it back, when its time limit runs out, or when the queue is over its size limit |
+| **RabbitMQ** | A **dead-letter exchange**. A message goes there when a consumer rejects it without putting it back, when its time limit runs out, when the queue is over its size limit, or (quorum queues, since RabbitMQ 4.0) when it has been redelivered more times than the `delivery-limit`, 20 by default. With no dead-letter exchange set, these messages are dropped |
 | **Kafka** | No built-in DLQ for consumers. Your consumer code writes the failed message to a separate topic, like `orders.dlq`, then moves on. Kafka Connect has a DLQ setting built in |
 
 The SQS redrive policy:
@@ -109,6 +109,11 @@ flowchart TB
 ```
 
 The main topic never waits on a failing message, and short problems fix themselves in a retry topic.
+
+**The catch: order breaks.** Say the Inventory Service fails on `OrderPlaced` for order 42, and the event goes to a retry topic. A moment later, `OrderCancelled` for order 42 arrives on the main topic and is handled first. Then the retry runs, and stock is reserved for a cancelled order. Keying by order ID (see [Kafka](./kafka.mdx)) can't help once events leave the main topic. When order matters:
+
+- **Park the whole key.** Once one event for order 42 is parked, send every later event for order 42 to the same place, and replay them in order.
+- **Or pause the partition** until the problem is fixed. The other keys in that partition wait too.
 
 ## Checking and replaying failed messages
 
@@ -141,6 +146,7 @@ Mention a DLQ every time you add a queue. It shows you thought about failure:
   - A **poison message** fails every time. Without a DLQ, it is retried **forever** and can block others.
   - A **DLQ** takes a message after **N failed tries**, so the main queue keeps flowing.
   - Retry **short-lived** errors with backoff. Send **permanent** errors to the DLQ.
+  - Retry topics and the DLQ **break per-key order**. If order matters, park the **whole key** or pause the partition.
   - **Alert** when the DLQ is not empty. Fix the cause, then **replay** (redrive).
   - Replay is only safe if consumers are **idempotent**.
 </Callout>

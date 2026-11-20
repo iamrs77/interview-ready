@@ -8,6 +8,10 @@ import { SidebarDoneMarks } from '@/components/sidebar-done-marks';
  * This grid puts the sidebar flush against the left edge, and centers the page + "On this page"
  * in the space that is left.
  * Columns: sidebar | gap | page | on-this-page | gap
+ *
+ * Copies Fumadocs 16.19 internals: the grid areas and CSS variables of its docs layout container
+ * (node_modules/fumadocs-ui/dist/layouts/docs/slots/container.js). Re-check after a Fumadocs upgrade:
+ * the sidebar should still sit flush left, with the page and "On this page" centered next to it.
  */
 const gridTemplate = `"sidebar . header toc ."
 "sidebar . toc-popover toc ."

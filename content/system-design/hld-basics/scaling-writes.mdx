@@ -117,7 +117,7 @@ But a viral post can get thousands of likes per second, and every one updates **
 
 The fixes, from simple to advanced:
 
-1. **Count in Redis.** `INCR likes:42` happens in memory and is very fast. Copy the totals to the database every few seconds.
+1. **Count in Redis.** `INCR likes:42` happens in memory and is very fast. A small job copies the totals to the database every few seconds. (Redis can't write to your database by itself.)
 2. **Batch the increments.** Each app server counts in its own memory for a few seconds, then writes `likes = likes + 312` once.
 3. **Sharded counters.** Split one counter into, say, 10 smaller counters. Each like adds 1 to a random one. To read the total, add them up. Now 10 writes can happen at the same time.
 4. **Approximate counts.** For "how many **different** people viewed this?", use a **HyperLogLog**, which estimates the answer using very little memory (see [Bloom Filter, HyperLogLog, Count-Min Sketch](../advanced-components/probabilistic-data-structures.mdx)).
@@ -127,13 +127,16 @@ The fixes, from simple to advanced:
 flowchart TB
   U["Users tapping like"]:::client --> API["API Servers"]:::service
   API -->|"INCR likes:42"| R[("Redis counters")]:::cache
-  R -->|"every 5 seconds:<br/>save totals"| DB[("Database")]:::db
+  J["Sync job<br/>runs every 5 seconds"]:::service -->|"read totals"| R
+  J -->|"save totals"| DB[("Database")]:::db
 ```
 
 A sharded counter in SQL looks like this:
 
 ```sql
 -- One row per small counter: (post_id, slot, count)
+-- Create all 10 rows (slots 0 to 9, count 0) when the post is created.
+-- Otherwise this UPDATE finds no row and silently does nothing.
 -- Write: add 1 to a random slot, from 0 to 9
 UPDATE like_counts SET count = count + 1
 WHERE post_id = 42 AND slot = 7;
@@ -148,7 +151,7 @@ Most apps show "1.2M likes" anyway. An exact, up-to-the-second count is rarely n
 
 **Discord stores messages in a write-friendly database.** In 2017, Discord wrote that it had moved its messages from MongoDB to Cassandra, because it needed to store billions of messages with a heavy, steady stream of writes. In 2023, it wrote about moving again, to ScyllaDB (a database compatible with Cassandra), as it grew to trillions of messages.
 
-**Google Firestore tells you to shard counters.** Google's Firestore documentation says a single document can only be updated about once per second. For counters that change faster, it tells developers to use **distributed counters**: split the count across several documents and add them up when reading.
+**Google Firestore tells you to shard counters.** As of 2026, Google's Firestore documentation warns that you can't update a single document at an unlimited rate. It gives no fixed number (older versions of the docs said about once per second). For counters that change faster, it tells developers to use **distributed counters**: split the count across several documents and add them up when reading.
 
 **Instagram sharded PostgreSQL.** In 2012, Instagram's engineering blog described splitting its data into thousands of small **logical shards**, spread across a much smaller number of PostgreSQL servers. Each new ID even includes the number of the shard it lives on, so the app always knows where to find it.
 

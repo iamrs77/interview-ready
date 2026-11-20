@@ -28,6 +28,8 @@ CREATE INDEX idx_users_email ON users (email);
 
 The database keeps the index up to date for you on every insert, update and delete. Primary keys and `UNIQUE` columns get an index automatically.
 
+**Foreign keys don't, in PostgreSQL.** A column like `orders.user_id` gets no index unless you add one. Without it, joins on that column are slow, and deleting a user must scan the whole `orders` table to check for orders that still point to it. (MySQL's InnoDB adds this index for you.)
+
 An index helps only with the column it is sorted by. Your phone contacts are sorted by name, so finding "Ravi" is instant. But "who has a number ending in 4321?" means scrolling through every contact.
 
 ## B-trees: great for reads
@@ -54,7 +56,7 @@ Because the keys are sorted, a B-tree helps with:
 - Exact matches: `WHERE email = '...'`
 - Ranges: `WHERE created_at > '2026-01-01'`, `BETWEEN`
 - Sorting: `ORDER BY created_at` (the index is already in order)
-- Starts-with text: `LIKE 'run%'` (but not `LIKE '%shoes'`)
+- Starts-with text: `LIKE 'run%'` (but not `LIKE '%shoes'`). In PostgreSQL, a plain index helps here only if the database uses the simple `C` collation (its rules for sorting text). Otherwise, build the index with `text_pattern_ops`: `CREATE INDEX ON products (name text_pattern_ops);`
 
 The weak side: every write must find the right page and change it **in place**, at a random spot on disk. When a page is full, it **splits** in two. Heavy write loads mean lots of small random disk writes.
 
@@ -79,7 +81,7 @@ Step by step:
 1. **Write:** the change is appended to a log on disk (so a crash loses nothing) and added to a sorted list **in memory**, called the **memtable**. Both are very fast.
 2. **Flush:** when the memtable is full, it is written to disk in one go as a sorted file, called an **SSTable** (Sorted String Table). These files are never changed after being written.
 3. **Compaction:** in the background, small files are merged into bigger ones. Old versions and deleted items are thrown away.
-4. **Read:** check the memtable, then the newest file, then older ones. To skip files quickly, each file has a **Bloom filter**, a tiny summary that can say "this key is definitely not in this file". See [Probabilistic Data Structures](../advanced-components/probabilistic-data-structures.mdx).
+4. **Read:** check the memtable, then the newest file, then older ones. To skip files quickly, each file has a **Bloom filter**, a tiny summary that can say "this key is definitely not in this file". See [Bloom Filter, HyperLogLog, Count-Min Sketch](../advanced-components/probabilistic-data-structures.mdx).
 
 ## B-tree vs LSM tree
 

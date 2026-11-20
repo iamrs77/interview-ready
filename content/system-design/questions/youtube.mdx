@@ -54,11 +54,14 @@ The video bytes are the whole challenge:
 
 ```http
 POST /videos
+Idempotency-Key: 9e4d2b7a-3c1f-4e8b-a6d5-0f2c8b1e7a93
 { "title": "My trip to Japan", "description": "Two weeks in Tokyo and Kyoto" }
 
 → 201 Created
 { "videoId": "v_abc", "uploadUrls": ["https://storage.example.com/raw/v_abc/part-1?signature=...", "..."] }
 ```
+
+The app makes the **`Idempotency-Key`** once and sends it again on every retry. If the reply is lost, the retry gets the same `videoId` back, not a second, empty video.
 
 ```http
 POST /videos/{videoId}/complete
@@ -114,7 +117,7 @@ flowchart TB
 
 1. The creator's app sends `POST /videos`. The Video Service saves the info with status `uploading`, and returns **presigned URLs** (links that allow uploading to storage for a short time).
 2. The app uploads the video in parts, **straight to raw storage**.
-3. When all parts are uploaded, the app calls `POST /videos/{videoId}/complete`. The Video Service asks storage to **join the parts** into one file, marks the video `processing`, and starts the **processing pipeline**.
+3. When all parts are uploaded, the app calls `POST /videos/{videoId}/complete`. The Video Service asks storage to **join the parts** into one file, marks the video `processing`, and starts the **processing pipeline** (deep dive 1 makes this safe if the service crashes in the middle).
 4. The pipeline makes all the versions and the manifest, and saves them in processed storage.
 5. The pipeline marks the video `ready` in the Metadata DB.
 
@@ -143,7 +146,11 @@ flowchart TB
 1. The app uploads every part and keeps each part's ETag.
 2. The app calls `POST /videos/{videoId}/complete` with that list.
 3. The **Video Service** calls `CompleteMultipartUpload`. S3 joins the parts into one raw file.
-4. Only after that succeeds, the Video Service marks the video `processing` and tells the **orchestrator** (below) to start. So it is always clear who starts processing: the Video Service, after the file is whole. If the app retries `complete`, the Video Service sees the video is already `processing` and does not start it a second time.
+4. Only after that succeeds, the Video Service marks the video `processing` and tells the **orchestrator** (below) to start. So it is always clear who starts processing: the Video Service, after the file is whole.
+
+**Careful: "mark `processing`, then tell the orchestrator" is two writes.** If the Video Service crashes between them, the video is stuck: a retried `complete` sees `processing` and does nothing, and no job ever starts. So the Video Service writes both in **one transaction**: the status `processing`, and a "start processing `v_abc`" row in an **outbox** table in the same database. The orchestrator reads new outbox rows and starts a job for each (the [Outbox Pattern](../distributed-systems/outbox-pattern.mdx)). It may read a row twice after a crash, so it keeps **one job per video** and ignores a second start.
+
+**A retry gets the first answer.** If the app retries `complete`, the Video Service sees the video is already `processing` and answers `202` again, without starting anything. (If an earlier try already joined the parts but crashed before marking `processing`, the Video Service just checks that the raw file is there, and goes on.)
 
 If the app never calls `complete` (it crashed, or the user gave up), the parts are never joined. A storage cleanup rule deletes unfinished uploads after a few days, so we don't pay for them forever.
 
@@ -180,9 +187,9 @@ flowchart LR
   Manifest --> Done[("Processed videos")]:::storage
 ```
 
-The steps form a **DAG** (a directed acyclic graph): a set of steps where some steps wait for others, and nothing loops back. "Make manifest" waits for all the transcoding steps. A small **orchestrator** service keeps the state of each task in a database, puts ready tasks on the queue, and starts the next step when a step is done.
+The steps form a **DAG** (a directed acyclic graph): a set of steps where some steps wait for others, and nothing loops back. "Make manifest" waits for all the transcoding steps. A small **orchestrator** service keeps the state of each task in a database, puts ready tasks on the queue, and starts the next step when a step is done. Workers tell it when each task is done.
 
-A nice trick: **publish the low qualities first**. When 360p and 720p are ready, mark the video watchable. 4K can arrive a little later.
+A nice trick: **publish the low qualities first**. When 360p and 720p are ready, mark the video watchable. 4K can arrive a little later, and is then added to the master manifest.
 
 ### 2. Smooth playback: adaptive bitrate streaming
 
@@ -241,8 +248,11 @@ flowchart LR
 
 - **Cache hit:** the edge has the segment and sends it right away. **Cache miss:** the edge fetches it once from the **origin** (our processed storage), keeps a copy, and serves everyone after that.
 - **Segments never change** once made. So edges can keep them for a long time, and we never need to clear them.
+- **The master manifest can change.** When 4K is added later, `master.m3u8` gets a new line. So it gets a **short** cache time, like a minute, and viewers see the new quality soon.
 - **Popular videos** end up on almost every edge. **Old videos that few people watch** (the "long tail") often miss. That is fine: they are served from the origin, or from a middle layer of regional caches.
 - For a video that is clearly about to be huge (a new trailer), we can **push** it to the edges before people ask for it.
+
+The CDN carries the bytes. **Video info** (`GET /videos/{videoId}`: title, view count, manifest URL) is small, but every play asks for it. So the Video Service keeps it in a **Redis cache** for a few seconds, and most of these reads never reach the Metadata DB.
 
 ### 4. Counting views
 
@@ -303,15 +313,16 @@ flowchart TB
   GW --> VideoSvc["Video Service"]:::service
   GW -->|"view events"| Kafka["Kafka"]:::queue
   VideoSvc --> Cache[("Redis Cache<br/>video info")]:::cache
-  VideoSvc --> Meta[("Metadata DB")]:::db
+  VideoSvc -->|"video info, status<br/>+ outbox row"| Meta[("Metadata DB<br/>videos + outbox")]:::db
   Kafka --> Counter["Counter Workers"]:::service
   Counter -->|"one update per video<br/>+ Kafka position"| Meta
   VideoSvc -->|"CompleteMultipartUpload"| Raw
-  VideoSvc -->|"start processing"| Orch["Orchestrator"]:::service
+  Meta -->|"outbox: start processing"| Orch["Orchestrator"]:::service
   Orch --> TaskQ["Task Queue"]:::queue
   TaskQ --> Workers["Transcoding Workers<br/>(hundreds)"]:::service
   Raw -->|"raw pieces"| Workers
   Workers --> Done[("Processed Videos<br/>segments + manifests")]:::storage
+  Workers -.->|"task done"| Orch
   Orch -->|"status: ready"| Meta
   CDN -->|"only on a miss"| Done
 ```
@@ -337,7 +348,7 @@ The CDN copes well: after the first misses, every edge has the segments. Video i
 </Accordion>
 <Accordion title="Storage costs too much. How do you save money?">
 
-Most old videos are rarely watched. Move them to **cheaper, colder storage**, keep fewer versions of them (and make a missing version again if someone asks), and delete the raw upload once processing is done (or move it to the coldest storage). Re-encode **popular** videos with a newer codec, because saving bits on a popular video saves the most bandwidth.
+Most old videos are rarely watched. Move them to **cheaper, colder storage**, keep fewer versions of them (and make a missing version again if someone asks), and move the raw upload to the coldest storage once processing is done. Don't delete it: making a version again, or re-encoding with a newer codec, needs the original. Re-encode **popular** videos with a newer codec, because saving bits on a popular video saves the most bandwidth.
 
 </Accordion>
 <Accordion title="How does 'continue watching' work?">
@@ -370,7 +381,7 @@ There is no time for a big processing pipeline. The stream is transcoded **as it
 </Tab>
 <Tab value="Senior">
 
-- Presigned, multipart, resumable uploads, and who finishes them (`CompleteMultipartUpload`) and starts processing.
+- Presigned, multipart, resumable uploads, and who finishes them (`CompleteMultipartUpload`) and starts processing, with an outbox so a crash can't leave a video stuck.
 - A parallel transcoding pipeline: split, transcode on many workers, retry failed tasks.
 - Explain adaptive bitrate streaming: segments, manifest, the player choosing quality.
 - Batch view counts to avoid a hot row, without double counting after a crash.
@@ -388,7 +399,7 @@ There is no time for a big processing pipeline. The stream is transcoded **as it
 
 <Callout title="Remember this" type="success">
   - **Bytes never go through our API.** Upload straight to storage, watch straight from the CDN.
-  - **Multipart parts are joined only when we call `CompleteMultipartUpload`.** The Video Service does it, then starts processing.
+  - **Multipart parts are joined only when we call `CompleteMultipartUpload`.** The Video Service does it, then marks `processing` and writes a "start" **outbox** row in one transaction, so a crash can't leave the video stuck.
   - **Transcode in parallel:** split the video into pieces and give them to many workers.
   - **Adaptive bitrate streaming:** small segments + a manifest. The player picks the quality before each segment.
   - **HLS** (`.m3u8`) and **MPEG-DASH** (`.mpd`) are the two common standards.

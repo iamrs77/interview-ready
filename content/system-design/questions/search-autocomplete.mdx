@@ -172,7 +172,7 @@ score([0, 0, 2000]); // 1620  (searched more, but 2 days ago)
 </Callout>
 
 <Callout title="Best: daily rebuild + a small trending layer" type="success">
-  Keep the daily rebuild for the main trie. Add a **stream job** that counts searches in the last hour, and finds queries that suddenly jumped. The Suggestion Service mixes these trending queries into its answers. Fresh within minutes, while the big trie stays simple.
+  Keep the daily rebuild for the main trie. Add a **stream job** that counts searches in the last hour, and finds queries that suddenly jumped. The Suggestion Service loads this small trending list into memory every minute, and mixes it into its answers. Fresh within minutes, while the big trie stays simple.
 </Callout>
 
 **Swapping without downtime:** a server loads the new trie into memory **next to** the old one, then switches one pointer. Requests already running finish on the old trie, and then the old one is freed. Roll the new trie out server by server, so a bad trie can be stopped early.
@@ -184,7 +184,7 @@ Most requests should never reach our servers. Four layers help:
 1. **Debounce in the browser.** Debounce means: wait until the user stops typing for a moment (about 100 ms) before sending a request. Someone typing "pizza" quickly sends 1 or 2 requests instead of 5.
 2. **Browser cache.** The answer for "piz" is kept for 1 minute (`max-age=60`). If the user deletes a letter and types it again, no request is sent. Keep this time **short**: we can clear the CDN, but we can't reach into users' browsers. A harmful suggestion stays in a browser until its cache time runs out.
 3. **CDN cache.** Suggestions are the same for everyone, so a **CDN** (servers spread around the world, close to users) can keep them, here for 5 minutes (`s-maxage=300`). Short prefixes like "a" or "pi" are asked millions of times, so even 5 minutes in the CDN saves a lot. A short time also lets trending queries show up within minutes. And if we must remove a suggestion, we can clear the CDN right away.
-4. **Trie in memory.** Requests that do reach us are answered from RAM in well under a millisecond. No database on this path.
+4. **Trie in memory.** Requests that do reach us are answered from RAM in well under a millisecond. The trending list and the block list are in memory too (reloaded every minute), so no database or Redis call is on this path.
 
 ```mermaid
 flowchart LR
@@ -203,7 +203,7 @@ flowchart TB
   User(["Browser<br/>debounce + cache"]):::client --> CDN["CDN"]:::storage
   CDN --> LB["Load Balancer"]:::lb
   LB --> Sug["Suggestion Service<br/>(many copies, trie in RAM)"]:::service
-  Sug --> Trend[("Trending queries<br/>Redis")]:::cache
+  Sug -->|"reloads every minute"| Trend[("Trending queries<br/>Redis")]:::cache
   Sug -->|"loads daily trie"| S3["Trie files (S3)"]:::storage
   Sug -->|"reloads every minute"| Block[("Block list")]:::db
   Search["Search Service"]:::service -->|"search logs"| Kafka["Kafka"]:::queue

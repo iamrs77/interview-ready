@@ -156,9 +156,12 @@ ZADD feed:bob 1795089600123 p-901
 ZREMRANGEBYRANK feed:bob 0 -501
 # first page: the 20 newest IDs
 ZRANGE feed:bob +inf -inf BYSCORE REV LIMIT 0 20
-# next page: 20 IDs older than the cursor post (its time, "(" means "less than")
-ZRANGE feed:bob (1795089000000 -inf BYSCORE REV LIMIT 0 20
+# next page: start AT the cursor post's time (read from its ID), ask for a few extra,
+# then skip everything up to and including the cursor post
+ZRANGE feed:bob 1795089000000 -inf BYSCORE REV LIMIT 0 25
 ```
+
+Why not ask for "less than the cursor's time" (written `(1795089000000`)? Two posts can share the same millisecond. If a page ends on one of them, "less than" would skip the other one forever. Posts with the same score always come back in the same order, so skipping up to the cursor post is exact.
 
 Why not a plain Redis list? A list can only be read **by position** ("items 20 to 39"). New posts keep arriving at the front, so positions shift while you scroll, and you see the same posts twice. A sorted set can be read **by score**: "20 posts older than this one". That is exactly what the cursor in deep dive 3 needs.
 
@@ -168,7 +171,7 @@ Keep the feed cache small:
 - Keep only the newest **500 IDs** per user. Very few people scroll further.
 - Only keep feeds for **active** users, like people who opened the app in the last 30 days. Skip the others during fan-out. If one comes back, build their feed the slow way once.
 
-Memory: 200 million users × 500 IDs × 8 bytes = **800 GB** of raw IDs. A sorted set also stores the score and some bookkeeping for every item, so plan for a few times more. Spread over a Redis cluster, that is fine.
+Memory: 200 million users × 500 IDs × 8 bytes = **800 GB** of raw IDs. But Redis adds a lot on top. By default, a sorted set with more than **128** items switches to a big format (a **skiplist** plus a hash table) that costs roughly 100 bytes per item. 200 million × 500 × 100 bytes = about **10 TB**. The fix: raise the Redis setting `zset-max-listpack-entries` to 512. Then each 500-item feed stays in the compact **listpack** format, at roughly 20 to 30 bytes per item: about 2 to 3 TB. Spread over a Redis cluster, that is fine.
 
 ### 2. The celebrity problem
 
@@ -216,7 +219,7 @@ Big companies use machine learning models for step 2. In the interview, a simple
 
 With ranking, the order is no longer by time, so "older than p-850" stops working. The fix: rank once when the user opens the app, save that ranked list for the session (in a cache, for about 10 minutes), and page through the saved list.
 
-Last step, **hydration**: fetch the details of the 20 chosen posts from the posts cache in **one** batch call (Redis `MGET`), plus author names and like counts. Posts that were deleted are simply skipped.
+Last step, **hydration**: fetch the details of the 20 chosen posts from the posts cache in **one** batch, plus author names and like counts. Posts that were deleted are simply skipped. Use a **pipeline** of `GET`s, grouped by Redis server: many commands sent at once, without waiting for each answer. Most Redis Cluster clients do the grouping for you. A single `MGET` would fail with a `CROSSSLOT` error, because in a cluster the 20 keys live on different servers.
 
 ### Final architecture
 
@@ -241,6 +244,7 @@ flowchart TB
   Feed -->|"celebrities I follow"| FDB
   Feed --> PC[("Posts Cache<br/>incl. celebrity posts")]:::cache
   Feed --> Rank["Ranking Service"]:::service
+  Feed -->|"ranked list per session<br/>(about 10 min)"| SC[("Session Cache<br/>ranked lists")]:::cache
   PC -.->|"on miss"| PDB
 ```
 
@@ -294,7 +298,7 @@ Keep counts in a separate counter store, like Redis `INCR`, updated in the backg
 
 - Compare fan-out on read and on write, with numbers.
 - Solve the celebrity problem with the hybrid approach.
-- Size the feed cache: IDs only, 500 per user, active users only. A sorted set, so a cursor can page by time.
+- Size the feed cache: IDs only, 500 per user, active users only, and the compact listpack format (about 10 TB without it). A sorted set, so a cursor can page by time.
 - Hydration and hot keys.
 
 </Tab>
@@ -311,8 +315,9 @@ Keep counts in a separate counter store, like Redis `INCR`, updated in the backg
 <Callout title="Remember this" type="success">
   - Feeds are **read-heavy**, so do the work **at write time** (fan-out on write).
   - The feed cache stores **post IDs only**: newest 500, active users only, in a Redis **sorted set** scored by time.
+    Raise `zset-max-listpack-entries` to 512, or the feeds take about 10 TB instead of 2 to 3 TB.
   - **Celebrities:** don't fan out. Merge their posts **at read time** (the hybrid).
-  - Page with a **cursor**, not page numbers.
+  - Page with a **cursor**, not page numbers. Hydrate with a pipeline of `GET`s, not `MGET` (`CROSSSLOT` in a cluster).
   - Ranking = **collect candidates → score → filter**.
   - Handle deletes and unfollows **lazily, at read time**.
 </Callout>

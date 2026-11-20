@@ -19,7 +19,7 @@ That page note is the **outbox**.
 When an order is placed, the Order Service must:
 
 1. **Save** the order in its database.
-2. **Send** an `OrderPlaced` event to Kafka, so email, shipping and others can react.
+2. **Send** an `OrderPlaced` event to Kafka, so inventory, email and others can react.
 
 These are two different systems. No single transaction covers both. This is called the **dual write problem**.
 
@@ -37,7 +37,7 @@ sequenceDiagram
   DB-->>S: Saved
   Note over S: Crash! (or Kafka is down)
   S--xK: OrderPlaced never sent
-  Note over K: Email and shipping never<br/>hear about order 42
+  Note over K: Inventory and email never<br/>hear about order 42
 ```
 
 ## The outbox table
@@ -48,11 +48,12 @@ Instead of sending the event directly, write it into a table called `outbox`, in
 BEGIN;
 
 INSERT INTO orders (id, user_id, total, status)
-VALUES (42, 7, 500, 'PLACED');
+VALUES (42, 7, 500, 'PENDING');
 
-INSERT INTO outbox (id, aggregate_id, topic, payload, created_at)
+-- seq is filled in by the database (a BIGSERIAL column)
+INSERT INTO outbox (id, aggregate_id, topic, payload)
 VALUES (gen_random_uuid(), '42', 'orders',
-        '{"type": "OrderPlaced", "orderId": 42}', now());
+        '{"type": "OrderPlaced", "orderId": 42}');
 
 COMMIT;
 ```
@@ -60,11 +61,13 @@ COMMIT;
 | Column | What it holds |
 | --- | --- |
 | `id` | A unique event ID. Consumers use it to spot duplicates |
+| `seq` | A number that goes up with every new row (`BIGSERIAL`). Events go out in this order |
 | `aggregate_id` | The thing the event is about, here order 42. Used as the Kafka key, so one order's events stay in order |
 | `topic` | Where the event should go |
 | `payload` | The event itself, as JSON |
-| `created_at` | When it was written, so events go out in order |
 | `sent_at` | Empty until the event is sent (used by the polling relay) |
+
+**Why not sort by a `created_at` time?** In PostgreSQL, `now()` is the time the transaction **started**, not when it was saved. Say two transactions change order 42. A starts first, waits for B's lock on the order row, and saves after B. Sorting by time would send A's event before B's: the wrong order. Two events in one transaction would also get the same time. `seq` is handed out when the outbox row is inserted. So change the order row **first** (that takes its lock), then insert the outbox row: a second transaction on the same order then always gets a bigger `seq`.
 
 ## A relay that sends the events
 
@@ -77,7 +80,7 @@ flowchart TB
   Relay["Outbox Relay"]:::service -->|"read new rows"| DB
   Relay -->|"publish"| K["Kafka"]:::queue
   K --> Email["Email Service"]:::service
-  K --> Ship["Shipping Service"]:::service
+  K --> Inv["Inventory Service"]:::service
 ```
 
 There are two ways to build the relay:
@@ -92,7 +95,7 @@ A simple polling relay:
 ```ts
 // Runs every second
 const rows = await db.query(
-  'SELECT * FROM outbox WHERE sent_at IS NULL ORDER BY created_at LIMIT 100'
+  'SELECT * FROM outbox WHERE sent_at IS NULL ORDER BY seq LIMIT 100'
 );
 for (const row of rows) {
   await kafka.send({
@@ -131,7 +134,7 @@ So the outbox gives **at-least-once delivery**: every event is delivered, never 
 
 That's fine, as long as consumers are **idempotent**. A common way: each consumer keeps a `processed_events` table and saves the event ID **in the same transaction** as its own change. If the ID is already there, it skips the event. This table is sometimes called an **inbox**. See [Idempotency](../messaging/idempotency.mdx).
 
-**Ordering:** the relay sends rows in `created_at` order, and uses `aggregate_id` (the order ID) as the Kafka message key. So all events for one order go to the same partition and stay in order. See [Kafka](../messaging/kafka.mdx).
+**Ordering:** the relay sends rows in `seq` order, and uses `aggregate_id` (the order ID) as the Kafka message key. So all events for one order go to the same partition and stay in order. See [Kafka](../messaging/kafka.mdx).
 
 ## In the real world
 

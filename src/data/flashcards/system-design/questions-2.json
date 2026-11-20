@@ -47,7 +47,7 @@
       "id": "questions/google-drive-8",
       "lesson": "questions/google-drive",
       "q": "In Design Google Drive, why not just poll for changes every 30 seconds?",
-      "a": "Changes would arrive up to 30 seconds late, and most calls return nothing. A long poll instead keeps the request open until there is a change, or about a minute passes. Then the device asks again."
+      "a": "Changes would arrive up to 30 seconds late, and most calls return nothing. A long poll instead keeps the request open until there is a change, or about a minute passes. It carries the device's cursor, so if the change log is already ahead, it answers at once."
     },
     {
       "id": "questions/google-drive-9",
@@ -77,7 +77,19 @@
       "id": "questions/google-drive-13",
       "lesson": "questions/google-drive",
       "q": "In Design Google Drive, how does the cleanup job avoid deleting a chunk that a new upload just reused?",
-      "a": "Both sides change the same `chunks` row with a conditional update, so only one can win. An upload takes a reference only if the chunk is `live`. Cleanup claims it only if `refCount` is 0 and it was unused for at least a day."
+      "a": "Both sides change the same `chunks` row with a conditional update, so only one can win. An upload takes a reference only if the chunk is `live`. Cleanup claims it only if `refCount` is 0 and unused for a day. If the chunk is `deleting`, the upload waits until cleanup removes it, then uploads it again."
+    },
+    {
+      "id": "questions/google-drive-14",
+      "lesson": "questions/google-drive",
+      "q": "In Design Google Drive, `complete` worked but its reply was lost. How does the retry avoid a 409 against its own save?",
+      "a": "`complete` carries the `uploadId` from `POST /files`, and each version row stores it. When the version check fails, the server first looks for that `uploadId`. Found: it answers `200` with that version again. Not found: it is a real conflict, `409`."
+    },
+    {
+      "id": "questions/google-drive-15",
+      "lesson": "questions/google-drive",
+      "q": "In Design Google Drive, what does a save based on version 5 run in the database?",
+      "a": "One transaction: `UPDATE files SET current_version = current_version + 1 WHERE ... AND current_version = 5`. 0 rows: conflict, roll back. 1 row: insert the `file_versions` row for version 6, plus the change log row and the outbox event."
     },
     {
       "id": "questions/youtube-1",
@@ -101,7 +113,7 @@
       "id": "questions/youtube-4",
       "lesson": "questions/youtube",
       "q": "In Design YouTube, what happens if the app retries `complete`, or never calls it?",
-      "a": "On a retry, the Video Service sees the video is already `processing` and does not start it a second time. If `complete` never comes, the parts are never joined, and a storage cleanup rule deletes them after a few days."
+      "a": "A retry sees the video is already `processing` and answers `202` again. Marking `processing` and writing a \"start\" outbox row happen in one transaction, so a crash can't leave the video stuck. If `complete` never comes, a storage cleanup rule deletes the parts after a few days."
     },
     {
       "id": "questions/youtube-5",
@@ -137,7 +149,7 @@
       "id": "questions/youtube-10",
       "lesson": "questions/youtube",
       "q": "In Design YouTube, why do video segments cache so well on a CDN?",
-      "a": "Segments never change once made, so edges can keep them a long time and never need to clear them. Popular videos end up on almost every edge. The long tail often misses and is served from the origin or regional caches."
+      "a": "Segments never change once made, so edges keep them a long time and never clear them. The master manifest does change (4K is added later), so it gets a short cache time. Popular videos end up on almost every edge. The long tail is served from the origin or regional caches."
     },
     {
       "id": "questions/youtube-11",
@@ -173,7 +185,7 @@
       "id": "questions/uber-3",
       "lesson": "questions/uber",
       "q": "In Design Uber, what happens to driver locations if Redis crashes?",
-      "a": "We lose almost nothing. Every driver sends a fresh location within 5 seconds, so the index fills itself up again. Old positions were never worth saving."
+      "a": "We lose almost nothing. Moving drivers send a fresh location every 5 seconds and parked ones every 15, so the index fills itself up again within about 15 seconds. Old positions were never worth saving."
     },
     {
       "id": "questions/uber-4",
@@ -185,7 +197,7 @@
       "id": "questions/uber-5",
       "lesson": "questions/uber",
       "q": "In Design Uber, why search the pickup's geohash box plus the 8 boxes around it?",
-      "a": "Two drivers can be 10 meters apart but on opposite sides of a box border, so their codes differ. Searching the 8 neighbors catches them."
+      "a": "Two drivers can be 10 meters apart but on opposite sides of a box border, so their codes differ. The box must be at least as big as the search radius, and then we drop drivers farther than the radius. Redis `GEOSEARCH` does both for us."
     },
     {
       "id": "questions/uber-6",
@@ -234,6 +246,18 @@
       "lesson": "questions/uber",
       "q": "In Design Uber, how do you handle busy peaks like New Year's Eve?",
       "a": "**Split by city**, each with its own Redis shard. Put ride requests in **Kafka**, split by region, so the queue gets longer instead of dropping requests. **Raise prices** when demand is high, so some riders wait and more drivers come."
+    },
+    {
+      "id": "questions/uber-14",
+      "lesson": "questions/uber",
+      "q": "In Design Uber, what happens to drivers who go silent, and how often does a parked driver send its location?",
+      "a": "We store when each driver last sent a location. Drivers not heard from in **30 seconds** (app closed, tunnel) are ignored, and a cleanup job removes them. A parked driver sends every **15 seconds**, not 30, so one late update won't make it blink out of the index."
+    },
+    {
+      "id": "questions/uber-15",
+      "lesson": "questions/uber",
+      "q": "In Design Uber, how do you make sure a saved ride always reaches the matching queue?",
+      "a": "Save the ride **and** a \"new ride request\" outbox row in one transaction. An Outbox Relay sends the rows to Kafka. Saving, then sending, could crash in between and leave the ride `matching` forever. A request sent twice is fine: workers skip rides no longer `matching`."
     },
     {
       "id": "questions/payment-system-1",
@@ -287,7 +311,7 @@
       "id": "questions/payment-system-9",
       "lesson": "questions/payment-system",
       "q": "In a payment system, how do you handle a webhook from the PSP safely?",
-      "a": "**Check the signature**, made with a secret only the PSP and we know, and reject it if it doesn't match. **De-duplicate** by `eventId` with a unique rule. Then find the payment by our own `paymentId`, sent to the PSP as metadata."
+      "a": "**Check the signature**, made with a secret only the PSP and we know. **De-duplicate** by `eventId` with a unique rule, saved in the same transaction as the status update, so an event is never marked seen but not applied. Then find the payment by our own `paymentId`, sent as metadata."
     },
     {
       "id": "questions/payment-system-10",
@@ -304,7 +328,7 @@
     {
       "id": "questions/payment-system-12",
       "lesson": "questions/payment-system",
-      "q": "In a payment system, \"succeeded\" can arrive from the PSP, a webhook and the checker. How are ledger lines written only once?",
+      "q": "In a payment system, \"succeeded\" can arrive from the PSP, a webhook, the checker and reconciliation. How are ledger lines written only once?",
       "a": "Only the `UPDATE ... WHERE status = 'PENDING'` that changes 1 row writes ledger lines. 0 rows means someone already did it, so roll back. A unique rule on `(source_id, account)` is a second lock on the door."
     },
     {
@@ -324,6 +348,30 @@
       "lesson": "questions/payment-system",
       "q": "In a payment system, the PSP is down. Which payments may switch to a second PSP?",
       "a": "Only ones we know the first PSP did **not** charge, like when the connection was refused. A payment whose call timed out must stay `PENDING` with the first PSP, or the card could be charged twice."
+    },
+    {
+      "id": "questions/payment-system-16",
+      "lesson": "questions/payment-system",
+      "q": "In a payment system, a $25.00 payment had a $1.00 PSP fee. How is a full refund written if the PSP keeps its fee?",
+      "a": "New lines with the refund's own `source_id`: buyer +25.00, store −25.00. The fee line is not reversed, so the refund costs the store the $1.00 fee. Nothing old is touched, and the lines still add up to zero."
+    },
+    {
+      "id": "questions/payment-system-17",
+      "lesson": "questions/payment-system",
+      "q": "In a payment system, why not use a distributed transaction (2PC) with the PSP?",
+      "a": "The PSP is another company and will not join our database transaction. So we save `PENDING` first, call the PSP with an idempotency key, then save the result. The stuck-payment checker and reconciliation fix anything that breaks in between, like a saga."
+    },
+    {
+      "id": "questions/payment-system-18",
+      "lesson": "questions/payment-system",
+      "q": "In a payment system, we crash after saving `PENDING` but before calling the PSP. What happens?",
+      "a": "A retry sees `PENDING` and calls the PSP again with the **same key**: safe, it charges at most once per key. If no retry comes, the checker finds no record at the PSP and, after a set time, marks it `FAILED`, so the buyer can pay again. Reconciliation refunds a late charge."
+    },
+    {
+      "id": "questions/payment-system-19",
+      "lesson": "questions/payment-system",
+      "q": "In a payment system, how do you stop partial refunds from giving back more than was paid?",
+      "a": "Each refund first takes its share with one conditional update: `refunded_cents = refunded_cents + 1000` only if `refunded_cents + 1000 <= amount_cents`. 0 rows: refuse it. Two refunds at once can't both pass. The payment is `REFUNDED` once all of it is given back."
     },
     {
       "id": "questions/distributed-cache-1",
@@ -365,7 +413,7 @@
       "id": "questions/distributed-cache-7",
       "lesson": "questions/distributed-cache",
       "q": "In a distributed cache, which key do you evict when memory is full, and why?",
-      "a": "**LRU:** the key nobody has read for the longest time. Popular keys keep getting read, so they stay. FIFO might throw out the most popular key, and refusing new writes keeps fresh data out."
+      "a": "**LRU:** the key nobody has read for the longest time. Popular keys keep getting read, so they stay. FIFO might throw out the most popular key, and refusing new writes keeps fresh data out. Redis refuses writes by default (`noeviction`), so set `allkeys-lru`."
     },
     {
       "id": "questions/distributed-cache-8",
@@ -395,13 +443,19 @@
       "id": "questions/distributed-cache-12",
       "lesson": "questions/distributed-cache",
       "q": "In a distributed cache, how do you handle one very hot key?",
-      "a": "Keep it in a tiny **local cache** on each app server for a few seconds. Or store **copies** like `profile:1#1` to `profile:1#5` on different nodes and read a random one. Or **read from replicas**."
+      "a": "Keep it in a tiny **local cache** on each app server for a few seconds. Or store **copies** like `profile:1#1` to `profile:1#5`, which usually land on different nodes, and read a random one. On a change, update or delete every copy. Or **read from replicas**."
     },
     {
       "id": "questions/distributed-cache-13",
       "lesson": "questions/distributed-cache",
       "q": "In a distributed cache, a popular key expires and 10,000 requests miss at once. What do you do?",
       "a": "This is a **cache stampede**. Let only one request rebuild the value, using a short lock, while the others wait a moment or get the old value. A small random amount added to each TTL stops keys expiring at the same second."
+    },
+    {
+      "id": "questions/distributed-cache-14",
+      "lesson": "questions/distributed-cache",
+      "q": "In a distributed cache, how does Redis Cluster split keys, route clients and do failover?",
+      "a": "It splits keys into **16,384 hash slots**, and each primary owns a range. A node asked for a key it doesn't own answers `MOVED` with the right node. There is no separate coordination service: when a primary fails, a majority of the other primaries vote to promote one of its replicas."
     },
     {
       "id": "questions/distributed-message-queue-1",
@@ -482,6 +536,12 @@
       "a": "With pull, each consumer reads at its own speed, can rewind, and can grab big batches. With push, a slow consumer gets flooded. An idle consumer keeps asking, so use long polling: the broker holds the request open until there is data."
     },
     {
+      "id": "questions/distributed-message-queue-14",
+      "lesson": "questions/distributed-message-queue",
+      "q": "In a distributed message queue, how is exactly-once possible inside the queue system?",
+      "a": "The broker gives each producer an **ID** and numbers its messages, so a retried send is spotted and not stored twice. A **transaction** saves the output messages and the consumer's new offset together, so both happen or neither does. It costs more than at-least-once."
+    },
+    {
       "id": "questions/logging-metrics-1",
       "lesson": "questions/logging-metrics",
       "q": "In a logging and metrics system, what is the difference between logs and metrics?",
@@ -508,7 +568,7 @@
     {
       "id": "questions/logging-metrics-5",
       "lesson": "questions/logging-metrics",
-      "q": "In a logging and metrics system, what does the agent do if Kafka can't be reached?",
+      "q": "In a logging and metrics system, what does the agent do if the Ingest Service can't be reached?",
       "a": "It saves batches to a **local disk buffer** and sends them later. If even that fills up, it drops `DEBUG` lines first and keeps `ERROR` lines."
     },
     {
@@ -558,6 +618,12 @@
       "lesson": "questions/logging-metrics",
       "q": "In a logging and metrics system, besides the \"for\" duration, what makes alerts good?",
       "a": "Alert on **metrics**, not logs. **Group** duplicates, so one outage sends one message, not 200 pages. **Route** each alert to the right team. And **watch the watcher** with a dead man's switch: an always-firing alert to an outside service."
+    },
+    {
+      "id": "questions/logging-metrics-14",
+      "lesson": "questions/logging-metrics",
+      "q": "In a logging and metrics system, how is the work split over many machines?",
+      "a": "Every layer is partitioned. **Kafka:** many partitions, and the Ingest Service picks one by `hash(host)`. **Log store:** each day's index is split by service into shards. **TSDB:** series are spread by `hash(metric name + labels)`, so one series is one fast read."
     },
     {
       "id": "questions/ad-click-aggregator-1",
@@ -665,7 +731,7 @@
       "id": "questions/top-k-5",
       "lesson": "questions/top-k",
       "q": "In Design Top K, a viral video gets 5% of all views. Why is one worker for it still fine?",
-      "a": "That is about 5,000 tiny events per second, and adding 1 in memory can be done millions of times a second. If it were ever too much, servers would pre-count per second before Kafka, sending events like `v_981: +350`."
+      "a": "That is about 5,000 tiny events per second, and adding 1 in memory can be done millions of times a second. If it were ever too much, the View Ingest servers would pre-count per second before Kafka, sending events like `v_981: +350`."
     },
     {
       "id": "questions/top-k-6",
@@ -707,7 +773,7 @@
       "id": "questions/top-k-12",
       "lesson": "questions/top-k",
       "q": "In Design Top K, how do the nightly batch and the stream share the all-time list?",
-      "a": "Each list has **one writer**: only the merger writes the lists people read. The batch writes exact all-time counts up to midnight into its own table, and the merger adds the stream count since midnight on top."
+      "a": "Only the merger writes the lists people read. The batch writes a **base** into its own table: exact all-time counts up to a **cut-off time** (midnight). The merger adds the stream count since that cut-off. Until the new base arrives, it keeps the old base and its older cut-off, so no hour is lost."
     },
     {
       "id": "questions/top-k-13",
@@ -749,7 +815,7 @@
       "id": "questions/google-docs-6",
       "lesson": "questions/google-docs",
       "q": "In Design Google Docs, why must each browser also transform the ops it receives?",
-      "a": "Its own unconfirmed edits are already on screen. So before applying an op from the server, it transforms the op against every **pending** op it has sent but not seen confirmed, and updates those pending ops the same way."
+      "a": "Its own unconfirmed edits are already on screen. So it transforms each op from the server against all its **pending** ops (the one in flight, then the buffer), and updates them the same way. It keeps only **one op in flight**: later typing waits in a buffer until that op is confirmed."
     },
     {
       "id": "questions/google-docs-7",
@@ -779,7 +845,7 @@
       "id": "questions/google-docs-11",
       "lesson": "questions/google-docs",
       "q": "In Design Google Docs, what happens when a document's owner server dies?",
-      "a": "Its documents move to the next server on the ring, which loads the snapshot plus recent ops. Browsers reconnect with `fromVersion` and resend ops never confirmed. Each op has an ID like `alice-17`, so a copy already saved is ignored."
+      "a": "Its documents move to the next server on the ring, which loads the snapshot plus recent ops. Browsers reconnect with `fromVersion` and resend the op never confirmed. Each op has an ID like `c7f3a-17` (the tab's client ID plus a counter), so a copy already saved is ignored."
     },
     {
       "id": "questions/google-docs-12",
@@ -792,6 +858,18 @@
       "lesson": "questions/google-docs",
       "q": "In Design Google Docs, how do you show who is online and where their cursors are?",
       "a": "Presence lives **in memory** on the owner server, never in the database. Users are removed when their WebSocket closes or no heartbeat comes for about 30 seconds. A lost cursor move is not retried: the next one fixes it."
+    },
+    {
+      "id": "questions/google-docs-14",
+      "lesson": "questions/google-docs",
+      "q": "In Design Google Docs, how do undo and version restore work?",
+      "a": "**Undo** only your own last op: make the opposite op, then transform it against everything others did since. **Restore** never deletes history: rebuild the old version (snapshot + replay), then add new ops that turn the current text into it."
+    },
+    {
+      "id": "questions/google-docs-15",
+      "lesson": "questions/google-docs",
+      "q": "In Design Google Docs, why does each browser keep only one op in flight?",
+      "a": "If Alice sends `H` at 1 and `E` at 2, both based on 1287, the server transforms `E` against her own `H` and moves it to 3: `CHAET`, not `CHEAT`. So `E` waits in a buffer until `H` is confirmed, then goes out based on 1288. The server only transforms against other people's ops."
     }
   ]
 }

@@ -8,7 +8,7 @@ icon: LogIn
 
 Some cars come with a **valet key**. You give it to the parking attendant. It starts the car and drives it, but it can't open the boot or the glove box. You never hand over your main key.
 
-**OAuth 2.0** is a valet key for your online accounts. It lets an app get **limited access** to your data on another service, without ever seeing your password. For example, a photo printing app can get permission to **read** your Google Photos, but not to read your email or delete anything.
+**OAuth 2.0** is a valet key for your online accounts. It lets an app get **limited access** to your data on another service, without ever seeing your password. For example, a meeting planner app called SlotFinder can get permission to **read** your Google Calendar, to find times when you are free, but not to read your email or delete anything.
 
 **OpenID Connect (OIDC)** is a thin layer on top of OAuth that adds **login**: it tells the app **who you are**. Together they power every "Log in with Google" button.
 
@@ -20,73 +20,73 @@ Before OAuth, if an app wanted your contacts from your email account, it asked f
 - The app **stored your password**. If the app got hacked, so did your email.
 - To stop one app, you had to **change your password**, which broke every other app too.
 
-With OAuth, you log in **on Google's own page**. Google asks "PhotoPrint wants to see your photos. Allow?" Then it gives the app a **token** that can only do that. You can take it back any time in your Google account settings, without changing your password.
+With OAuth, you log in **on Google's own page**. Google asks "SlotFinder wants to see your calendar. Allow?" Then it gives the app a **token** that can only do that. You can take it back any time in your Google account settings, without changing your password.
 
 ## The four roles
 
 | Role | What it is | In our example |
 | --- | --- | --- |
 | **Resource owner** | The user who owns the data | You |
-| **Client** | The app that wants access | PhotoPrint |
+| **Client** | The app that wants access | SlotFinder |
 | **Authorization server** | Logs you in, asks your permission, gives out tokens | Google's login server |
-| **Resource server** | The API that holds the data | The Google Photos API |
+| **Resource server** | The API that holds the data | The Google Calendar API |
 
-**Scopes** are the exact permissions the app asks for, like "read your photos" or "see your email address". The user sees them on the **consent screen**, the "Allow?" page. A good app asks for as few as it can.
+**Scopes** are the exact permissions the app asks for, like "read your calendar" or "see your email address". The user sees them on the **consent screen**, the "Allow?" page. A good app asks for as few as it can.
 
 ## The authorization code flow, step by step
 
-This is the flow almost every web and mobile app uses. Example: you click **"Log in with Google"** on PhotoPrint.
+This is the flow almost every web and mobile app uses. Example: you click **"Log in with Google"** on SlotFinder.
 
 ```mermaid
 sequenceDiagram
   participant U as Your browser
-  participant A as PhotoPrint server
+  participant A as SlotFinder server
   participant G as Google login
   participant P as Google API
   U->>A: Click Log in with Google
   A-->>U: Go to Google (redirect)
   U->>G: Log in and click Allow
-  G-->>U: Go back to PhotoPrint + code
+  G-->>U: Go back to SlotFinder + code
   U->>A: Here is the code
   A->>G: Code + client secret
   G-->>A: Access token + ID token
   A->>P: Request + access token
-  P-->>A: Your photos
+  P-->>A: Your calendar events
 ```
 
 <Steps>
 <Step>
 
-**You click the button.** PhotoPrint sends your browser to Google with a link like this (split over lines so it is easy to read):
+**You click the button.** SlotFinder sends your browser to Google with a link like this (split over lines so it is easy to read):
 
 ```http
 GET https://accounts.google.com/o/oauth2/v2/auth
-  ?client_id=photoprint-123
-  &redirect_uri=https://photoprint.com/callback
+  ?client_id=slotfinder-123
+  &redirect_uri=https://slotfinder.com/callback
   &response_type=code
-  &scope=openid+email+profile+photos.read
+  &scope=openid+email+profile+calendar.readonly
   &state=k8Jd02
 ```
 
-- `client_id`: which app is asking. PhotoPrint registered with Google earlier and got this ID, plus a secret.
+- `client_id`: which app is asking. SlotFinder registered with Google earlier and got this ID, plus a secret.
 - `redirect_uri`: where to send you back. Google only accepts addresses that were registered in advance, so an attacker can't have the code sent to their own site.
-- `scope`: what access the app wants. `openid email profile` is for logging you in. `photos.read` is for reading your photos. (Each provider names its scopes its own way, and Google's real ones are long URLs. The name here is shortened to keep the example readable.)
-- `state`: a random value. When you come back, PhotoPrint checks it is the same one. This stops an attacker from tricking your browser into finishing a login they started (a **CSRF** attack).
+- `scope`: what access the app wants. `openid email profile` is for logging you in. `calendar.readonly` is for reading your calendar. (Each provider names its scopes its own way, and Google's real ones are long URLs. The name here is shortened to keep the example readable.)
+- `state`: a random value. When you come back, SlotFinder checks it is the same one. This stops an attacker from tricking your browser into finishing a login they started (a **CSRF** attack).
 
 </Step>
 <Step>
 
-**You log in at Google and click Allow.** Your password goes only to Google. PhotoPrint never sees it.
+**You log in at Google and click Allow.** Your password goes only to Google. SlotFinder never sees it.
 
 </Step>
 <Step>
 
-**Google sends you back** to `https://photoprint.com/callback?code=4xT9...&state=k8Jd02`. The **authorization code** is a one-time ticket. It works only once, and only for a short time.
+**Google sends you back** to `https://slotfinder.com/callback?code=4xT9...&state=k8Jd02`. The **authorization code** is a one-time ticket. It works only once, and only for a short time.
 
 </Step>
 <Step>
 
-**PhotoPrint's server swaps the code for tokens.** It calls Google directly, server to server, and sends the code plus its **client secret** (a password for the app itself).
+**SlotFinder's server swaps the code for tokens.** It calls Google directly, server to server, and sends the code plus its **client secret** (a password for the app itself).
 
 </Step>
 <Step>
@@ -96,7 +96,7 @@ GET https://accounts.google.com/o/oauth2/v2/auth
 </Step>
 <Step>
 
-**PhotoPrint calls the API** with the header `Authorization: Bearer <access token>`.
+**SlotFinder calls the API** with the header `Authorization: Bearer <access token>`.
 
 </Step>
 </Steps>
@@ -129,7 +129,7 @@ Someone who steals the code doesn't have the verifier, so the code is useless to
 | **Used for** | Calling the API | Getting a new access token |
 | **Sent to** | The API, with every request | Only the authorization server |
 | **Lives for** | A short time: minutes, up to about an hour | A long time: days or months, or until taken back |
-| **If stolen** | Works only until it expires | Dangerous. Keep it on the server, safely stored. |
+| **If stolen** | Works only until it expires | Dangerous. Keep it safely stored: on the server, or in the device's secure storage for mobile apps. |
 
 **Why two tokens?** A short-lived access token limits the damage if it leaks. The refresh token lets the app get a new access token quietly, without asking the user to log in again. And when you remove the app's access in your Google account, the refresh token stops working.
 
@@ -142,7 +142,7 @@ An access token can be a random string that the API looks up, or a **JWT** that 
   "access_token": "ya29.a0Af...",
   "expires_in": 3599,
   "refresh_token": "1//0gLx...",
-  "scope": "openid email profile photos.read",
+  "scope": "openid email profile calendar.readonly",
   "token_type": "Bearer",
   "id_token": "eyJhbGciOiJSUzI1NiIs..."
 }
@@ -150,7 +150,7 @@ An access token can be a random string that the API looks up, or a **JWT** that 
 
 ## OpenID Connect: adding login
 
-OAuth answers "**what can this app access?**" It doesn't answer "**who is this user?**" An access token says "this token may read photos", and the app isn't meant to look inside it. Before OIDC, every company bolted login onto OAuth in its own way, and some of those ways were not safe.
+OAuth answers "**what can this app access?**" It doesn't answer "**who is this user?**" An access token says "this token may read the calendar", and the app isn't meant to look inside it. Before OIDC, every company bolted login onto OAuth in its own way, and some of those ways were not safe.
 
 **OpenID Connect** adds login on top of OAuth, in one standard way:
 
@@ -164,7 +164,7 @@ Inside an ID token:
 ```json
 {
   "iss": "https://accounts.google.com",
-  "aud": "photoprint-123",
+  "aud": "slotfinder-123",
   "sub": "110169484474386276334",
   "email": "asha@example.com",
   "name": "Asha Rao",
@@ -187,7 +187,7 @@ The app must **check the signature** with Google's public keys, and check `iss`,
 | **Answers** | What can this app access? | Who is this user? |
 | **Main token** | Access token | ID token (a JWT) |
 | **The token is for** | The API | The app |
-| **Example** | "PhotoPrint may read your photos" | "This is Asha, asha@example.com" |
+| **Example** | "SlotFinder may read your calendar" | "This is Asha, asha@example.com" |
 
 OIDC also gives you **single sign-on (SSO)**: log in once, and get into many apps. At work, you log in to your company's identity provider, like Okta or Microsoft Entra ID, and then open email, chat and HR apps without logging in again.
 

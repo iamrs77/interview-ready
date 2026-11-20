@@ -56,6 +56,13 @@ A **worker** is a separate process that loops forever: take a job, do it, mark i
 
 That means **a job can run twice**. So every job must be safe to run twice, which is called being **idempotent** (see [Idempotency](../messaging/idempotency.mdx)). For example: "send the receipt for order 1042, **unless** it was already sent."
 
+**Races and duplicates.** Two more ways a job can be lost or run twice:
+
+- **The API crashes between its two steps.** In the diagram, it saves the order, then adds the job. A crash in between keeps the order but loses the receipt job. Fix it with the [Outbox Pattern](../distributed-systems/outbox-pattern.mdx): save the job in the database, in the **same transaction** as the order, and let a relay put it on the queue. Or keep a `pending` row for each job and run a **sweeper**, a small scheduled job that re-queues rows still `pending` after a few minutes.
+- **A job runs longer than the visibility timeout.** It becomes visible again, and a second worker starts it while the first is still working. Set the timeout longer than your slowest job, or let the worker extend it while it works.
+
+The sweeper can also queue a job twice. That is fine, because every job is idempotent.
+
 **Use separate queues for urgent and slow work.** A password-reset email should not wait behind 50,000 monthly reports. Give each its own queue and workers.
 
 **Common tools:** Sidekiq (Ruby), Celery (Python) and BullMQ (Node.js), which usually keep jobs in Redis. AWS SQS with your own workers. **Temporal** for long jobs with many steps. More on queues in [Message Queues and Pub/Sub](../messaging/message-queues-pub-sub.mdx).
@@ -123,6 +130,8 @@ sequenceDiagram
   A-->>C: done + download link
 ```
 
+If the API crashes after saving job 77 but before adding it to the queue, the row stays `pending`. The sweeper finds it and queues it again.
+
 A job moves through a few **states**:
 
 ```mermaid
@@ -165,6 +174,7 @@ Whenever something slow happens after a user action, say "background job":
 <Callout title="Remember this" type="success">
   - If the user doesn't need it **now**, put it on a **job queue** and let **workers** do it.
   - Jobs carry **IDs**, not whole objects. A crashed worker's job comes back, so jobs must be **idempotent**.
+  - A crash between saving the data and queuing the job loses the job. Use an **outbox**, or a **sweeper** that re-queues old `pending` rows.
   - Cron on every server runs a job **many times**. Use **one scheduler** or a **lock**.
   - Many "run at" jobs: rows with `run_at`, claimed with `UPDATE … SKIP LOCKED … RETURNING`.
   - Long jobs: return **`202 Accepted` + job ID**, and let the client check the status.

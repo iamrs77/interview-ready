@@ -7,6 +7,8 @@ import { useMemo, useSyncExternalStore } from 'react';
  * Each card sits in a "box" from 0 to 5 (the Leitner system):
  *   - "I knew it" moves it up one box, so it comes back later: 1, 3, 7, 14, then 30 days.
  *   - "Again" puts it back in box 0, so it comes back right away.
+ *   - "I knew it" on a card that is not due yet ("Practice all") only counts the review. Its box and
+ *     due date stay the same, so cramming doesn't push cards weeks ahead.
  */
 const STORAGE_KEY = 'interview-ready:flashcards';
 const CHANGE_EVENT = 'interview-ready:flashcards-change';
@@ -60,8 +62,14 @@ export function useFlashcardProgress(): CardProgress {
 export function recordAnswer(cardId: string, knewIt: boolean) {
   const progress = parse(readRaw());
   const previous = progress[cardId];
-  const box = knewIt ? Math.min((previous?.box ?? 0) + 1, WAIT_DAYS.length - 1) : 0;
-  progress[cardId] = { box, due: Date.now() + WAIT_DAYS[box] * DAY, reviews: (previous?.reviews ?? 0) + 1 };
+  const reviews = (previous?.reviews ?? 0) + 1;
+  if (knewIt && previous && previous.due > dueClock()) {
+    // Not due yet: keep the box and the due date.
+    progress[cardId] = { ...previous, reviews };
+  } else {
+    const box = knewIt ? Math.min((previous?.box ?? 0) + 1, WAIT_DAYS.length - 1) : 0;
+    progress[cardId] = { box, due: Date.now() + WAIT_DAYS[box] * DAY, reviews };
+  }
   save(progress);
 }
 
@@ -89,13 +97,18 @@ export function deckStats(cardIds: string[], progress: CardProgress, now: number
   return { total: cardIds.length, fresh, due, known };
 }
 
-// The current time, rounded to the minute and updated every minute, so screens can show what is due.
+/*
+ * "Now" for due checks: the current time rounded UP to the minute, so a card missed seconds ago
+ * already counts as due. Rounding keeps the value the same for a whole minute (stable for React).
+ */
+const dueClock = () => Math.ceil(Date.now() / 60_000) * 60_000;
+
 function subscribeToClock(onChange: () => void) {
   const timer = window.setInterval(onChange, 60_000);
   return () => window.clearInterval(timer);
 }
-const currentMinute = () => Math.floor(Date.now() / 60_000) * 60_000;
 
+/** The time to compare due dates with, updated every minute. 0 on the server. */
 export function useNow(): number {
-  return useSyncExternalStore(subscribeToClock, currentMinute, () => 0);
+  return useSyncExternalStore(subscribeToClock, dueClock, () => 0);
 }

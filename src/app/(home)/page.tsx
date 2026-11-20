@@ -45,7 +45,7 @@ export default function HomePage() {
           <TrackProgress pageUrls={systemDesignPages} />
         </Link>
         <div className="mt-2 flex justify-end">
-          <ResetProgressButton />
+          <ResetProgressButton pageUrls={systemDesignPages} />
         </div>
       </section>
     </main>

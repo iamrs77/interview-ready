@@ -33,7 +33,7 @@ flowchart TB
   GW --> Order["Order Service"]:::service
   Order -->|"sync: reserve stock"| Inv["Inventory Service"]:::service
   Order -->|"sync: charge card"| Pay["Payment Service"]:::service
-  Order -->|"async: OrderPlaced event"| K["Kafka"]:::queue
+  Pay -->|"async: PaymentSucceeded event"| K["Kafka"]:::queue
   K --> Email["Email Service"]:::service
   K --> Ship["Shipping Service"]:::service
   Order --> ODB[("Orders DB")]:::db
@@ -41,7 +41,7 @@ flowchart TB
   Pay --> PDB[("Payments DB")]:::db
 ```
 
-Checkout **must know** that stock is reserved and the card is charged, so those are sync. The email and the shipping label can happen a few seconds later, so those are async.
+Checkout **must know** that stock is reserved and the card is charged, so those are sync. Once the card is charged, the Payment Service publishes a `PaymentSucceeded` event. The email and the shipping label can happen a few seconds later, so they react to that event, async. Shipping waits for the payment event, so an unpaid order is never shipped.
 
 Protect every sync call with a **timeout**, a few **retries**, and a **circuit breaker** (see [Circuit Breaker](../reliability-security/circuit-breaker.mdx)). More on the two styles: [Sync vs Async Communication](../messaging/sync-vs-async.mdx) and [Event-Driven Architecture](../messaging/event-driven-architecture.mdx).
 
@@ -118,7 +118,7 @@ Why it matters: with a shared database, the User team can't rename a column with
 
 Draw services by business area, give each its own database, and label each arrow as sync or async:
 
-> "I'll split by business area: orders, payments, inventory and notifications, each with its own database. Checkout calls inventory and payments synchronously, because it needs the answer. Then it publishes an OrderPlaced event, and email and shipping react to it asynchronously."
+> "I'll split by business area: orders, payments, inventory and notifications, each with its own database. Checkout calls inventory and payments synchronously, because it needs the answer. Then the Payment Service publishes a PaymentSucceeded event, and email and shipping react to it asynchronously."
 
 <Callout title="Remember this" type="success">
   - **Sync** when you need the answer now. **Async** (events) to tell others something happened.

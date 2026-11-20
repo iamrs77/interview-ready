@@ -54,7 +54,7 @@ We don't deliver the messages ourselves. We hand them to **providers**: outside 
 ## Step 2: Core entities
 
 - **Notification:** who it is for, the type (like `order_shipped`), the text, and the caller's idempotency key.
-- **Delivery:** one row per notification **and** channel, with its own status (`queued`, `sending`, `sent`, `failed`). "Order shipped" by push and by email is one notification with two deliveries. So when the push is `sent`, the email still shows `queued`, and the email worker doesn't skip it.
+- **Delivery:** one row per notification **and** channel, with its own status (`queued`, `sending`, `sent`, `delivered`, `bounced`, `failed`), and an `enqueued_at` time: when it was put on the queue (empty until then). `queued` means "waiting to be sent"; `enqueued_at` tells us whether it is really on the queue yet. "Order shipped" by push and by email is one notification with two deliveries. So when the push is `sent`, the email still shows `queued`, and the email worker doesn't skip it.
 - **Contact info:** the user's email, phone number, and **device tokens**. A device token is the address of one app on one phone. Apple or Google gives it to the app, and the app sends it to us.
 - **Preferences:** what the user wants, like "order updates by push, no marketing emails".
 - **Template:** text with blanks, like `Your order {orderId} has shipped.`
@@ -114,11 +114,11 @@ flowchart LR
 2. The Notification Service checks the user's **settings**. If the user turned off this type, it stops here.
 3. It looks up the **contact info**: device tokens, email, phone number.
 4. It fills in the **template**: "Your order 981 has shipped."
-5. In one transaction, it saves the notification and one **delivery** row per channel in the Notifications DB, each with status `queued`.
-6. It puts one message per delivery on the **queue**, marks those rows as "on the queue", and returns `202`.
+5. In one transaction, it saves the notification and one **delivery** row per channel in the Notifications DB, each with status `queued` and an empty `enqueued_at`.
+6. It puts one message per delivery on the **queue**, sets `enqueued_at` on those rows, and returns `202`.
 7. A **worker** takes the message from the queue, **claims** the delivery row, sends it to the right provider, and sets that delivery's status to `sent`.
 
-**What if we crash between step 5 and step 6?** The rows are saved, but nothing is on the queue. This is a **dual write**: two systems, and no way to update both in one step. So a small **scheduler** job (it also handles quiet hours, see deep dive 3) runs every minute. It finds deliveries that are due but still not on the queue after a minute, and puts them on the queue. The database is the source of truth, and the queue is filled from it. This is the idea behind the [outbox pattern](../distributed-systems/outbox-pattern.mdx). If we crash after step 6 but before marking the rows, a delivery can land on the queue twice. That is fine, because the claim in deep dive 2 lets only one worker send it.
+**What if we crash between step 5 and step 6?** The rows are saved, but nothing is on the queue. This is a **dual write**: two systems, and no way to update both in one step. So a small **scheduler** job (it also handles quiet hours, see deep dive 3) runs every minute. It finds deliveries with `enqueued_at IS NULL` that have been due for over a minute, puts them on the queue, and sets `enqueued_at`. The database is the source of truth, and the queue is filled from it. This is the idea behind the [outbox pattern](../distributed-systems/outbox-pattern.mdx). If we crash after step 6 but before setting `enqueued_at`, a delivery can land on the queue twice. That is fine, because the claim in deep dive 2 lets only one worker send it.
 
 **Change settings:** the app calls `PATCH /users/me/notification-settings`, and we save the settings in the Users DB. `PATCH` changes only the fields sent; `PUT` would replace all the settings.
 
@@ -191,25 +191,27 @@ RETURNING *;
 
 0 rows back means the delivery is already sent, or another worker is sending it right now. The claim has a time limit, called a **lease**. If a worker crashes while sending, the lease runs out, and someone else can claim the row.
 
-Here is the worker, in simple code:
+Here is the worker, in simple code. `db.move(id, from, to)` is a conditional update like the claim: it changes the status only if the row still has the `from` status, and returns false if not.
 
 ```js
 // The queue message is acknowledged only when handle() finishes.
 // If the worker crashes, the queue gives the message to another worker later.
+// msg.attempt is 1 for the first try.
 async function handle(msg) {
   const d = await db.claimDelivery(msg.deliveryId); // the UPDATE above
   if (!d) return; // already sent, or another worker has it: skip
 
   try {
-    await provider.send(d); // APNs, FCM, email or SMS
-    await db.setStatus(d.id, 'sent');
+    await provider.send(d); // APNs, FCM, email or SMS (with d.id, so webhooks can find the row)
+    await db.move(d.id, 'sending', 'sent'); // false if a webhook already said 'delivered'
   } catch (err) {
-    if (msg.attempt >= 5) {
-      await db.setStatus(d.id, 'failed');
+    if (msg.attempt >= 5) { // that was the 5th try
+      await db.move(d.id, 'sending', 'failed');
       return deadLetterQueue.put(msg);
     }
-    await db.setStatus(d.id, 'queued'); // free the row for the next try
-    const waitMs = 1000 * 2 ** msg.attempt + Math.random() * 1000; // backoff + jitter
+    // Free the row for the next try, unless a webhook already moved it on.
+    if (!(await db.move(d.id, 'sending', 'queued'))) return;
+    const waitMs = 1000 * 2 ** (msg.attempt - 1) + Math.random() * 1000; // 1 s, 2 s, 4 s, 8 s + jitter
     await queue.putLater({ ...msg, attempt: msg.attempt + 1 }, waitMs);
   }
 }
@@ -224,6 +226,18 @@ There are two places where duplicates can come from, and one fix for each:
 | The caller sends twice | Orders service retries after a timeout | `Idempotency-Key`, saved with a unique index in the Notifications DB |
 | We send twice | The queue gives a message to a worker again | The worker claims the delivery row before sending; only one claim can win |
 
+**Who writes each status?** Three parts of the system change a delivery's status. Every change is a conditional update that names the status it expects, so a late or repeated update can never undo a newer one:
+
+| Status | Who sets it |
+| --- | --- |
+| `queued` | The Notification Service, when it saves the row. A worker, before a retry. |
+| `sending` | A worker, when it claims the row. |
+| `sent` | The worker, after the provider accepts the message. |
+| `delivered`, `bounced` | The webhook receiver, when the provider reports back. |
+| `failed` | The worker after the last try, or the webhook receiver (for example, "SMS failed"). |
+
+**Webhooks from providers.** Email and SMS providers call our **webhook receiver** with news like "delivered" or "bounced". Anyone can call that URL, so the receiver first **checks the signature** (the provider signs each call with a secret only it and we know), and **skips event IDs it has already handled**. Then it moves the status forward only: `delivered` can replace `queued`, `sending` or `sent`, but nothing replaces `delivered`. So a `delivered` that arrives before the worker's `sent` is kept, because the worker's update needs a row that is still `sending`. These are the same rules as in [Design a Payment System](./payment-system.mdx).
+
 <Callout title="Exactly once is not possible here" type="idea">
   If a worker crashes **after** the provider sent the SMS but **before** we saved `sent`, the retry sends it again. We can't see inside the provider, so no design can fully stop this. We make it **rare**, not impossible. Say this in the interview; it shows you understand [delivery guarantees](../messaging/delivery-guarantees.mdx).
 </Callout>
@@ -237,7 +251,7 @@ Too many notifications make people turn them all off, or delete the app. So the 
 - **Quiet hours:** don't buzz a phone at 3 a.m. the user's time. Save non-urgent deliveries with a send time, and the **scheduler** job (the same one that catches missed sends) moves them into the queue when that time comes. Login codes ignore quiet hours, because the user asked for them right now.
 - **Grouping:** "5 people liked your photo" instead of 5 separate pushes.
 - **Unsubscribe:** every marketing email has an unsubscribe link. In many countries this is required by law.
-- **Clean up dead devices:** when a user deletes the app, APNs and FCM tell us the device token is no longer valid. We delete the token and stop sending to it.
+- **Clean up dead devices:** when a user deletes the app, the device token stops working. APNs and FCM don't tell us on their own. Instead, the answer to our **next** push says so: APNs answers `410` with the reason `Unregistered`, and FCM answers with the error `UNREGISTERED`. We delete the token and stop sending to it.
 
 ### Final architecture
 
@@ -249,7 +263,7 @@ flowchart TB
   NS --> Redis[("Redis<br/>settings cache, frequency caps,<br/>provider rate limits")]:::cache
   NS --> UDB[("Users DB<br/>settings + contacts")]:::db
   NS --> NDB[("Notifications DB<br/>deliveries: status, send time")]:::db
-  Sched["Scheduler<br/>(quiet hours, missed sends)"]:::service -->|"finds due deliveries<br/>not on the queue"| NDB
+  Sched["Scheduler<br/>(quiet hours, missed sends)"]:::service -->|"finds due deliveries<br/>with no enqueued_at"| NDB
   NS --> Queues["Queues per channel<br/>high + low priority"]:::queue
   Sched --> Queues
   Queues --> Workers["Push, Email, SMS Workers"]:::service
@@ -259,9 +273,9 @@ flowchart TB
   Workers --> APNs["APNs / FCM"]:::external
   Workers --> Email["Email provider"]:::external
   Workers --> SMS["SMS provider"]:::external
-  Email -.->|"delivered, bounced, opened"| Hooks["Webhook receiver"]:::service
-  SMS -.->|"delivered, failed"| Hooks
-  Hooks -->|"update delivery status"| NDB
+  Email -.->|"signed: delivered,<br/>bounced, opened"| Hooks["Webhook receiver<br/>(checks signature,<br/>skips seen event IDs)"]:::service
+  SMS -.->|"signed: delivered, failed"| Hooks
+  Hooks -->|"move status forward only"| NDB
 ```
 
 ## In the real world
@@ -284,7 +298,7 @@ A fan-out job reads the audience in batches (say 1,000 users at a time). Each ba
 </Accordion>
 <Accordion title="How do you know if a notification was delivered or opened?">
 
-Many providers call us back with a **webhook**: a URL on our side that the provider calls when something happens, like "email delivered" or "SMS failed". A small **webhook receiver** service takes these calls. For emails, a tiny invisible image in the email tells us when it was opened. We save these events and update the status of that delivery.
+Many providers call us back with a **webhook**: a URL on our side that the provider calls when something happens, like "email delivered" or "SMS failed". A small **webhook receiver** service takes these calls. It checks the signature, skips events it has already seen, and only moves a delivery's status forward (deep dive 2). For emails, a tiny invisible image in the email tells us when it was opened. Opens are saved as events, not as a status.
 
 </Accordion>
 <Accordion title="A user has a phone and a tablet. Where do you send the push?">
@@ -319,6 +333,7 @@ Treat it as one more channel. A worker writes the notification into an **Inbox**
 
 - Separate queues per channel and priority, so urgent messages are never stuck.
 - Two dedupe checks: idempotency key at the API, and claiming the delivery row in the worker.
+- Signed, de-duplicated provider webhooks, and conditional status updates, so a late update can't undo a newer one.
 - Status per delivery (notification + channel), not per notification.
 - Save first, then queue. A scheduler job catches deliveries that never reached the queue (the dual write).
 - Backoff with jitter, and a dead-letter queue.
@@ -340,7 +355,9 @@ Treat it as one more channel. A worker writes the notification into an **Inbox**
   - **Separate queues per channel and priority**, so login codes never wait behind marketing.
   - **Retry with backoff + jitter**, then send to a **dead-letter queue**.
   - One **delivery** row per notification and channel, each with its own status.
-  - Save first, then queue. A **scheduler** puts missed deliveries on the queue (the outbox idea).
+  - Save first, then queue. A **scheduler** puts missed deliveries (empty `enqueued_at`) on the queue (the outbox idea).
+  - Every status change is a **conditional update**, so a late update can't undo a newer one. Provider webhooks are
+    **signed** and de-duplicated by event ID.
   - **Two dedupe checks:** idempotency key at the API, and a **claim** (one conditional update) in the worker.
   - Exactly-once is impossible. Make duplicates **rare**.
   - Respect users: **settings, frequency caps, quiet hours**.

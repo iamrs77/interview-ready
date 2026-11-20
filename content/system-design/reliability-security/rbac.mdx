@@ -87,7 +87,7 @@ if (!can(user, "article:publish")) return res.status(403).end();
 if (user.role !== "editor" && user.role !== "admin") return res.status(403).end();
 ```
 
-**Making it fast.** Looking up roles in the database on every request adds work. Common options are to cache each user's permissions in Redis, or to put the roles inside the login token (a JWT, see [Cookies, Sessions and JWT](../foundations/cookies-sessions-jwt.mdx)). A token is fast, but it can go **stale**: if you remove someone's admin role, their token still says "admin" until it expires. Keep such tokens short-lived.
+**Making it fast.** Looking up roles in the database on every request adds work. Common options are to cache each user's permissions in Redis, or to put the roles inside the login token (a JWT, see [Cookies, Sessions and JWT](../foundations/cookies-sessions-jwt.mdx)). Both are fast, but both can go **stale**: if you remove someone's admin role, their token still says "admin" until it expires, and the cache keeps the old permissions. So delete the cached entry whenever a user's roles change, keep such tokens short-lived, or look up important permissions fresh.
 
 **Roles per team.** In apps like Slack or GitHub, a person can be an admin in one team and a plain member in another. So the role is given **inside a team or project**, and the table becomes `user_roles (user_id, team_id, role_id)`. See [Multi-Tenancy](../advanced-components/multi-tenancy.mdx).
 

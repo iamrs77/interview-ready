@@ -59,7 +59,7 @@ POST /fares
 { "pickup": { "lat": 37.7749, "lng": -122.4194 }, "destination": { "lat": 37.7955, "lng": -122.3937 } }
 
 → 200 OK
-{ "fareId": "fare_1", "price": 18.50, "etaMinutes": 4 }
+{ "fareId": "fare_1", "priceCents": 1850, "etaMinutes": 4 }
 ```
 
 ```http
@@ -71,7 +71,7 @@ Idempotency-Key: 3f9a1c7e-2b4d-4e6f-8a1b-9c0d2e3f4a5b
 { "rideId": "ride_789", "status": "matching" }
 ```
 
-The rider sends the `fareId`, not the price. So nobody can change the price on their phone.
+The price is a whole number of cents (`1850` = $18.50), never a decimal number, so rounding never loses money. The rider sends the `fareId`, not the price. So nobody can change the price on their phone.
 
 The **`Idempotency-Key`** is a unique ID the app makes once per "Request" tap and sends again on every retry. Phones often lose the network for a moment. Without the key, a retried request would create a second ride, and two drivers would drive to the same rider. With it, the Ride Service sees the key it already saved and returns the first ride (see [Idempotency](../messaging/idempotency.mdx)).
 
@@ -119,14 +119,14 @@ flowchart TB
 
 **Request a ride:**
 
-1. The rider sends `POST /rides` with an idempotency key. The Ride Service saves a ride with status `matching` (or returns the saved ride if the key was seen before) and passes it to the Matching Service.
+1. The rider sends `POST /rides` with an idempotency key. The Ride Service saves a ride with status `matching` (or returns the saved ride if the key was seen before) and passes it to the Matching Service. (Deep dive 4 makes this hand-off safe if the service crashes in the middle.)
 2. The Matching Service asks the Location Service for **available drivers near the pickup**.
 3. It picks the best one and sends them a **ride offer** through the Notification Service (a push notification, or a message on the driver's open connection).
 4. The driver has 10 seconds to accept. If they accept, the ride becomes `driver_on_the_way`, and the rider is told. If they decline or don't answer, the next driver gets the offer.
 
 **Share location:**
 
-1. Every 5 seconds, the driver's app sends its location.
+1. Every 5 seconds, the driver's app sends its location (a parked driver less often, see deep dive 1).
 2. The Location Service saves it in the in-memory location index.
 
 ## Step 5: Deep dives
@@ -159,10 +159,10 @@ GEOSEARCH drivers:sf FROMLONLAT -122.4183 37.7755 BYRADIUS 2 km ASC COUNT 10
 
 Nice details:
 
-- **What if Redis crashes?** We lose almost nothing. Every driver sends a fresh location within 5 seconds, so the index **fills itself up again**. Old positions were never worth saving.
+- **What if Redis crashes?** We lose almost nothing. Every moving driver sends a fresh location within 5 seconds (a parked one within 15), so the index **fills itself up again** within about 15 seconds. Old positions were never worth saving.
 - **Keep one connection open.** The driver's app uses a **WebSocket**: one connection that stays open, so each update is a tiny message, not a whole new HTTP request.
 - **Drivers who go silent:** we also store when each driver last sent a location. Drivers not heard from in 30 seconds (app closed, tunnel) are ignored, and a cleanup job removes them.
-- **Send less when it does not matter:** a parked driver can send every 30 seconds, not every 5.
+- **Send less when it does not matter:** a parked driver can send every 15 seconds, not every 5. Not every 30: then one late update would push a parked driver past the 30-second cut-off, and they would blink out of the index.
 
 ### 2. How do we find nearby drivers fast?
 
@@ -178,11 +178,19 @@ So places that are close usually share the same first characters, and a normal s
 
 One catch: two drivers can be 10 meters apart but on **opposite sides of a box border**, so their codes differ. That is why we always search the pickup's box **and the 8 boxes around it**.
 
+Two more rules make this correct:
+
+- **The box must be at least as big as the search radius.** The 8 neighbors reach only one box past the pickup's own box. For a 2 km search, a 5-character geohash box (about 4.9 km wide) is big enough. A smaller box would miss a driver 2 km away, two boxes over.
+- **Then filter by real distance.** The 9 boxes cover much more than the 2 km circle, so we drop every driver farther than 2 km.
+
+Redis `GEOSEARCH` does both steps for us: it picks the box size from the radius, and returns only drivers inside it.
+
 ```mermaid
 flowchart LR
-  P["Pickup point"] --> Cell["Find its box<br/>(geohash)"]
+  P["Pickup point"] --> Cell["Find its box<br/>(at least as big<br/>as the radius)"]
   Cell --> Near["Search that box<br/>+ 8 neighbors"]
-  Near --> Free["Keep only<br/>available drivers"]
+  Near --> Dist["Drop drivers<br/>farther than 2 km"]
+  Dist --> Free["Keep only<br/>available drivers"]
   Free --> Rank["Rank by<br/>driving time"]
 ```
 
@@ -261,12 +269,13 @@ UPDATE drivers SET status = 'on_trip'
 COMMIT;
 ```
 
-The Redis lock only decides **who gets the offer**. It can expire between step 1 and step 2, so it can't be the final guard. The two `WHERE` conditions are: a ride gets one driver, and a driver gets one ride, even if a late answer slips past the lock check. The Matching Service also skips drivers who are locked or `on_trip` when it searches. See [Distributed Locking](../distributed-systems/distributed-locking.mdx).
+The Redis lock only decides **who gets the offer**. It can expire between step 1 and step 2, so it can't be the final guard. The two `WHERE` conditions make sure that a ride gets one driver, and a driver gets one ride, even if a late answer slips past the lock check. The Matching Service also skips drivers who are locked or `on_trip` when it searches. See [Distributed Locking](../distributed-systems/distributed-locking.mdx).
 
 ### 4. Busy areas and peak times
 
 - **Split by city.** Each city (or region) gets its own Redis shard, or several for a big city like New York. Cities don't share drivers, so they never need to talk to each other. A pickup near a border searches both sides.
 - **Put ride requests in a queue.** Ride requests go into **Kafka**, split by region, and matching workers pull from it. At midnight on New Year's Eve, the queue gets longer instead of requests being dropped. If a matching worker crashes, another one picks up its requests.
+- **Save the ride and queue it in one step.** "Save the ride, then send it to Kafka" is two writes. If the Ride Service crashes between them, the ride stays `matching` forever, and the rider's retry just returns that stuck ride. So the Ride Service saves the ride **and** a "new ride request" row in an **outbox** table, in one transaction. An Outbox Relay reads that table and sends the rows to Kafka (the [Outbox Pattern](../distributed-systems/outbox-pattern.mdx)). The relay may send a request twice after a crash. That is fine: a matching worker skips rides that are no longer `matching`, and the conditional accept still gives each ride one driver.
 - **Raise prices when demand is high.** When many more riders than drivers are in one area, the price goes up. Some riders wait, and more drivers drive to that area. This is a **business** fix for a scaling problem, and it works.
 - **Match in small batches.** Instead of giving each rider the closest driver right away, wait 1 to 2 seconds and match a group of riders and drivers together. The total waiting time for everyone gets shorter.
 - **Hot spots** like a stadium or an airport: use smaller cells there, or a simple line where the driver who has waited longest gets the next ride.
@@ -282,14 +291,19 @@ flowchart TB
   GW --> RideSvc["Ride Service"]:::service
   WSGW -->|"locations"| LocSvc["Location Service"]:::service
   RideSvc --> Maps["Maps API"]:::external
-  RideSvc -->|"new ride request"| Kafka["Kafka<br/>split by region"]:::queue
-  RideSvc --> RideDB[("Rides DB<br/>rides, fares")]:::db
+  RideSvc -->|"ride + outbox row<br/>(one transaction)"| RideDB[("Rides DB<br/>rides, fares, outbox")]:::db
+  RideDB --> Relay["Outbox Relay"]:::service
+  Relay -->|"new ride request"| Kafka["Kafka<br/>split by region"]:::queue
   Kafka --> Match["Matching Workers"]:::service
   WSGW <-->|"offers, answers"| Match
   LocSvc --> Geo[("Redis GEO<br/>one shard per city")]:::cache
   Match -->|"who is near?"| Geo
   Match -->|"take lock, check on accept"| Locks[("Redis Locks<br/>10 s TTL")]:::cache
   Match -->|"accept: conditional update"| RideDB
+  Match -->|"offers if the app is in the<br/>background, rider updates"| Notify["Notification Service"]:::service
+  Notify --> Push["APNs / FCM"]:::external
+  Push -.->|"push"| Driver
+  Push -.->|"push"| Rider
 ```
 
 ## In the real world
@@ -361,10 +375,10 @@ You can, with the atomic update from deep dive 3. But offers happen many times p
 
 <Callout title="Remember this" type="success">
   - **400,000 location updates per second** → keep only the **latest** location, **in memory** (Redis GEO).
-  - If Redis is lost, the index **refills itself** within one update cycle.
-  - **Geohash** turns latitude and longitude into one code. Search the cell **plus its 8 neighbors**.
+  - If Redis is lost, the index **refills itself** within about 15 seconds (moving drivers send every 5 s, parked ones every 15 s). Silent for 30 s = ignored.
+  - **Geohash** turns latitude and longitude into one code. Pick a cell at least as big as the search radius, search the cell **plus its 8 neighbors**, then drop drivers outside the radius.
   - Rank nearby drivers by **driving time**, not straight-line distance.
   - **No double booking:** a Redis lock with a **10-second TTL** per driver. No answer = the lock expires = next driver.
   - **Accept is conditional:** the lock must still hold this ride, the ride must still be `matching`, and the driver must still be `available`.
-  - **Peaks:** split by city, queue the requests, and use surge pricing.
+  - **Peaks:** split by city, queue the requests (through an **outbox**, so a saved ride is always queued), and use surge pricing.
 </Callout>

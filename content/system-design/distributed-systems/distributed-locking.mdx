@@ -21,7 +21,7 @@ flowchart TB
   W1["Worker 1"]:::service -->|"take lock: got it"| R[("Redis")]:::cache
   W2["Worker 2"]:::service -->|"take lock: taken, skip"| R
   W3["Worker 3"]:::service -->|"take lock: taken, skip"| R
-  W1 --> Job["Run the invoice job"]:::service
+  W1 --> Job["Rebuild the sales report"]:::service
 ```
 
 **First, check if you need one.** If all the data lives in **one database**, use that database's own locks or a conditional update. They are simpler and safer. See [Locks and Deadlocks](../databases/locking.mdx).
@@ -35,11 +35,11 @@ It also helps to ask **why** you want the lock:
 
 ## Locks with Redis
 
-One Redis command takes the lock:
+Say only one server should rebuild the nightly sales report. If two do it, some work is wasted, but nothing breaks. One Redis command takes the lock:
 
 ```bash
 # Take the lock only if nobody has it (NX), and let it expire after 30 seconds (PX 30000)
-SET lock:invoice-job 7f3a9c NX PX 30000
+SET lock:report-rebuild 7f3a9c NX PX 30000
 # OK     -> you have the lock
 # (nil)  -> someone else has it
 ```
@@ -58,7 +58,7 @@ const RELEASE = `
   end
   return 0
 `;
-await redis.eval(RELEASE, 1, 'lock:invoice-job', myToken);
+await redis.eval(RELEASE, 1, 'lock:report-rebuild', myToken);
 ```
 
 ```mermaid
@@ -131,6 +131,23 @@ WHERE id = 9 AND COALESCE(last_token, 0) <= 34;
 
 Where to get tokens: **etcd** and **ZooKeeper** give every change a number that always goes up, which works as a fencing token. A plain Redis lock doesn't give you one.
 
+**Fencing only protects storage that checks the token.** It can't stop a second invoice **email**. So for billing, also make the work itself safe to repeat (see [Idempotency](../messaging/idempotency.mdx)). A unique rule allows one invoice per customer per month, and the email is queued in the same transaction as the invoice (see [Outbox Pattern](./outbox-pattern.mdx)):
+
+```js
+// The invoices table has a unique rule on (customer_id, month)
+await db.transaction(async (tx) => {
+  const added = await tx.query(
+    `INSERT INTO invoices (customer_id, month, total) VALUES ($1, $2, $3)
+     ON CONFLICT (customer_id, month) DO NOTHING`,
+    [customerId, month, total]
+  );
+  if (added.rowCount === 0) return;               // already billed: no second invoice, no second email
+  await queueInvoiceEmail(tx, customerId, month); // an outbox row, saved in the same transaction
+});
+```
+
+A crash before the commit saves nothing, so the next run bills that customer. A crash after it leaves the invoice and its email together, and the next run skips that customer.
+
 ## Choosing a tool
 
 | Tool | How it works | Good for |
@@ -147,7 +164,7 @@ Where to get tokens: **etcd** and **ZooKeeper** give every change a number that 
 
 ## In the interview
 
-> "Only one instance should run each scheduled job. Where a double run only wastes work, like rebuilding a report, a Redis lock with SET NX and a 30-second expiry, renewed while the job runs, is enough. Billing twice would be harmful, and a Redis lock gives no fencing token. So the billing lock comes from etcd, which gives one, and the database rejects writes with an old token."
+> "Only one instance should run each scheduled job. Where a double run only wastes work, like rebuilding a report, a Redis lock with SET NX and a 30-second expiry, renewed while the job runs, is enough. Billing twice would be harmful, and a Redis lock gives no fencing token. So the billing lock comes from etcd, which gives one, and the database rejects writes with an old token. A lock can't take back an email, so a unique rule also allows only one invoice per customer per month."
 
 <Callout title="Remember this" type="success">
   - A **distributed lock** lives in a shared place (Redis, etcd, ZooKeeper), so all servers see it.
@@ -156,4 +173,5 @@ Where to get tokens: **etcd** and **ZooKeeper** give every change a number that 
   - A paused holder can **wake up after its lease expired** and still think it has the lock.
   - **Fencing tokens:** an always-increasing number. Storage **rejects old tokens**.
   - Redis locks for **saving work**. etcd/ZooKeeper + fencing for **correctness**.
+  - Fencing can't stop side effects like a second email. Make the work **idempotent** too: one invoice per customer per month.
 </Callout>

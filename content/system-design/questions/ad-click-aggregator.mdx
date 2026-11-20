@@ -90,7 +90,8 @@ The simplest design that works: save every click, count when asked.
 flowchart LR
   User(["Browser"]):::client -->|"1. click"| Click["Click Service"]:::service
   Click -->|"2. save click"| DB[("Clicks DB")]:::db
-  Click -.->|"3. 302 redirect"| Site["Advertiser website"]:::external
+  Click -.->|"3. 302 redirect"| User
+  User -.->|"4. opens"| Site["Advertiser website"]:::external
   Adv(["Advertiser"]):::client --> Query["Query Service"]:::service
   Query -->|"COUNT clicks"| DB
 ```
@@ -228,7 +229,8 @@ Ask the interviewer which numbers are for **money** (exact) and which are for **
 flowchart TB
   User(["Browser"]):::client --> LB["Load Balancer"]:::lb
   LB --> Click["Click Service<br/>(many copies)"]:::service
-  Click -.->|"302 redirect"| Site["Advertiser website"]:::external
+  Click -.->|"302 redirect"| User
+  User -.->|"then opens"| Site["Advertiser website"]:::external
   Click -->|"click event"| Kafka["Kafka<br/>(split by ad ID)"]:::queue
   Kafka --> Flink["Flink<br/>dedupe<br/>1-minute windows<br/>checkpoints"]:::service
   Flink -->|"idempotent writes"| OLAP[("OLAP DB<br/>counts by minute,<br/>hour and day")]:::db

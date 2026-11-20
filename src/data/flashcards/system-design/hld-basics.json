@@ -83,7 +83,7 @@
       "id": "hld-basics/availability-reliability-2",
       "lesson": "hld-basics/availability-reliability",
       "q": "How much downtime per year do 99.9%, 99.99% and 99.999% uptime allow?",
-      "a": "Each extra nine means 10 times less downtime. 99.9%: about 9 hours. 99.99%: under 1 hour (about 53 minutes). 99.999%: about 5 minutes."
+      "a": "Each extra nine means 10 times less downtime. 99.9%: about 8.8 hours (say 9). 99.99%: about 53 minutes. 99.999%: about 5.3 minutes."
     },
     {
       "id": "hld-basics/availability-reliability-3",
@@ -158,6 +158,12 @@
       "a": "A tool that randomly shuts down servers in production during working hours. Every team must build services that survive a lost server, because it happens all the time."
     },
     {
+      "id": "hld-basics/availability-reliability-15",
+      "lesson": "hld-basics/availability-reliability",
+      "q": "Using a 30-day month, how much downtime per month do 99.9%, 99.99% and 99.999% allow?",
+      "a": "99.9%: about 43 minutes. 99.99%: about 4.3 minutes. 99.999%: about 26 seconds. Each extra nine cuts it by 10 times."
+    },
+    {
       "id": "hld-basics/latency-throughput-qps-1",
       "lesson": "hld-basics/latency-throughput-qps",
       "q": "What is the difference between latency and throughput?",
@@ -203,13 +209,13 @@
       "id": "hld-basics/latency-throughput-qps-8",
       "lesson": "hld-basics/latency-throughput-qps",
       "q": "What is Little's Law?",
-      "a": "**requests in progress = throughput × latency**. A server working on 100 requests at once, 0.1 seconds each, finishes 1,000 per second. At 0.2 seconds each, only 500."
+      "a": "**requests in progress = throughput × latency**. If a server can work on only 100 requests at once, 0.1 s each, it finishes 1,000 per second; at 0.2 s each, only 500. If traffic stays the same instead, slower requests mean more requests in progress."
     },
     {
       "id": "hld-basics/latency-throughput-qps-9",
       "lesson": "hld-basics/latency-throughput-qps",
       "q": "How does a server's busyness affect latency?",
-      "a": "Under about 50% busy: fast. About 70 to 80%: some waiting, and latency starts to rise. Over 90%: long lines, latency shoots up and timeouts start. So add servers before 100%."
+      "a": "Under about 50% busy: little waiting. About 70 to 80%: some waiting, and latency starts to rise. Over 90%: long lines, latency shoots up and timeouts start. So add servers before 100%."
     },
     {
       "id": "hld-basics/latency-throughput-qps-10",
@@ -222,6 +228,78 @@
       "lesson": "hld-basics/latency-throughput-qps",
       "q": "How should you write latency and throughput in your non-functional requirements?",
       "a": "With numbers and percentiles, and plan for the peak. For example: \"Opening a short link should take under 100 ms at p99. About 12,000 reads per second on average, so design for around 30,000.\""
+    },
+    {
+      "id": "hld-basics/latency-throughput-qps-12",
+      "lesson": "hld-basics/latency-throughput-qps",
+      "q": "A request waits for 100 servers, and each is slow 1 time in 100. How often is the user's request slow?",
+      "a": "All 100 are fast only 0.99 to the power 100 ≈ 37% of the time, so about **63%** of user requests are slow. Rare slowness on each server becomes common slowness for users."
+    },
+    {
+      "id": "hld-basics/queueing-basics-1",
+      "lesson": "hld-basics/queueing-basics",
+      "q": "What are arrival rate, service time and utilization?",
+      "a": "**Arrival rate:** how many requests come in per second. **Service time:** how long one takes to handle, not counting the wait. **Utilization:** how busy the server is = arrival rate ÷ service rate. 80 per second at 10 ms each = 80%."
+    },
+    {
+      "id": "hld-basics/queueing-basics-2",
+      "lesson": "hld-basics/queueing-basics",
+      "q": "In the simple M/M/1 model, what is the average wait in the queue?",
+      "a": "**utilization ÷ (1 − utilization) × service time.** 50% busy → about 1× the service time, 80% → 4×, 90% → 9×, 99% → 99×. It is a simplified model, but real systems show the same shape: flat, then a steep wall near 100%."
+    },
+    {
+      "id": "hld-basics/queueing-basics-3",
+      "lesson": "hld-basics/queueing-basics",
+      "q": "Why does waiting explode as a server gets close to 100% busy?",
+      "a": "Requests arrive in random bunches, and the server needs free time to clear each line. At 50% busy it has plenty. At 99% it has almost none, so every small bunch leaves a line that takes a very long time to clear."
+    },
+    {
+      "id": "hld-basics/queueing-basics-4",
+      "lesson": "hld-basics/queueing-basics",
+      "q": "An API gets 1,000 requests per second, and each takes 0.2 s. How many are in flight?",
+      "a": "Little's Law: 1,000 × 0.2 = **200 requests in flight** (started, not finished). With one thread per request, you need at least 200 threads across all servers, and more for the peak."
+    },
+    {
+      "id": "hld-basics/queueing-basics-5",
+      "lesson": "hld-basics/queueing-basics",
+      "q": "What happens to requests in flight when a dependency gets slow?",
+      "a": "They grow, even with the same traffic. At 1,000 per second, going from 0.2 s to 1 s per request means 1,000 in flight instead of 200. Threads and connection pools run out, and one slow database can freeze many app servers."
+    },
+    {
+      "id": "hld-basics/queueing-basics-6",
+      "lesson": "hld-basics/queueing-basics",
+      "q": "How can Little's Law size a database connection pool?",
+      "a": "2,000 requests per second × 10 ms holding a connection = **20** connections in use on average. If the database slows to 50 ms, you need **100**. If the pools only have 50 in total, requests wait in line for a connection."
+    },
+    {
+      "id": "hld-basics/queueing-basics-7",
+      "lesson": "hld-basics/queueing-basics",
+      "q": "When is it fine to run a server near 100% busy?",
+      "a": "For background or batch work, where nobody waits for each item: throughput matters, not latency. Latency-sensitive servers need headroom (a common rule of thumb: around 50 to 70% busy at peak), because waiting explodes near 100%."
+    },
+    {
+      "id": "hld-basics/queueing-basics-8",
+      "lesson": "hld-basics/queueing-basics",
+      "q": "How do queues cause tail latency?",
+      "a": "Unlucky requests arrive just after a burst and wait behind it. In the M/M/1 model, p99 is about 4.6× the average: at 80% busy with 10 ms of work, the average is 50 ms, but p99 is about 230 ms."
+    },
+    {
+      "id": "hld-basics/queueing-basics-9",
+      "lesson": "hld-basics/queueing-basics",
+      "q": "What practical rules keep queues from hurting latency?",
+      "a": "Leave headroom. Give every queue a size limit. Use timeouts, and drop requests that already waited longer than the caller will wait. When full, shed load (fast 503s) or push back on the sender. Watch queue length and wait time."
+    },
+    {
+      "id": "hld-basics/queueing-basics-10",
+      "lesson": "hld-basics/queueing-basics",
+      "q": "What risk does Amazon's article \"Avoiding insurmountable queue backlogs\" warn about?",
+      "a": "During an outage, messages keep arriving but aren't processed, so a big backlog builds. After the fix, it must all be worked through, so the service stays slow long after the cause is fixed. Measure the age of messages, not only the count."
+    },
+    {
+      "id": "hld-basics/queueing-basics-11",
+      "lesson": "hld-basics/queueing-basics",
+      "q": "M/M/1 model: a server does 10 ms of work per request and is 90% busy. How long does a request wait, and how long in total?",
+      "a": "Wait = 0.9 ÷ 0.1 × 10 ms = **90 ms** in the queue. Total = 90 + 10 = **100 ms**, 10 times the work itself. At 50% busy it would be 10 ms of waiting and 20 ms in total."
     },
     {
       "id": "hld-basics/stateless-vs-stateful-1",
@@ -707,7 +785,7 @@
       "id": "hld-basics/capacity-estimation-11",
       "lesson": "hld-basics/capacity-estimation",
       "q": "Roughly how many requests per second can one app server and one SQL database handle?",
-      "a": "App server: 1,000 to 10,000 simple API calls. SQL database: a few thousand to about 10,000 simple queries, fewer for writes and heavy queries. Say out loud that these are rough guesses."
+      "a": "App server: 1,000 to 10,000 simple API calls. SQL database: about 10,000 to 50,000 simple reads using an index, on a well-sized server; fewer for writes and heavy queries. Say out loud that these are rough guesses."
     },
     {
       "id": "hld-basics/capacity-estimation-12",
@@ -719,7 +797,7 @@
       "id": "hld-basics/capacity-estimation-13",
       "lesson": "hld-basics/capacity-estimation",
       "q": "What are rough one-machine limits for connections, RAM, SSD and network?",
-      "a": "Open WebSocket connections: hundreds of thousands on a well-tuned server. RAM: 64 to 512 GB is common. SSD: a few TB to tens of TB. Network: about 10 Gbps, which is about 1 GB per second."
+      "a": "Open WebSocket connections: hundreds of thousands on a well-tuned server. RAM: 64 to 512 GB is common. SSD: a few TB to tens of TB. Network: 10 Gbps or more (10 Gbps ≈ 1 GB per second); big cloud machines get 25 to 100 Gbps or more."
     },
     {
       "id": "hld-basics/capacity-estimation-14",
@@ -749,7 +827,7 @@
       "id": "hld-basics/capacity-estimation-18",
       "lesson": "hld-basics/capacity-estimation",
       "q": "Photo app: 10 million daily users each view 50 photos. What read QPS, and what decision follows?",
-      "a": "500 million views a day ÷ 100,000 = 5,000 per second, about 15,000 at peak. That is too many for one database, so add a cache and read replicas."
+      "a": "500 million views a day ÷ 100,000 = 5,000 per second, about 15,000 at peak. One database might manage it, but it would run too busy, and busy servers get slow. We want headroom, so add a cache and read replicas."
     },
     {
       "id": "hld-basics/capacity-estimation-19",
@@ -798,6 +876,12 @@
       "lesson": "hld-basics/capacity-estimation",
       "q": "Why did \"Gangnam Style\" nearly break YouTube's view counter?",
       "a": "View counts were stored as a 32-bit number, which only goes up to about 2.1 billion. In December 2014 the video got close, and YouTube moved to a 64-bit number."
+    },
+    {
+      "id": "hld-basics/capacity-estimation-27",
+      "lesson": "hld-basics/capacity-estimation",
+      "q": "Chat app: 2 billion messages a day, about 200 bytes each. How much storage per year, and what follows?",
+      "a": "2 billion × 200 bytes = 400 GB a day. × 365 ≈ **150 TB a year**. That can't fit on one machine, so the data must be split across machines."
     },
     {
       "id": "hld-basics/scaling-reads-1",
@@ -905,19 +989,19 @@
       "id": "hld-basics/scaling-writes-11",
       "lesson": "hld-basics/scaling-writes",
       "q": "How can you count likes at scale?",
-      "a": "Count in Redis with `INCR` and save totals every few seconds, batch increments in each app server, use sharded counters, use a HyperLogLog for unique counts, or send events to Kafka for a counting job."
+      "a": "Count in Redis with `INCR` and have a job save the totals every few seconds, batch increments in each app server, use sharded counters, use a HyperLogLog for unique counts, or send events to Kafka for a counting job."
     },
     {
       "id": "hld-basics/scaling-writes-12",
       "lesson": "hld-basics/scaling-writes",
       "q": "What is a sharded counter?",
-      "a": "One counter split into, say, 10 smaller counters. Each like adds 1 to a random one, and you add them all up to read the total. Now 10 writes can happen at the same time."
+      "a": "One counter split into, say, 10 smaller counters. Each like adds 1 to a random one, and you add them all up to read the total. Now 10 writes can happen at the same time. Create the 10 rows up front, or the `UPDATE` finds no row and does nothing."
     },
     {
       "id": "hld-basics/scaling-writes-13",
       "lesson": "hld-basics/scaling-writes",
       "q": "Why does Google Firestore tell developers to shard counters?",
-      "a": "A single Firestore document can only be updated about once per second. For counters that change faster, it says to split the count across several documents and add them up when reading."
+      "a": "As of 2026, Firestore's docs warn that one document can't be updated at an unlimited rate (older docs said about once per second). For counters that change faster, they say to split the count across several documents and add them up when reading."
     }
   ]
 }

@@ -36,7 +36,7 @@ Cookies have settings (flags) that keep them safe:
 | --- | --- |
 | `HttpOnly` | JavaScript on the page **can't read** the cookie, so a malicious script can't steal it |
 | `Secure` | Only sent over **HTTPS** |
-| `SameSite` | Not sent when **another site** triggers the request. Protects against fake requests from other sites (CSRF) |
+| `SameSite` | Whether it is sent on requests that **another site** starts. `Strict`: never. `Lax`: only when the user clicks a link to the site (a `GET`), not on form `POST`s, images, iframes or `fetch`. `None`: always (must also be `Secure`). Helps against fake requests from other sites (CSRF) |
 | `Max-Age` / `Expires` | When the cookie runs out |
 
 ## Sessions
@@ -58,7 +58,7 @@ flowchart LR
 
 Because sessions live in Redis and not inside one app server, **any** server can handle **any** request. The app servers stay stateless (see [Stateless vs Stateful Servers](../hld-basics/stateless-vs-stateful.mdx)).
 
-- **Good:** logging out is easy. Delete the session, and the user is logged out everywhere, instantly.
+- **Good:** logging out is easy. Delete the session, and the user is logged out at once, on every server. To log out every device, delete all of the user's sessions.
 - **Bad:** every request needs a lookup in the session store.
 
 ## JWT (JSON Web Token)
@@ -66,13 +66,13 @@ Because sessions live in Redis and not inside one app server, **any** server can
 A JWT is a token made of three parts, joined by dots: **header.payload.signature**.
 
 ```txt
-eyJhbGciOiJSUzI1NiJ9.eyJ1c2VySWQiOjcsInJvbGUiOiJ1c2VyIiwiZXhwIjoxNzY0MDAwMDAwfQ.k3J9...
+eyJhbGciOiJSUzI1NiJ9.eyJ1c2VySWQiOjcsInJvbGUiOiJ1c2VyIiwiZXhwIjoxODAwMDAwMDAwfQ.k3J9...
 ```
 
 The middle part (the payload) is just JSON, encoded:
 
 ```json
-{ "userId": 7, "role": "user", "exp": 1764000000 }
+{ "userId": 7, "role": "user", "exp": 1800000000 }
 ```
 
 - The auth service **signs** the token with a **private key** that only it has. If anyone changes even one letter of the payload, the signature stops matching, and the token is rejected.
@@ -114,7 +114,7 @@ sequenceDiagram
 
 - Always use **HTTPS**, and mark cookies `Secure`.
 - Use `HttpOnly` cookies, so scripts can't steal them.
-- Use `SameSite` cookies (or CSRF tokens) to block fake requests from other sites.
+- Use `SameSite` cookies **plus** CSRF tokens, in layers, to block fake requests from other sites. See [CSRF and CORS](../reliability-security/csrf-cors.mdx).
 - Keep tokens **short-lived**, and replace refresh tokens each time they are used.
 - **Never** put passwords or secrets inside a JWT.
 

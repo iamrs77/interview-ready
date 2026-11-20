@@ -82,7 +82,7 @@ A crawler is a **loop**. Every page goes through the same steps:
 3. **Look up** the site's IP address with [DNS](../foundations/dns.mdx).
 4. **Download** the page.
 5. **Check** a fingerprint of the page text. If we already have this exact page (from another URL), stop here.
-6. **Save** the raw HTML in object storage.
+6. **Save** the raw HTML in object storage, named by its fingerprint. Only after the save, mark the fingerprint as seen.
 7. **Parse** the page: pull out the text and all the links.
 8. **Clean and filter** the links: make them full URLs, and drop the ones we have already seen.
 9. **Add** the new links to the frontier, and go back to step 1.
@@ -118,7 +118,7 @@ flowchart LR
 1. A crawler worker takes a URL from the frontier queue.
 2. It checks the site's `robots.txt` rules. These are cached, so they are downloaded once per site, not once per page.
 3. It asks DNS for the IP address, then downloads the page.
-4. It checks the page's fingerprint (deep dive 2). If the page is new, it saves the HTML in S3. Either way, it writes `done` in the URL DB (plus the S3 location for a new page).
+4. It checks the page's fingerprint (deep dive 2). If the page is new, it saves the HTML in S3 under that fingerprint, and only then marks the fingerprint as seen. Either way, it writes `done` in the URL DB, with the page's S3 location.
 5. It parses the page, cleans the links, and adds the new ones to the frontier.
 
 Things to fix next: one site can get flooded, we will see many duplicates, and things will fail. Those are the deep dives.
@@ -191,7 +191,18 @@ There are two kinds of duplicates.
   A **Bloom filter** is a small, clever structure that answers "have I seen this?" with **"definitely not"** or **"probably yes"**. For 10 billion URLs with a 1% mistake rate, it needs only about **12 GB**, small enough to keep in memory. The cost: 1% of new URLs are wrongly called "seen" and skipped. For a crawler, missing 1% of pages is fine. See [Bloom Filter](../advanced-components/probabilistic-data-structures.mdx).
 </Callout>
 
-**The same page at a different URL.** One article can live at `http://`, `https://`, `www.` and `?ref=` addresses, or be copied to other sites. The fix: compute a **hash** of the page text. A hash is a short fingerprint, like `9f86d081...`. The same text always gives the same hash. The **crawler worker** checks it right after the download, **before** it saves anything: it adds the hash to a set of content hashes in one "add if new" step (like Redis `SADD`, which tells you whether the item was new). If the hash was already there, the worker doesn't save or parse the page. One step means two workers can't both decide the same page is new.
+**Mark a URL as seen only after it is saved.** The parser first **checks** the Bloom filter. For a new URL, it saves it in the URL DB as `to do` (doing nothing if it is already there), sends it to the frontier, and only **then** adds it to the Bloom filter. In the other order, a crash between the two steps would lose that URL forever: the retry would see "already seen" and skip it. In our order, a crash means the parser's message comes back (deep dive 3) and the links are handled again. At worst, a URL reaches the frontier twice and its page is downloaded twice. The content hash below stops it from being saved twice.
+
+**The same page at a different URL.** One article can live at `http://`, `https://`, `www.` and `?ref=` addresses, or be copied to other sites. The fix: compute a **hash** of the page text. A hash is a short fingerprint, like `9f86d081...`. The same text always gives the same hash. The **crawler worker** checks it right after the download, **before** it saves anything. The order of the steps matters:
+
+1. **Check** the hash in a set of content hashes (like Redis `SISMEMBER`). If it is there, we already have this page: don't save or parse it, just mark the URL `done`.
+2. **Save** the HTML in S3 **under its hash**, like `pages/9f86d081...`.
+3. **Hand it on** for parsing (the parse queue in deep dive 3).
+4. Only now **mark the hash as seen** (Redis `SADD`), and mark the URL `done`.
+
+Why mark it last? If the worker marked the hash first and crashed before the save, the retry would see "already seen" and skip the page. It would be lost forever. Marking last means a crash leaves the URL `to do`, and the retry does the work again. Doing it twice is harmless: the second save writes the same file under the same name, and a second parse only finds links we already have. Two workers that download the same page at the same moment may both save and parse it, which is just as harmless.
+
+**How big is the set?** At most 10 billion hashes. Use a 16-byte (128-bit) hash, so two different pages never share one by accident. With Redis's own overhead, each entry takes about 70 bytes. 10 billion × 70 bytes = about **700 GB** of memory: a Redis Cluster of about a dozen 64 GB servers. A second Bloom filter would need only about 12 GB, but it would wrongly skip about 1% of new pages.
 
 An exact hash misses pages that are **almost** the same, where only a date or an ad changed. For those, search engines use **SimHash**: similar pages get similar fingerprints, so near-copies can be found too.
 
@@ -249,13 +260,13 @@ flowchart TB
   API --> Front
   Back --> Crawl["Crawler Workers<br/>robots.txt + DNS cache"]:::service
   Crawl --> Web["Websites"]:::external
-  Crawl -->|"seen this page text?"| Hashes[("Content hashes")]:::cache
-  Crawl -->|"raw HTML, new pages only"| S3["Object Storage (S3)"]:::storage
+  Crawl -->|"check hash,<br/>mark it after the save"| Hashes[("Content hashes<br/>(Redis Cluster)")]:::cache
+  Crawl -->|"raw HTML under its hash,<br/>new pages only"| S3["Object Storage (S3)"]:::storage
   Crawl -->|"done, failed"| Meta[("URL DB<br/>status")]:::db
   Crawl -->|"page ready"| PQ["Parse Queue"]:::queue
   PQ --> Parse["Parser Workers"]:::service
   S3 --> Parse
-  Parse -->|"seen this URL?"| Bloom[("Bloom filter<br/>seen URLs")]:::cache
+  Parse -->|"check URL,<br/>mark it after the insert"| Bloom[("Bloom filter<br/>seen URLs")]:::cache
   Parse -->|"new URLs as to do"| Meta
   Parse -->|"only new URLs"| Front
   Meta -.->|"reload after a crash"| Front
@@ -332,7 +343,9 @@ Always follow `robots.txt`. Send a clear **User-Agent** name with a link to a pa
   - **Politeness:** cache robots.txt. Front queues for priority, a fixed number of **back queues** (one site each),
     and a **heap** of next allowed times (about 1 request per second per site).
   - **Same URL:** normalize it, then check a **Bloom filter** (about 12 GB for 10 billion URLs at 1%).
-  - **Same page:** compare a **hash** of the text, **before** saving it.
+  - **Same page:** check a **hash** of the text **before** saving. Save the page under its hash.
+  - **Mark "seen" last:** add the hash (or the URL) to its "seen" set only **after** the save (or the insert). Then a
+    crash repeats harmless work instead of losing a page.
   - **No lost work:** URLs stay `to do` in the URL DB until handled, a parse queue with a visibility timeout, raw HTML
     in S3, separate download and parse.
   - **Traps:** maximum depth, maximum URL length, page limit per site.

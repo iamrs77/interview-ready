@@ -61,11 +61,11 @@ GET /top-videos?window=1h&k=100
 }
 ```
 
-There is only one read endpoint. Views come in from the video player as events, not through this API.
+There is only one read endpoint. Views come in from the video player as events, not through this API. A browser can't write to Kafka directly, so the player sends them to a small **View Ingest Service**, which puts them into Kafka.
 
 ## Step 4: Data flow
 
-1. A user watches a video. A view event goes into Kafka.
+1. A user watches a video. The player sends a view event to the View Ingest Service, which puts it into Kafka.
 2. Counter workers read the views and count them per video, per minute.
 3. Each worker finds the top K among **its own** videos.
 4. A merger combines all the workers' lists into **one** top K list per window.
@@ -77,7 +77,8 @@ Start simple: one counter that keeps everything in memory.
 
 ```mermaid
 flowchart LR
-  Player(["Video player"]):::client -->|"view event"| Kafka["Kafka"]:::queue
+  Player(["Video player"]):::client -->|"view event"| Ingest["View Ingest<br/>Service"]:::service
+  Ingest --> Kafka["Kafka"]:::queue
   Kafka --> Counter["Counter<br/>counts + top K"]:::service
   Counter -->|"every minute"| Cache[("Redis<br/>top K lists")]:::cache
   User(["User"]):::client --> API["Top K API"]:::service
@@ -86,7 +87,7 @@ flowchart LR
 
 **Count views:**
 
-1. The video player sends a view event, like `{ videoId: "v_981", time: "10:05:12" }`, into Kafka.
+1. The video player sends a view event, like `{ videoId: "v_981", time: "10:05:12" }`, to the View Ingest Service, which puts it into Kafka.
 2. The Counter reads it and adds 1 to that video's count in a **hash map** (video ID → count).
 3. Every minute, the Counter finds the top K and saves the list in Redis.
 
@@ -132,9 +133,9 @@ This design works for a small site. At 100,000 views per second and a billion vi
 
 ```mermaid
 flowchart LR
-  Kafka["Kafka<br/>split by video ID"]:::queue --> W1["Worker 1<br/>videos A to H<br/>local top K"]:::service
-  Kafka --> W2["Worker 2<br/>videos I to P<br/>local top K"]:::service
-  Kafka --> W3["Worker 3<br/>videos Q to Z<br/>local top K"]:::service
+  Kafka["Kafka<br/>split by video ID"]:::queue --> W1["Worker 1<br/>videos with<br/>hash(id) % 3 = 0<br/>local top K"]:::service
+  Kafka --> W2["Worker 2<br/>videos with<br/>hash(id) % 3 = 1<br/>local top K"]:::service
+  Kafka --> W3["Worker 3<br/>videos with<br/>hash(id) % 3 = 2<br/>local top K"]:::service
   W1 --> Merge["Merger<br/>global top K"]:::service
   W2 --> Merge
   W3 --> Merge
@@ -150,7 +151,7 @@ flowchart LR
 
 Two small wins: workers add up views **in memory** and update their counts in batches, and they only send their top K to the merger, never all their counts.
 
-**What about one very hot video?** Splitting by video ID means a viral video's views all land on **one** Kafka partition and **one** worker. Say it gets 5% of all views: 5,000 views per second. That sounds scary, but here it is fine. Each view event is tiny (about 100 bytes, so about 0.5 MB per second), and counting is just adding 1 to a number in memory, which one worker can do millions of times per second. If one video ever got too much even for that, we would **pre-count** before Kafka: the servers that receive view events add up views per video for one second and send a single event like `v_981: +350`. We still never spread one video's views over several workers: that is the trap above. (See [Hot Keys](../advanced-components/hot-keys-fan-out.mdx).)
+**What about one very hot video?** Splitting by video ID means a viral video's views all land on **one** Kafka partition and **one** worker. Say it gets 5% of all views: 5,000 views per second. That sounds scary, but here it is fine. Each view event is tiny (about 100 bytes, so about 0.5 MB per second), and counting is just adding 1 to a number in memory, which one worker can do millions of times per second. If one video ever got too much even for that, we would **pre-count** before Kafka: the View Ingest servers add up views per video for one second and send a single event like `v_981: +350`. We still never spread one video's views over several workers: that is the trap above. (See [Hot Keys](../advanced-components/hot-keys-fan-out.mdx).)
 
 ### 2. How do we handle "last hour" and "last day"?
 
@@ -225,12 +226,14 @@ The sketch can answer "how many views does video X have?", but it can't list vid
 
 <Callout title="Best when small errors are okay: Count-Min Sketch + heap" type="success">
   Tiny, fixed memory and very fast. Add a **nightly batch job** that counts exactly from the raw views in S3.
-  It gives the all-time list an exact base, so the sketch's small errors never pile up for more than a day.
+  It gives the all-time list an exact base, so the sketch's small errors never pile up for more than about a day.
 </Callout>
 
 **The raw views in S3** get there through an **S3 sink** (for example Kafka Connect's S3 connector): a second Kafka consumer that writes every view event to S3 in big files. Kafka does not copy to S3 by itself.
 
-**Batch and stream must not fight over the same lists.** If the nightly batch wrote the all-time list into Redis, the merger would overwrite it a minute later with its own numbers, and the batch would overwrite those again the next night. So each list has **one writer**: only the merger writes the lists people read. The batch job writes something else into its own table: the **exact all-time count of each video up to midnight**, plus the top 10,000 videos by that count. The merger then builds the all-time list as "exact count up to midnight + stream count since midnight", over those 10,000 videos plus today's top videos from the stream. Every night the base becomes exact again, and the stream adds today on top.
+**Batch and stream must not fight over the same lists.** If the nightly batch wrote the all-time list into Redis, the merger would overwrite it a minute later with its own numbers, and the batch would overwrite those again the next night. So each list has **one writer**: only the merger writes the lists people read. The batch job writes something else into its own table: a **base**, the exact all-time count of each video up to a **cut-off time** (midnight), plus the top 10,000 videos by that count. Each base records its cut-off. The merger then builds the all-time list as "base count + stream count since the base's cut-off", over those 10,000 videos plus the top videos in the stream since then.
+
+**Mind the gap after midnight.** The batch that counts up to 00:00 today finishes a few hours later, say at 03:00. From 00:00 to 03:00, the merger keeps using **yesterday's** base, and adds the stream since **its** cut-off (00:00 the day before), about 27 hours of views. When the new base arrives, the merger switches to it and to the newer cut-off together. So no hour is ever counted twice or left out. For this, the merger keeps the stream's hour buckets for the last two days.
 
 ### 4. How do reads stay fast?
 
@@ -240,14 +243,15 @@ Reads never count anything. The merger writes the top 1,000 for each window to R
 
 ```mermaid
 flowchart TB
-  Player(["Video players"]):::client -->|"view events"| Kafka["Kafka<br/>split by video ID"]:::queue
+  Player(["Video players"]):::client -->|"view events"| Ingest["View Ingest Service<br/>(many copies)"]:::service
+  Ingest --> Kafka["Kafka<br/>split by video ID"]:::queue
   Kafka --> Workers["Counter workers<br/>(Flink)<br/>minute buckets<br/>+ local top K"]:::service
   Workers --> Merge["Merger<br/>global top K<br/>per window"]:::service
   Merge -->|"only writer<br/>of the lists"| Cache[("Redis<br/>top 1,000<br/>per window")]:::cache
   Kafka --> Sink["S3 sink<br/>(Kafka Connect)"]:::service
   Sink --> Raw["Raw views<br/>(S3)"]:::storage
   Raw --> Batch["Nightly exact<br/>count (Spark)"]:::service
-  Batch -->|"exact counts<br/>up to midnight"| Base[("All-time base<br/>counts")]:::db
+  Batch -->|"exact counts<br/>up to a cut-off"| Base[("All-time base<br/>counts + cut-off time")]:::db
   Base --> Merge
   User(["Users"]):::client --> CDN["CDN"]:::storage
   CDN --> API["Top K API"]:::service
@@ -256,9 +260,9 @@ flowchart TB
 
 ## In the real world
 
-**Trending is more than raw views.** YouTube has explained that its Trending list was not based on view count alone. It also looked at how quickly a video was gaining views, where the views came from, and how new the video was. The counting pipeline on this page is the base. A "trending score" is a formula on top of it.
+**Trending is more than raw views.** YouTube has explained that its Trending list was not based on view count alone. It also looked at how quickly a video was gaining views, where the views came from, and how new the video was. The counting pipeline on this page is the base. A "trending score" is a formula on top of it. In July 2025, YouTube removed its Trending page and replaced it with lists by category on YouTube Charts, such as trending music videos, podcasts and movie trailers.
 
-**Redis sorted sets** are a common way to build leaderboards. Redis also offers built-in **Count-Min Sketch** and **Top-K** data types (from its RedisBloom module), for exactly this kind of problem.
+**Redis sorted sets** are a common way to build leaderboards. Since Redis 8, **Count-Min Sketch** and **Top-K** data types are built in, for exactly this kind of problem. Older versions needed the RedisBloom module.
 
 **The Count-Min Sketch** was described by Graham Cormode and S. Muthukrishnan in the 2000s, and is widely used for counting in large data streams.
 
@@ -311,7 +315,7 @@ Flink saves its counts and its Kafka position together in **checkpoints**. A new
 <Tab value="Staff">
 
 - Everything from senior, but faster.
-- Stream for fresh lists plus a nightly batch for an exact all-time base, with one writer per list.
+- Stream for fresh lists plus a nightly batch for an exact all-time base, with one writer per list, and a cut-off time so no hours are lost or counted twice.
 - Trending scores, per-country lists, and bot filtering.
 - Failure recovery with checkpoints, and cost.
 
@@ -324,6 +328,6 @@ Flink saves its counts and its Kafka position together in **checkpoints**. A new
   - **Sliding windows:** minute buckets, add the newest, subtract the oldest.
   - **Bigger buckets for longer windows:** minutes for an hour, hours for a day.
   - **Count-Min Sketch:** fixed memory, never counts too low. Pair it with a heap. For sliding windows: one sketch per bucket, and rebuild the heap every minute.
-  - **Batch + stream:** the batch gives an exact base, the merger is the only writer of the lists.
+  - **Batch + stream:** the batch gives an exact base with its **cut-off time**, and the merger adds the stream since that cut-off. The merger is the only writer of the lists.
   - **Precompute lists into Redis.** Reads never count.
 </Callout>

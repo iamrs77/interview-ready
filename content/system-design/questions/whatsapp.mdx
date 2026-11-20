@@ -63,7 +63,7 @@ Over this open connection, the phone and server send small events:
 | Event | Direction | Meaning |
 | --- | --- | --- |
 | `send_message` | phone → server | "Please send this text to chat X." |
-| `ack` | server → phone | "Saved." The sender sees one tick. |
+| `ack` | server → phone | "Saved as message `m-5001`." The sender sees one tick. |
 | `new_message` | server → phone | "Here is a new message for you." |
 | `receipt` | phone → server | "I got it" or "I read it." |
 
@@ -76,7 +76,7 @@ Over this open connection, the phone and server send small events:
 }
 ```
 
-`clientMsgId` is an ID made by the phone. If the phone sends the same message twice (for example after a bad connection), the server sees the same ID and saves the message only once.
+`clientMsgId` is an ID made by the phone. If the phone sends the same message twice (for example after a bad connection), the server finds this ID in a small **dedupe table** and answers with the first message's ID, instead of saving a second copy (deep dive 2).
 
 Things that are not live use plain REST:
 
@@ -153,10 +153,13 @@ flowchart TB
   Redis Pub/Sub does not store messages. If nobody is subscribed, the message is simply gone. That is okay here, because we **saved the message and Bob's inbox row in the database first**. If the fast path fails, Bob still gets the message from his inbox. The database is the source of truth. Pub/Sub is only the fast path.
 </Callout>
 
-Two details close the gaps between the fast path and the inbox:
+Three details close the gaps between the fast path and the inbox:
 
 - **Subscribe first, then read the inbox.** When Bob connects, server 41 first subscribes to `user:bob`, and only then reads his inbox. In the other order, a message published between the two steps would reach nobody, and would wait until Bob's next reconnect. Our order can deliver a message twice (once from the inbox, once from Pub/Sub). That is fine: the phone drops duplicates by message ID.
-- **Resend what was not confirmed.** While Bob stays connected, the server resends any inbox message that still has no `delivered` receipt after a short time (say 30 seconds). This catches messages lost on the fast path, for example when a publish failed or the connection silently dropped.
+- **Resend what was not confirmed.** Each chat server keeps, in memory, a short list of the messages it pushed on each connection. If one still has no `delivered` receipt after a short time (say 30 seconds), the server pushes it again. This catches a connection that silently dropped. It is cheap, because each server checks only its own list. Scanning every online user's inbox every 30 seconds would be 300 million ÷ 30 s = 10 million reads per second, about 40 times the message rate.
+- **Catch what never arrived.** If a publish failed, server 41 never saw the message, so it is not on that list. But it is still in Bob's inbox. When Bob's phone reconnects, it reads its inbox and gets the message then.
+
+**Who sends the push notification?** With Pub/Sub, server 3 can't see whether anyone got the message. So each chat server keeps a **presence key** for its users in Redis, like `online:bob`, with a 60-second expiry. Bob's phone sends a small heartbeat every 30 seconds, and each heartbeat resets the expiry (see the follow-ups). Before it publishes, server 3 checks `online:bob`. If the key is missing, Bob is offline, so server 3 asks the Push Service to wake his phone. The message is in his inbox either way.
 
 One more detail: WebSocket connections stay open for hours, so the load balancer should send each **new** connection to the server with the **fewest** connections. If a server restarts, its phones simply reconnect to other servers.
 
@@ -165,7 +168,7 @@ One more detail: WebSocket connections stay open for hours, so the load balancer
 Three rules make sure no message is lost:
 
 1. **Save first, then ack.** The server sends the one-tick `ack` only after the message is safely stored. So one tick means "safe".
-2. **The phone retries.** If Alice's phone gets no `ack` (maybe the network dropped), it keeps the message on the phone and sends it again later with the **same** `clientMsgId`. The server sees the ID and doesn't save it twice.
+2. **The phone retries.** If Alice's phone gets no `ack` (maybe the network dropped), it keeps the message on the phone and sends it again later with the **same** `clientMsgId`. The server spots the repeat with a dedupe table (below) and doesn't save it twice.
 3. **The inbox.** For every message, we add an inbox row for each person who has not received it yet. The row is deleted only when their phone says "delivered".
 
 ```mermaid
@@ -176,7 +179,7 @@ sequenceDiagram
   participant P as APNs / FCM
   participant B as Bob
   A->>S: send 'Hi' (c-123)
-  S->>D: save message + inbox row
+  S->>D: dedupe check, save message + inbox row
   S-->>A: ack: one tick
   Note over S,B: Bob is offline
   S->>P: push 'New message'
@@ -187,6 +190,18 @@ sequenceDiagram
   S->>D: delete inbox row
   S-->>A: two ticks
 ```
+
+**How the server spots a repeat.** The message ID is made by the server, so a retry would get a new ID and a second row. So the server keeps a small **dedupe table** keyed by `(sender_id, client_msg_id)`, which stores the `message_id` it gave out. When `send_message` arrives, the server makes a new message ID and tries to add it:
+
+```sql
+INSERT INTO client_msg_ids (sender_id, client_msg_id, message_id)
+VALUES ('alice', 'c-123', 5001)
+IF NOT EXISTS USING TTL 604800;  -- forget it after 7 days
+-- [applied] = true:  a new message, its ID is 5001.
+-- [applied] = false: a repeat. The answer holds the first message_id.
+```
+
+Either way, the server then saves the message and the inbox row under that `message_id`, and sends the `ack` with it. What if the server crashed after this insert, before it saved the message? The retry finds the dedupe row and saves the message then. Saving twice is safe, because a Cassandra write with the same key just overwrites the same row. So a retry never makes a second copy, and a crash never loses the message. (Redis `SET ... NX` with an expiry also works, and is cheaper. But Redis can lose a key in a failover, and then a retry makes a duplicate.)
 
 In our design, the push notification only **wakes up** the phone ("you have new messages"). The messages themselves still come through the chat server. The inbox is a simple table keyed by `userId`, holding the IDs of the waiting messages.
 
@@ -203,7 +218,7 @@ Two tricks keep receipts cheap:
 - **One receipt for many messages.** If Bob opens a chat with 20 new messages, his phone sends one receipt: "read everything up to `m-5020`". Not 20 receipts.
 - **Groups keep a "read up to" marker per member**, instead of a status for every message and every member. A message shows blue ticks when all members' markers have passed it.
 
-**Keeping the order.** Phone clocks can be wrong, so the **server** decides the order. Each new message gets an ID that grows over time, like a [Snowflake ID](../distributed-systems/distributed-id-generation.mdx): the time comes first, then a counter. Every phone sorts the chat by this ID, so everyone sees the same order.
+**Keeping the order.** Phone clocks can be wrong, so the **server** decides the order. Each new message gets an ID that grows over time, like a [Snowflake ID](../distributed-systems/distributed-id-generation.mdx): the time comes first, then the machine's number, then a counter. Every phone sorts the chat by this ID, so everyone sees the same order. One catch: server clocks differ by a few milliseconds, so two messages sent at almost the same moment through different servers can swap places. If a chat needs strict order, give each chat its own **sequence number** that goes up by 1 for each message (for example, Redis `INCR seq:chat-9`), and sort by that.
 
 ### 4. Storing billions of messages
 
@@ -243,8 +258,8 @@ flowchart TB
   Phones -->|"photos, videos"| Media["Blob storage + CDN"]:::storage
   LB -->|"WebSocket"| Chat["Chat Servers<br/>(hundreds, stateful)"]:::service
   LB -->|"REST"| API["API Servers<br/>groups, history"]:::service
-  Chat <--> PS["Redis Cluster<br/>sharded Pub/Sub,<br/>one channel per user"]:::queue
-  Chat --> MDB[("Messages DB<br/>Cassandra, by chatId")]:::db
+  Chat <--> PS["Redis Cluster<br/>sharded Pub/Sub,<br/>one channel per user<br/>+ presence keys"]:::queue
+  Chat --> MDB[("Messages DB<br/>Cassandra, by chatId<br/>+ dedupe table")]:::db
   Chat --> Inbox[("Inboxes<br/>by userId")]:::db
   Chat --> Groups[("Chats + members DB")]:::db
   API --> Groups
@@ -275,7 +290,7 @@ The phone uploads the file straight to blob storage (like Amazon S3), using a **
 </Accordion>
 <Accordion title="How do you show 'online' and 'last seen'?">
 
-The phone sends a small **heartbeat** ("I'm still here") every 30 seconds or so. The server keeps `lastSeen` in Redis with a short expiry. Only send presence updates to people who have the chat **open right now**. Sending them to all contacts would turn one person coming online into thousands of messages.
+The phone sends a small **heartbeat** ("I'm still here") every 30 seconds or so. The server resets the expiry of the presence key `online:bob` in Redis (the same key that decides whether to send a push notification), and saves Bob's `lastSeen` time. Only send presence updates to people who have the chat **open right now**. Sending them to all contacts would turn one person coming online into thousands of messages.
 
 </Accordion>
 <Accordion title="A chat server crashes. What happens?">
@@ -304,7 +319,7 @@ One message becomes thousands of deliveries. Store the message **once**, and kee
 <Tab value="Senior">
 
 - Routing between chat servers (Pub/Sub vs a directory), with tradeoffs. Subscribe first, then read the inbox.
-- At-least-once delivery: phone retries with `clientMsgId`, server removes duplicates.
+- At-least-once delivery: phone retries with `clientMsgId`, and a dedupe table `(sender, clientMsgId) → messageId` stops duplicates.
 - How receipts work, and how to keep them cheap.
 - Partitioning messages by `chatId` in a database like Cassandra, and keeping order.
 
@@ -325,7 +340,9 @@ One message becomes thousands of deliveries. Store the message **once**, and kee
   - Every message gets an **inbox** row, deleted on the `delivered` receipt. A push notification wakes offline phones.
   - Route between chat servers with **sharded Redis Pub/Sub, one channel per user**. The database stays the source of
     truth. On connect: subscribe first, then read the inbox.
-  - The phone retries with the same **clientMsgId**. The server removes duplicates.
+  - The phone retries with the same **clientMsgId**. A dedupe table `(sender, clientMsgId) → messageId` returns the
+    first ID, so a retry never makes a second copy.
+  - No presence key in Redis → the user is offline → send a push notification.
   - Store messages by **chatId**, sorted by a time-ordered message ID.
   - Receipts are tiny messages. Batch them: "read up to X".
 </Callout>

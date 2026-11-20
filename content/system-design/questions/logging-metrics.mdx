@@ -34,7 +34,7 @@ We build one system that **collects** both from every server, **stores** them, l
 ### Non-functional requirements
 
 1. **Huge write volume:** 10,000 servers, all writing all the time.
-2. **Fresh:** new logs searchable within about 1 minute. Alerts fire within about 1 minute.
+2. **Fresh:** new logs searchable within about 1 minute. Alerts fire within about 1 minute of the rule being met (for a "5 minutes" rule, once the 5 minutes are up).
 3. **Fast search:** searching the last day of logs takes a few seconds.
 4. **Never hurts the apps:** collecting must not slow down the servers. If our system has trouble, the apps keep running.
 5. **Keep data:** logs searchable for 30 days, kept cheaply for 1 year. Metrics kept for 1 year.
@@ -136,7 +136,7 @@ flowchart LR
 
 Three more safety rules:
 
-- **The agent has a disk buffer.** If Kafka can't be reached, the agent saves batches to local disk and sends them later. If even that fills up, it drops `DEBUG` lines first and keeps `ERROR` lines.
+- **The agent has a disk buffer.** If the Ingest Service can't be reached (or Kafka behind it is down), the agent saves batches to local disk and sends them later. If even that fills up, it drops `DEBUG` lines first and keeps `ERROR` lines.
 - **Limits per service.** If one service suddenly logs 100 times more than usual (a **log storm**), the Ingest Service limits or samples it, so it can't drown everyone else. This is [backpressure](../reliability-security/backpressure.mdx).
 - **Clean data at the agent.** Remove passwords, card numbers and emails before logs leave the server.
 
@@ -174,7 +174,7 @@ We also **split logs by day**: one index per day. Deleting old data is then just
 
 **Partitioning: spreading the work over many machines.** 200 MB of logs per second and 10 million time series are far too much for one machine. So every layer is split into parts, and each part lives on a different machine (see [Partitioning and Sharding](../databases/partitioning-sharding.mdx)):
 
-- **Kafka:** the log topic has many partitions (say 200), and agents pick one by `hash(host)`. 10,000 servers spread evenly over them. Each indexer worker reads a few partitions, so adding workers adds speed.
+- **Kafka:** the log topic has many partitions (say 200), and the Ingest Service picks one for each batch by `hash(host)`. 10,000 servers spread evenly over them. Each indexer worker reads a few partitions, so adding workers adds speed.
 - **Log store:** each day's index is split again **by service**, into shards on many machines. A search for "checkout, last hour" opens only today's checkout shards, not everything.
 - **Time-series DB:** series are spread over machines by `hash(metric name + labels)`. All points of one series sit on one machine, so reading one series is one fast read. A chart that adds up many series asks several machines in parallel and merges the answers.
 
@@ -221,7 +221,7 @@ flowchart LR
 
 More rules for good alerts:
 
-- **Alert on metrics, not logs.** Checking a number is fast and cheap. If you need log-based alerts, first turn logs into a metric, like "count of `ERROR` lines per minute".
+- **Alert on metrics, not logs.** Checking a number is fast and cheap. If you need log-based alerts, first turn logs into a metric, like "count of `ERROR` lines per minute". The log indexers can count these as they write, and send the counts to the Time-Series DB.
 - **Group and remove duplicates.** One database outage can break 200 rules at once. Send **one** message, "database down, 200 alerts", not 200 pages.
 - **Route** each alert to the right team: payments alerts to the payments on-call, and so on.
 - **Watch the watcher.** If the alert system itself dies, nobody gets alerts. A common trick: an alert that **always** fires, sent to an outside service. If that alert ever **stops** arriving, the outside service pages someone. This is often called a **dead man's switch**.
@@ -240,8 +240,10 @@ flowchart TB
   Indexer --> Hot[("Hot + warm<br/>log store<br/>30 days, indexed<br/>split by day + service")]:::db
   Hot -->|"older than 30 days"| Cold["Cold archive<br/>(S3, 1 year)"]:::storage
   MCol --> TSDB[("Time-Series DB<br/>+ downsampling<br/>split by series")]:::db
+  Indexer -->|"log-based metrics<br/>(ERROR lines per minute)"| TSDB
   Eng(["Engineer / Dashboards"]):::client --> Query["Query Service"]:::service
   Query --> Hot
+  Query -.->|"old logs<br/>(minutes)"| Cold
   Query --> TSDB
   Alert["Alert Service"]:::service -->|"check rules<br/>every 30 s"| TSDB
   Alert --> Pager["Pager / Slack"]:::external

@@ -401,7 +401,7 @@
       "id": "advanced-components/file-upload-download-2",
       "lesson": "advanced-components/file-upload-download",
       "q": "What is a presigned URL?",
-      "a": "A normal S3 link with an **expiry time** and a **signature** made with the app server's secret key, which is never sent. Whoever holds it can do exactly one thing, like upload one file to one key, until it expires."
+      "a": "A normal S3 link with an **expiry time** and a **signature** made with the app server's secret key, which is never sent. Whoever holds it can do exactly one thing, like upload one file to one key, again and again until it expires. It isn't single-use."
     },
     {
       "id": "advanced-components/file-upload-download-3",
@@ -450,6 +450,12 @@
       "lesson": "advanced-components/file-upload-download",
       "q": "What are range requests used for?",
       "a": "Asking for part of a file with a `Range` header, answered with `206 Partial Content`. Video players use them to jump to the middle, and download managers to resume a broken download."
+    },
+    {
+      "id": "advanced-components/file-upload-download-11",
+      "lesson": "advanced-components/file-upload-download",
+      "q": "What happens to an upload's `pending` row if the client never uploads, and how do you clean it up?",
+      "a": "It stays `pending` forever. A **sweeper**, a small scheduled job, checks old `pending` rows: if the object is in S3, mark it `ready`; if not, delete the row. Marking `ready` must also be safe to repeat, because the S3 event can arrive twice."
     },
     {
       "id": "advanced-components/background-jobs-1",
@@ -506,6 +512,12 @@
       "a": "Retry with backoff plus a little randomness, and stop a job that runs too long. Cap the tries (say 5), then move the job to a **dead-letter queue**, a parking place where a person can look at it."
     },
     {
+      "id": "advanced-components/background-jobs-10",
+      "lesson": "advanced-components/background-jobs",
+      "q": "The API saves an order, then adds a \"send receipt\" job to the queue. What if it crashes in between?",
+      "a": "The order is saved but the job is lost. Save the job in the same transaction as the order and let a relay queue it (the **outbox pattern**), or run a **sweeper** that re-queues rows still `pending` after a few minutes. Jobs are idempotent, so a double queue is fine."
+    },
+    {
       "id": "advanced-components/multi-tenancy-1",
       "lesson": "advanced-components/multi-tenancy",
       "q": "What is a tenant, and what is a multi-tenant system?",
@@ -539,7 +551,7 @@
       "id": "advanced-components/multi-tenancy-6",
       "lesson": "advanced-components/multi-tenancy",
       "q": "With Row-Level Security, why set the tenant with `SET LOCAL`, not `SET`?",
-      "a": "`SET LOCAL` lasts only until the transaction ends. A plain `SET` stays on the connection, so with a connection pool the next request, maybe for another tenant, could get the old tenant still set."
+      "a": "`SET LOCAL` lasts only until the transaction ends. A plain `SET` stays on the connection, so with a connection pool the next request, maybe for another tenant, could get the old tenant still set. From app code, `set_config('app.tenant_id', $1, true)` does the same with a safe query parameter."
     },
     {
       "id": "advanced-components/multi-tenancy-7",
@@ -569,7 +581,7 @@
       "id": "advanced-components/microservices-patterns-1",
       "lesson": "advanced-components/microservices-patterns",
       "q": "In a microservices checkout, which calls are sync and which are async?",
-      "a": "Order calls Inventory (reserve stock) and Payment (charge the card) synchronously, because checkout must know they worked. Then it publishes an OrderPlaced event, and Email and Shipping react to it asynchronously."
+      "a": "Order calls Inventory (reserve stock) and Payment (charge the card) synchronously, because checkout must know they worked. Then Payment publishes a `PaymentSucceeded` event, and Email and Shipping react to it asynchronously."
     },
     {
       "id": "advanced-components/microservices-patterns-2",
@@ -618,6 +630,12 @@
       "lesson": "advanced-components/microservices-patterns",
       "q": "Besides the distributed monolith, what are common microservices mistakes?",
       "a": "Services that are too small, chatty calls (30 calls in a row for one page), long sync chains, splitting too early (5 people running 20 services), and no tracing across services."
+    },
+    {
+      "id": "advanced-components/microservices-patterns-10",
+      "lesson": "advanced-components/microservices-patterns",
+      "q": "Each of 3 services in a chain of sync calls is up 99.9% of the time. How often does a request that needs all 3 work?",
+      "a": "About **99.7%** of the time (0.999 × 0.999 × 0.999). Uptime multiplies along a chain of sync calls, so long chains are fragile. Go async where you don't need the answer."
     },
     {
       "id": "advanced-components/strangler-pattern-1",

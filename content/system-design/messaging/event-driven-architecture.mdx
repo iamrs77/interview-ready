@@ -34,7 +34,7 @@ An event is a **fact about something that already happened**.
 | | Command | Event |
 | --- | --- | --- |
 | **Means** | "Please do this" | "This happened" |
-| **Name** | `ChargeCard`, `SendEmail` | `OrderPlaced`, `CardCharged` |
+| **Name** | `ChargeCard`, `SendEmail` | `OrderPlaced`, `PaymentSucceeded` |
 | **Sent to** | One known receiver | Anyone who wants to listen |
 | **Can the receiver say no?** | Yes | No, it is already true |
 
@@ -58,7 +58,7 @@ flowchart TB
 ```
 
 - The Order Service doesn't call anyone. It publishes one event and is done.
-- Want to add loyalty points? Build a Loyalty Service that **subscribes** to `OrderPlaced`. Nothing else changes.
+- Want to add loyalty points? Build a Loyalty Service that **subscribes** to `PaymentSucceeded` (below), so only paid orders earn points. Nothing else changes.
 - If the Email Service is down for an hour, orders still work. It catches up from the topic when it is back.
 
 ## A simple example: an online order
@@ -98,12 +98,12 @@ The **Inventory Service** hears `OrderPlaced`, reserves the items, and publishes
 </Step>
 <Step>
 
-The **Payment Service** hears `StockReserved`, charges the card, and publishes `PaymentSucceeded` (or `PaymentFailed`). The Order Service hears `PaymentSucceeded` and marks the order "paid".
+The **Payment Service** hears `StockReserved`, charges the card, and publishes `PaymentSucceeded` (or `PaymentFailed`). The Order Service hears `PaymentSucceeded` and marks the order "paid". The **Shipping Service** also waits for `PaymentSucceeded`, never for `OrderPlaced`, so it never ships an unpaid order.
 
 </Step>
 </Steps>
 
-**What if the payment fails?** The Payment Service publishes `PaymentFailed`. The Inventory Service hears it and releases the items, and the Order Service marks the order as failed. When several steps have already happened, each one must be **undone** like this. That is the [Saga Pattern](../distributed-systems/saga-pattern.mdx). Here, each service reacts on its own with no boss. This is called **choreography**. Using one central service that tells each step what to do is called **orchestration**. The saga page compares the two.
+**What if the payment fails?** The Payment Service publishes `PaymentFailed`. The Inventory Service hears it, releases the items, and publishes `StockReleased`. The Order Service hears `StockReleased` and marks the order "cancelled". When several steps have already happened, each one must be **undone** like this. That is a **saga**. Here, each service reacts on its own with no boss. This is called **choreography**. Using one central service that tells each step what to do is called **orchestration**. [Saga Pattern](../distributed-systems/saga-pattern.mdx) compares the two.
 
 **One trap:** the Order Service must both **save the order** and **publish the event**. If it crashes between the two, the event is lost. The [Outbox Pattern](../distributed-systems/outbox-pattern.mdx) fixes this.
 

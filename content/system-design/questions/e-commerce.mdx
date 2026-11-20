@@ -184,7 +184,7 @@ Two traps in this code:
 
 **When do we reserve?** At **checkout**, not when the item goes into the cart. Most carts are never bought, and holding stock for them would hide items from real buyers.
 
-**Flash sales:** 100,000 people want 1,000 cheap items at 12:00. Even the atomic update gets slow when all of them hit one row. Put a **Redis counter** in front: `stock:ps5`, set to 1,000. A tiny Lua script takes one only if the counter is above 0, so it never goes below 0. It is atomic and very fast. Only the people who got one go on to the database. Everyone else sees "Sold out" right away. When a hold is released (payment fails, or the 15 minutes pass), **give it back** with `INCR stock:ps5`, so someone else can buy it. Without this, released items stay hidden behind a counter that says 0. The database is still the real check. For huge sales, add a waiting room, like in [Design a Ticket Booking System](./ticket-booking.mdx).
+**Flash sales:** 100,000 people want 1,000 cheap items at 12:00. Even the atomic update gets slow when all of them hit one row. Put a **Redis counter** in front: `stock:ps5`, set to 1,000. A tiny Lua script takes one only if the counter is above 0, so it never goes below 0. It is atomic and very fast. Only the people who got one go on to the database. Everyone else sees "Sold out" right away. When a hold is released (payment fails, or the 15 minutes pass), or the database transaction rolls back (for example, another item in the cart is sold out), **give it back** with `INCR stock:ps5`, so someone else can buy it. Without this, released items stay hidden behind a counter that says 0. (If a server crashes before it gives one back, the counter stays a little too low. After the rush, a small job resets it from the database.) The database is still the real check. For huge sales, add a waiting room, like in [Design a Ticket Booking System](./ticket-booking.mdx).
 
 ### 2. Checkout and payment: never charge twice, never lose an order
 
@@ -211,6 +211,8 @@ Three things can go wrong:
 
 A **webhook** is a call that the payment provider makes **to us** when something happens, like "payment for `ord_555` succeeded". So even if our first request timed out, we still learn the result.
 
+Anyone on the internet can call our webhook URL, so we never trust one just because it arrived. We **check its signature** (the provider signs each webhook with a secret that only it and we know), and **skip any event ID we have already handled**. So a fake or repeated "paid" changes nothing. See [Design a Payment System](./payment-system.mdx).
+
 ```mermaid
 sequenceDiagram
   participant C as Client
@@ -223,11 +225,11 @@ sequenceDiagram
   P-->>O: Payment succeeded
   O->>DB: Mark order paid
   O-->>C: Order placed
-  P->>O: Webhook: ord_555 paid
-  Note over O: already paid, nothing to do
+  P->>O: Signed webhook: ord_555 paid
+  Note over O: signature OK, already paid, nothing to do
 ```
 
-The direct answer, the webhook and the expiry job can all try to change the same order. So the order's status only changes with a **conditional update**, like `UPDATE orders SET status = 'paid' WHERE order_id = 'ord_555' AND status = 'pending_payment'`. Only the first one wins. The others change 0 rows and know someone got there first. If the webhook finds the order already `cancelled`, it follows the "payment succeeds late" rule from deep dive 1: reserve again, or refund.
+The direct answer, the webhook and the expiry job can all try to change the same order. So the order's status only changes with a **conditional update**, like `UPDATE orders SET status = 'paid' WHERE order_id = 'ord_555' AND status = 'pending_payment'`. The status only moves forward, and only the first one wins. The others change 0 rows and know someone got there first. If the webhook finds the order already `cancelled`, it follows the "payment succeeds late" rule from deep dive 1: reserve again, or refund.
 
 **Card numbers never touch our servers.** The payment page uses the provider's own form. The card goes straight to the provider, and we get back a **token** like `pm_123`. This keeps us out of most of **PCI DSS**, the strict security rules for anyone who stores card numbers.
 
@@ -243,7 +245,7 @@ flowchart LR
   B --> S["shipped"] --> D["delivered"]
 ```
 
-Checkout touches several services: inventory, payment, then order. If a later step fails, we **undo** the earlier ones: card declined → release the stock. This "do steps, undo on failure" flow is a [saga](../distributed-systems/saga-pattern.mdx).
+Checkout has several steps: save the order and reserve the stock, then charge the payment. If a later step fails, we **undo** the earlier ones: card declined → release the stock and mark the order `payment_failed`. This "do steps, undo on failure" flow is a [saga](../distributed-systems/saga-pattern.mdx).
 
 ### 3. How do we make browsing fast?
 
@@ -275,7 +277,7 @@ flowchart TB
   Order --> ODB[("Orders + Inventory<br/>SQL")]:::db
   Order -->|"flash sales"| Stock[("Redis<br/>stock counters")]:::cache
   Order --> Pay["Payment Provider"]:::external
-  Pay -.->|"webhook"| Order
+  Pay -.->|"signed webhook"| Order
   PDB -->|"changes"| Kafka["Kafka"]:::queue
   ODB -->|"order events"| Kafka
   Kafka --> Indexer["Search Indexer"]:::service
@@ -339,7 +341,7 @@ Keep stock per **product and warehouse**. At checkout, pick a warehouse that has
 - Say that browsing and checkout need **different** consistency.
 - Reservations with expiry, and why we reserve at checkout. Cancel the payment before releasing a hold.
 - Check the row count, and lock items in `product_id` order to avoid deadlocks.
-- Idempotency keys on checkout and on the payment call, plus webhooks.
+- Idempotency keys on checkout and on the payment call, plus signed webhooks, de-duplicated by event ID.
 - Keep search in sync with the database through events.
 
 </Tab>
@@ -359,7 +361,8 @@ Keep stock per **product and warehouse**. At checkout, pick a warehouse that has
     Update cart items in `product_id` order to avoid deadlocks.
   - **Reserve at checkout** with an expiry, and release the stock if payment fails. Before an expired hold is
     released, cancel the payment. If a payment still succeeds late, reserve again or refund.
-  - **Never charge twice:** save the order first, use **idempotency keys**, and listen for **webhooks**.
+  - **Never charge twice:** save the order first, use **idempotency keys**, and listen for **webhooks**. Check each
+    webhook's signature and skip event IDs already handled.
   - Card numbers go **straight to the payment provider**, never through our servers.
   - The stock shown on the product page can be approximate. The **real check is at checkout**.
 </Callout>

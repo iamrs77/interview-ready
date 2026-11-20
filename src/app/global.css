@@ -32,7 +32,11 @@ html {
   color-scheme: light;
 }
 
-/* Wider sidebar, so long lesson titles fit on one line more often. (Fumadocs default: 268px.) */
+/*
+ * Wider sidebar, so long lesson titles fit on one line more often. (Fumadocs default: 268px.)
+ * Copies Fumadocs 16.19 internals (#nd-docs-layout, [data-sidebar-placeholder], --fd-sidebar-width).
+ * Re-check after a Fumadocs upgrade: the sidebar should still be 290px (tablet) / 320px (desktop) wide.
+ */
 @media (min-width: 768px) {
   #nd-docs-layout:has(> [data-sidebar-placeholder]) {
     --fd-sidebar-width: 290px;
@@ -44,9 +48,16 @@ html {
   }
 }
 
-html > body[data-scroll-locked] {
-  margin-right: 0px !important;
-  --removed-body-scroll-bar-size: 0px !important;
+/*
+ * Module folders ("4. Caching and CDN") darker and a little bolder than the lessons under them,
+ * so they are easy to spot and close when many folders are open.
+ * A folder toggle is a button whose parent has data-open / data-closed (the Search and
+ * "Collapse Sidebar" buttons don't), in the desktop and the phone sidebar.
+ * Copies Fumadocs 16.19 internals (#nd-sidebar, #nd-sidebar-mobile): re-check after an upgrade.
+ */
+:is(#nd-sidebar, #nd-sidebar-mobile) :is([data-open], [data-closed]) > button[aria-expanded] {
+  color: var(--color-fd-foreground);
+  font-weight: 500;
 }
 
 /* ---------- Comfortable reading on lesson pages ---------- */
@@ -86,4 +97,23 @@ html > body[data-scroll-locked] {
 /* Soft colored table headers. */
 .prose thead th {
   background: color-mix(in oklab, var(--color-fd-primary) 8%, transparent);
+}
+
+/* The small Yes / No dialog (components/confirm-dialog.tsx): a quick fade and grow when it opens. */
+dialog.confirm-dialog[open] {
+  animation: confirm-in 140ms ease-out;
+}
+dialog.confirm-dialog[open]::backdrop {
+  animation: confirm-fade 140ms ease-out;
+}
+@keyframes confirm-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes confirm-fade {
+  from {
+    opacity: 0;
+  }
 }

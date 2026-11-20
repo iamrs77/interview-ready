@@ -73,6 +73,56 @@ One system can choose differently for each feature. For a ticket site like Ticke
 - **Viewing an event page:** pick availability. Old data for a few seconds is fine.
 - **Booking a seat:** pick consistency. Two people must never get the same seat.
 
+## Beyond CAP: PACELC
+
+CAP only talks about the time **when the network is broken**. That is rare. But there is a second choice that you make **all the time**, even when nothing is broken.
+
+Go back to the two bank branches. Today the phone line works fine. Before paying out cash, a branch can:
+
+- **Phone the other branch first, and wait for "OK".** Both branches always agree on the balance. But every customer waits an extra minute, every single time.
+- **Pay out right away, and phone afterwards.** The customer is served fast. But for a short moment, the other branch has an old balance.
+
+Nothing is broken, and there is still a trade-off. Keeping copies in sync means **waiting for the other copies to confirm**, and that wait is added to **every write**, not only during failures.
+
+The database researcher **Daniel Abadi** gave this a name: **PACELC**. He first wrote about it in 2010, and explained it fully in a 2012 article. Read it as a sentence:
+
+- **If** there is a **P**artition: choose **A**vailability or **C**onsistency. (This part is CAP.)
+- **E**lse, in normal times: choose **L**atency or **C**onsistency. **Latency** is how long one request takes (see [Latency, Throughput and QPS](../hld-basics/latency-throughput-qps.mdx)).
+
+```mermaid
+flowchart LR
+  Q{"Is the network between<br/>the copies broken?"}
+  Q -->|"Yes: Partition"| P{"Choose A or C"}
+  Q -->|"No: Else"| E{"Choose L or C"}
+  P --> PA["A: answer anyway<br/>data may be old"]
+  P --> PC["C: wait or return an error<br/>data is always right"]
+  E --> EL["L: answer fast<br/>copies catch up later"]
+  E --> EC["C: wait for copies to agree<br/>slower, always right"]
+```
+
+A system gets a short name from its two choices:
+
+| System | During a partition | In normal times | Short name |
+| --- | --- | --- | --- |
+| **Cassandra** (default settings) | Keeps answering (A) | Doesn't wait for every copy. Copies catch up later (L) | **PA/EL** |
+| **Google Spanner** | Picks consistency (C) | Every write waits until a majority of copies agree (C) | **PC/EC** |
+
+Abadi's 2012 article puts Amazon's original Dynamo and Riak in the same PA/EL group as Cassandra, with their default settings.
+
+Many databases let you turn the dial **per request**, just like you can mix C and A per feature:
+
+- **Cassandra:** ask for `QUORUM` (a majority of copies must answer) instead of `ONE`. The data is more up to date, but each request waits longer.
+- **DynamoDB:** reads are eventually consistent by default. You can ask for a **strongly consistent read** instead. AWS says it can be slower, and it uses twice as much read capacity.
+
+### Why "CA" is not a real choice
+
+Some charts show three kinds of systems: CP, AP and **CA** (consistent and available, but not partition tolerant). For a distributed system, CA is not a real option:
+
+- **Partitions happen whether you like it or not.** A cable gets cut, a switch fails, a server freezes for a few seconds and looks dead to the others. You can't opt out of P. A system that "ignores" partitions still loses C or A when one comes. It just never decided which.
+- **A single-node database is not distributed.** One database server on one machine has no network between copies to break, so it can be consistent and answer every request. But if that one machine goes down, nothing answers at all.
+
+So for a distributed system, the real labels are **CP or AP**, or, with PACELC, **PC or PA** plus **EC or EL**.
+
 ## In the real world
 
 **Where the name comes from.** Eric Brewer presented CAP as an idea in 2000. Two years later, Seth Gilbert and Nancy Lynch of MIT proved it mathematically.
@@ -91,6 +141,8 @@ Say your choice in the **non-functional requirements**, and say why:
 
 > "The system should be highly available for viewing events, and strongly consistent for booking, so a seat is never sold twice."
 
+If you pick consistency, also say what it costs on a normal day (PACELC): every write waits for the copies to agree, so it is a little slower.
+
 <Callout title="Remember this" type="success">
   - **C** = newest data, **A** = always an answer, **P** = survives network breaks.
   - Network breaks always happen, so the real choice is **C or A**.
@@ -98,4 +150,5 @@ Say your choice in the **non-functional requirements**, and say why:
   - **Money and bookings → consistency.** Likes, feeds, profiles → availability.
   - Availability usually comes with **eventual consistency**.
   - You can choose **per feature**.
+  - **PACELC:** if **P**artition, pick **A** or **C**. **E**lse, pick **L**atency or **C**onsistency, because syncing copies costs time on **every** write.
 </Callout>

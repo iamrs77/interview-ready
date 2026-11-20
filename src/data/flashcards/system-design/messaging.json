@@ -161,7 +161,7 @@
       "id": "messaging/event-driven-architecture-5",
       "lesson": "messaging/event-driven-architecture",
       "q": "How do you add loyalty points to an event-driven order system?",
-      "a": "Build a Loyalty Service that **subscribes** to `OrderPlaced`. Nothing else changes: the Order Service doesn't know its consumers, so adding a feature means adding a subscriber."
+      "a": "Build a Loyalty Service that **subscribes** to `PaymentSucceeded`, so only paid orders earn points. Nothing else changes: publishers don't know their consumers, so adding a feature means adding a subscriber."
     },
     {
       "id": "messaging/event-driven-architecture-6",
@@ -198,6 +198,18 @@
       "lesson": "messaging/event-driven-architecture",
       "q": "Event-driven architecture vs event sourcing?",
       "a": "Event-driven architecture is about how services **talk to each other**. Event sourcing is about how one service **stores its own data**, as a list of events. You can use one without the other."
+    },
+    {
+      "id": "messaging/event-driven-architecture-12",
+      "lesson": "messaging/event-driven-architecture",
+      "q": "In an event-driven checkout, which event should the Shipping Service wait for, and why?",
+      "a": "`PaymentSucceeded`, never `OrderPlaced`. `OrderPlaced` only means the order is saved and still pending: the stock is reserved next, then the card is charged. Shipping on `OrderPlaced` would ship unpaid orders."
+    },
+    {
+      "id": "messaging/event-driven-architecture-13",
+      "lesson": "messaging/event-driven-architecture",
+      "q": "In an event-driven checkout, what happens when the payment fails?",
+      "a": "The Payment Service publishes `PaymentFailed`. The Inventory Service hears it, releases the items and publishes `StockReleased`. The Order Service hears `StockReleased` and marks the order cancelled."
     },
     {
       "id": "messaging/kafka-1",
@@ -245,7 +257,7 @@
       "id": "messaging/kafka-8",
       "lesson": "messaging/kafka",
       "q": "Why do partitions limit how many consumers can work?",
-      "a": "Inside a group, each partition is read by only one consumer. With 3 partitions, a 4th consumer in the same group sits idle. So pick enough partitions up front."
+      "a": "Inside a consumer group, each partition is read by only one consumer. With 3 partitions, a 4th consumer in the same group sits idle. So pick enough partitions up front. (Since Kafka 4.2, 2026, **share groups** lift this limit, but give up order.)"
     },
     {
       "id": "messaging/kafka-9",
@@ -521,7 +533,7 @@
       "id": "messaging/idempotency-13",
       "lesson": "messaging/idempotency",
       "q": "How can you make work safe to repeat without a key table?",
-      "a": "Set, don't add: `status = 'paid'`, not `balance + 10`. Only change from the expected state: `WHERE status = 'pending'`. Use unique constraints. Use upserts (insert, or update if it exists)."
+      "a": "Set, don't add: `status = 'PAID'`, not `balance + 10`. Only change from the expected state: `WHERE status = 'PENDING'`. Use unique constraints. Use upserts (insert, or update if it exists)."
     },
     {
       "id": "messaging/idempotency-14",
@@ -539,7 +551,7 @@
       "id": "messaging/idempotency-16",
       "lesson": "messaging/idempotency",
       "q": "How does Stripe handle idempotency keys?",
-      "a": "It accepts an `Idempotency-Key` header on `POST` requests. It saves the first result, **even an error**, and returns it for repeats. If a repeat's parameters differ, it returns an error."
+      "a": "It accepts an `Idempotency-Key` header on `POST` requests. It saves the status code and body of the first result, **even an error**, and returns them for repeats. If a repeat's parameters differ, it returns an error."
     },
     {
       "id": "messaging/retries-backoff-timeouts-1",
@@ -653,7 +665,7 @@
       "id": "messaging/dead-letter-queues-6",
       "lesson": "messaging/dead-letter-queues",
       "q": "How do SQS and RabbitMQ move messages to a DLQ?",
-      "a": "**SQS:** a redrive policy names the DLQ and `maxReceiveCount`, the tries before a message moves. **RabbitMQ:** a dead-letter exchange, used when a message is rejected without being put back, expires, or the queue is over its size limit."
+      "a": "**SQS:** a redrive policy names the DLQ and `maxReceiveCount`, the tries before a message moves. **RabbitMQ:** a dead-letter exchange, used when a message is rejected without being put back, expires, the queue is over its size limit, or (quorum queues, since 4.0) it passes the `delivery-limit`, 20 by default."
     },
     {
       "id": "messaging/dead-letter-queues-7",
@@ -690,6 +702,12 @@
       "lesson": "messaging/dead-letter-queues",
       "q": "What does a sudden flood into the DLQ usually mean?",
       "a": "Usually a bug or a broken dependency, not bad messages. Don't set the limit too low, like 1 try, or every short blip fills the DLQ."
+    },
+    {
+      "id": "messaging/dead-letter-queues-13",
+      "lesson": "messaging/dead-letter-queues",
+      "q": "How do retry topics and a DLQ break per-key order, and what is the fix?",
+      "a": "While `OrderPlaced` for order 42 waits in a retry topic, a later `OrderCancelled` for order 42 can pass it on the main topic. When order matters, park the **whole key** (send every later event for it to the same place), or **pause the partition**."
     },
     {
       "id": "messaging/eventual-consistency-async-1",

@@ -73,14 +73,14 @@ async function onOrderPlaced(e: OrderPlaced) {
     { _id: e.orderId },                    // one document per order
     {
       $set: { userId: e.userId, total: e.total, placedAt: e.placedAt },
-      $setOnInsert: { status: 'PLACED' },  // only when the document is new
+      $setOnInsert: { status: 'PENDING' }, // only when the document is new
     },
     { upsert: true }                       // insert or update: running it twice does no harm
   );
 }
 ```
 
-Why `$setOnInsert` for the status? Say the order has already moved on, and the view says `SHIPPED`. Then an old `OrderPlaced` arrives again (a retry, or a replay). A plain `$set` would put the status back to `PLACED`. `$setOnInsert` only sets it when the document is first created. A more general fix: save the version number of the last event applied to each document, and skip any event that is older.
+Why `$setOnInsert` for the status? Say the order has already moved on, and the view says `SHIPPED`. Then an old `OrderPlaced` arrives again (a retry, or a replay). A plain `$set` would put the status back to `PENDING`. `$setOnInsert` only sets it when the document is first created. A more general fix: save the version number of the last event applied to each document, and skip any event that is older.
 
 Because events can arrive twice, projectors should be **idempotent**. See [Idempotency](../messaging/idempotency.mdx). A nice bonus: if a view gets messed up, or you need a new one, you can **throw it away and rebuild it** from the events.
 

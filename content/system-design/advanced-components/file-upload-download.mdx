@@ -6,7 +6,7 @@ icon: FileUp
 
 ## The idea
 
-Think of a **shop owner** who orders a huge sofa. She doesn't make the delivery truck drive through her small shop. She gives the driver a **one-time pass** to the warehouse at the back: "Good for this one sofa, today only." The driver drops it off directly, and the shop keeps serving customers.
+Think of a **shop owner** who orders a huge sofa. She doesn't make the delivery truck drive through her small shop. She gives the driver a **short-lived pass** to the warehouse at the back: "Good for this one sofa, today only." The driver drops it off directly, and the shop keeps serving customers.
 
 Big file uploads work the same way. Your app server is the small shop. It should **hand out a pass** (a **presigned URL**) and let the file go **straight to storage** like S3. It never carries the heavy bytes itself.
 
@@ -35,7 +35,7 @@ flowchart TB
 
 A **presigned URL** is a normal S3 link with two extra things inside it: an **expiry time** and a **signature**. The app server makes the signature with its own secret key. It never sends the key itself.
 
-Whoever holds the URL can do **exactly one thing** (like "upload one file to the key `uploads/42/a1b2.jpg`") until it **expires**. After that, the URL is useless.
+Whoever holds the URL can do **exactly one thing** (like "upload one file to the key `uploads/42/a1b2.jpg`") until it **expires**. It is not single-use: it works again and again until then. After that, the URL is useless.
 
 ### The upload, step by step
 
@@ -60,6 +60,11 @@ sequenceDiagram
 4. The client uploads the bytes **directly to S3**.
 5. S3 sends an **event**, usually through a queue like SQS. (Or the client calls your API to say "done", but the event is more reliable.)
 6. The app marks the file `ready`, and can start work like making thumbnails.
+
+**Races and duplicates.** Two things can go wrong between these steps:
+
+- **The S3 event can arrive twice.** So marking the file `ready` must be safe to repeat: if it is already `ready`, do nothing (see [Idempotency](../messaging/idempotency.mdx)).
+- **The upload may never finish.** The client gives up, or the event is never handled, so the row stays `pending` forever. Run a **sweeper**, a small scheduled job, over old `pending` rows: if the object is in S3, mark it `ready`; if not, delete the row.
 
 Making the URL takes a few lines:
 
@@ -148,7 +153,7 @@ Content-Range: bytes 1048576-2097151/52428800
 
 ## In the real world
 
-**S3 multipart limits.** In S3, each part can be **5 MB to 5 GB** (the last part can be smaller), one upload can have up to **10,000 parts**, so a single object can be several terabytes. AWS suggests multipart upload for files over about 100 MB.
+**S3 multipart limits.** In S3, each part can be **5 MB to 5 GB** (the last part can be smaller), one upload can have up to **10,000 parts**, so a single object can be up to **50 TB** (raised from 5 TB in December 2025). AWS suggests multipart upload for files over about 100 MB.
 
 **YouTube supports resumable uploads.** The YouTube Data API has a resumable upload mode. If the connection drops, the client asks how much arrived and continues from there. Google Cloud Storage offers the same kind of resumable upload.
 
@@ -163,7 +168,7 @@ Any question with photos, videos or documents (Instagram, YouTube, Google Drive,
 <Callout title="Remember this" type="success">
   - **Don't send big files through app servers.** It wastes them and hits size and time limits.
   - **Presigned URL** = a signed, short-lived link to upload or download **one** object directly from S3.
-  - Save a **metadata row** (`pending`), upload, then mark it **ready** when S3's event arrives.
+  - Save a **metadata row** (`pending`), upload, then mark it **ready** when S3's event arrives. A **sweeper** cleans up rows stuck in `pending`.
   - Big files: **multipart upload**. Parts in parallel, retry only failed parts, **resume** after a crash.
   - Downloads: **CDN** for public files, **signed URLs** for private ones, **range requests** to resume and seek.
 </Callout>

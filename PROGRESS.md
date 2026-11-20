@@ -5,7 +5,7 @@
 Same order as the sidebar. This file is generated: run `npm run progress` after writing a page.
 A page that is not written yet has `planned: true` in its frontmatter (it shows dimmed in the sidebar).
 
-**Written: 122 of 122**
+**Written: 126 of 126**
 
 ## Guide
 - ✅ Start Here
@@ -25,11 +25,13 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ Polling, WebSockets and SSE
 - ✅ Cookies, Sessions and JWT
 - ✅ Reverse and Forward Proxies
+- ✅ What Happens When You Type a URL
 
 ## 2. High-Level Design Basics
 - ✅ Scalability
 - ✅ Availability and Reliability
 - ✅ Latency, Throughput and QPS
+- ✅ Queueing Basics
 - ✅ Stateless vs Stateful Servers
 - ✅ Load Balancing
 - ✅ Health Checks and Service Discovery
@@ -51,6 +53,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ Partitioning and Sharding
 - ✅ Consistent Hashing
 - ✅ Connection Pooling
+- ✅ PostgreSQL vs MySQL
 - ✅ How a Query Runs
 - ✅ SQL Fundamentals
 
@@ -105,6 +108,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ Role-Based Access Control (RBAC)
 - ✅ Encryption at Rest and in Transit
 - ✅ API Security Basics
+- ✅ CSRF and CORS
 
 ## 8. Advanced Components
 - ✅ Object, Block and File Storage
@@ -162,7 +166,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 
 ## To do
 - [x] **Cheat Sheet:** written last, from all the finished lessons.
-- [x] **Flashcards:** 1415 cards in 11 decks, one per module. Check them with `npm run check:flashcards`.
+- [x] **Flashcards:** 1519 cards in 11 decks, one per module. Check them with `npm run check:flashcards`.
 
 ## Later: separate tracks (not System Design)
 - **OS and Concurrency (slim):** processes vs threads, concurrency vs parallelism, race conditions and mutexes,

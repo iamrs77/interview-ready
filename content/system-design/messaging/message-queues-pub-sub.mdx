@@ -48,7 +48,7 @@ In **pub/sub**, the producer (here called the **publisher**) sends a message to 
 flowchart TB
   O["Order Service"]:::service -->|"OrderPlaced"| T[["orders topic"]]:::queue
   T --> E["Email Service"]:::service
-  T --> W["Warehouse Service"]:::service
+  T --> I["Inventory Service"]:::service
   T --> A["Analytics Service"]:::service
 ```
 
@@ -64,10 +64,10 @@ Real systems usually mix the two. A topic sends a copy of each message to **one 
 flowchart TB
   O["Order Service"]:::service -->|"OrderPlaced"| T[["orders topic (SNS)"]]:::queue
   T --> Q1[["email queue (SQS)"]]:::queue
-  T --> Q2[["warehouse queue (SQS)"]]:::queue
+  T --> Q2[["inventory queue (SQS)"]]:::queue
   Q1 --> E1["Email Worker 1"]:::service
   Q1 --> E2["Email Worker 2"]:::service
-  Q2 --> W1["Warehouse Worker"]:::service
+  Q2 --> W1["Inventory Worker"]:::service
 ```
 
 Every subscriber gets every order, and inside each subscriber, the work is split between its workers. [Kafka](./kafka.mdx) does the same thing with **consumer groups**.
@@ -97,7 +97,7 @@ Every subscriber gets every order, and inside each subscriber, the work is split
 
 **AWS fan-out.** AWS documents the SNS-to-SQS fan-out pattern: one SNS topic sends each message into several SQS queues, so that different services can each handle every message in their own time.
 
-**Slack's job queue.** Slack's engineering blog ("Scaling Slack's Job Queue", 2020) describes a job queue that runs work too slow to do inside a web request, such as push notifications and link previews. After an incident where the queue's Redis ran out of memory, they put Kafka in front of it to store jobs safely on disk.
+**Slack's job queue.** Slack's engineering blog ("Scaling Slack's Job Queue", 2017) describes a job queue that runs work too slow to do inside a web request, such as push notifications and link previews. After an incident where the queue's Redis ran out of memory, they put Kafka in front of it to store jobs safely on disk.
 
 ## In the interview
 

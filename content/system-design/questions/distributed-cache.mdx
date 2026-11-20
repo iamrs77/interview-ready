@@ -116,10 +116,10 @@ Here is a small ring with numbers from 0 to 359, drawn as a straight line. Bend 
 ```mermaid
 flowchart LR
   A0(("Node A<br/>at 0")):::cache --- B90(("Node B<br/>at 90")):::cache
-  B90 --- K["user:42<br/>at 120"]:::service
+  B90 --- K["user:42<br/>at 120"]:::network
   K -->|"walk clockwise"| C180(("Node C<br/>at 180")):::cache
   C180 --- A270(("Node A<br/>at 270")):::cache
-  A270 --- W["after 359,<br/>back to 0"]
+  A270 --- W["after 359,<br/>back to 0"]:::network
 ```
 
 Notice that Node A appears **twice** on the ring. These are **virtual nodes**: each real machine sits at many spots on the ring. This helps in two ways:
@@ -152,7 +152,8 @@ Two different things remove keys: **expiry** (the TTL ran out) and **eviction** 
 
 <Callout title="Best: LRU (least recently used)" type="success">
   Throw away the key that **nobody has read for the longest time**. Popular keys keep getting read, so they stay.
-  This is the usual default.
+  This is the usual choice for a cache. But it is not always the default: Redis refuses writes when full unless
+  you set `maxmemory-policy` to `allkeys-lru`.
 </Callout>
 
 LRU is built from a **hash map** (to find a key fast) plus a **list ordered by last use**. Every read moves the key to the "newest" end. When memory is full, we remove from the "oldest" end. Both steps are fast. In JavaScript, a `Map` keeps keys in the order they were added, which makes a tiny LRU easy:
@@ -226,7 +227,7 @@ flowchart TB
 Sometimes one key gets a huge share of traffic, like a celebrity's profile. All of it lands on **one** node, no matter how many nodes we have. Three fixes (see [Hot Keys](../advanced-components/hot-keys-fan-out.mdx)):
 
 - **Tiny local cache:** each app server keeps the hottest keys in its own memory for a few seconds.
-- **Copies of the key:** store it as `profile:1#1`, `profile:1#2` ... `profile:1#5` on different nodes, and read a random copy.
+- **Copies of the key:** store it as `profile:1#1`, `profile:1#2` ... `profile:1#5`. Each name hashes to its own spot, so the copies **usually** land on different nodes (two can still share one). Read a random copy. When the value changes, update or delete **every** copy, or some readers keep getting the old value.
 - **Read from replicas** for that key.
 
 ### Final architecture
@@ -263,7 +264,7 @@ Each primary runs the hash map, TTL checks and LRU eviction. The client library 
 
 **Redis Cluster** splits all keys into **16,384 hash slots**. Each primary owns a range of slots, and each primary can have replicas. If a client asks the wrong node, the node answers with a `MOVED` reply that names the right one. Redis Cluster does failover **without** a separate coordination service: the primaries talk to each other, and when a primary fails, a majority of the other primaries vote to promote one of its replicas. A primary that can't reach most of the other primaries stops accepting writes after a timeout. Same ideas as ours, a different place for the vote.
 
-**Redis runs commands on a single thread.** One command finishes before the next one starts, so there are no locks inside. Redis also uses **approximate LRU**: it samples a few keys and evicts the best one among them. And it expires keys both when they are read and with a background job that checks random keys.
+**Redis runs commands on a single thread.** One command finishes before the next one starts, so there are no locks inside. Redis also uses **approximate LRU**: it samples a few keys and evicts the best one among them. And it expires keys both when they are read and with a background job that checks random keys. Careful: Redis's default `maxmemory-policy` is `noeviction`. When memory is full, it refuses writes, which is the "Not great" option above. For a cache, set it to `allkeys-lru`.
 
 **Memcached** has no clustering built in. The **client libraries** pick the server by hashing the key, often with consistent hashing.
 
@@ -326,8 +327,8 @@ Not for correctness: the database has the real data. But saving a snapshot to di
   - **Hash map in RAM** per node. About 1 ms per request.
   - **`hash % N` moves most keys** when N changes. **Consistent hashing** moves only about 1/N.
   - **Virtual nodes** spread keys evenly and share the load when a node dies.
-  - **Expiry:** check on read, plus a background sampler. **Eviction:** LRU.
+  - **Expiry:** check on read, plus a background sampler. **Eviction:** LRU (in Redis, set `allkeys-lru`: the default refuses writes).
   - **Primary + replicas**, async copies, **automatic failover by majority vote** in the coordination service. A **lease** makes the old primary stop taking writes before a new one starts.
   - A lost `DELETE` = **stale data**, so every key gets a TTL.
-  - **Hot key** → local cache, copies of the key, or read from replicas.
+  - **Hot key** → local cache, copies of the key (update every copy on a change), or read from replicas.
 </Callout>

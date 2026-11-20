@@ -15,7 +15,7 @@ icon: Inbox
 
 A **message queue** sits between services. One service, the **producer**, drops messages in. Other services, the **consumers**, read them later. The producer doesn't wait for the consumer, and the two don't even need to be running at the same time.
 
-Example: when an order is placed, the Order Service sends an `order-placed` message. The Email Service, the Warehouse Service and the Analytics Service each read it and do their own job.
+Example: when an order is paid, the Payment Service sends a `payment-succeeded` message. The Email Service, the Warehouse Service and the Analytics Service each read it and do their own job.
 
 We will build a queue like **Kafka**. Messages are **kept for days**, not deleted when read. So many different services can read the same messages, and a service can go back and read old messages again.
 
@@ -102,9 +102,9 @@ flowchart LR
 
 **Read messages:**
 
-1. The consumer asks the broker: "give me partition 3, starting at offset 1042, up to 100 messages".
+1. The consumer asks the broker: "give me partition 3, starting at offset 1043, up to 100 messages". (1043 is the offset it committed last time.)
 2. The broker reads them from disk and sends them back.
-3. The consumer handles them, then **commits** its new offset: "next time, start at 1142".
+3. The consumer handles them (1043 to 1142), then **commits** its new offset: "next time, start at 1143".
 
 Reading does **not** delete anything. Messages are removed only when they are older than 7 days.
 
@@ -127,7 +127,7 @@ Why is this so fast? Disks are slow when they jump around (**random** access), b
 Four more tricks:
 
 - **Segments.** One partition is split into **segment** files, for example 1 GB each. Only the newest segment gets new messages. When a segment is older than 7 days, we delete the **whole file** at once. That is much cheaper than deleting messages one by one.
-- **A small index.** Each segment has an index file: "offset 1,000,500 is at byte 512,000 in this segment's log" (it is the 500th message, about 1 KB each, in the segment that starts at 1,000,000). So a reader can jump straight to any offset.
+- **A small index.** Each segment has an index file: "offset 1,000,500 is at byte 512,000 in this segment's log" (500 messages of about 1 KB each come before it, in the segment that starts at 1,000,000). So a reader can jump straight to any offset.
 - **The OS keeps recent data in memory.** The operating system keeps recently used file data in RAM (the **page cache**). Consumers that keep up read fresh messages from memory, not from disk.
 - **Batches.** Producers send many messages in one request, and the broker writes them to disk together. Fewer trips, much more throughput. Batches can also be compressed.
 
@@ -149,7 +149,7 @@ orders-3/                          # partition 3 of topic "orders"
 
 ### 2. How do consumers keep their place?
 
-Each consumer group saves its **offset** for each partition: "the next message I need is number 1142". The queue stores these offsets for the groups, in a small internal topic of its own.
+Each consumer group saves its **offset** for each partition: "the next message I need is number 1143". The queue stores these offsets for the groups, in a small internal topic of its own.
 
 Because each group has its own offsets, the Email Service and Analytics read the same messages **without affecting each other**. One can be fast and one slow. One can even rewind and re-read yesterday's messages.
 
@@ -264,7 +264,7 @@ Each broker stores its partitions as append-only segment files on disk. Every pa
 
 **Kafka** was built at LinkedIn and is now an Apache open-source project. It works exactly like this page: topics split into partitions, each partition an append-only log made of segment files, a leader and followers per partition, and consumers that pull. Consumer offsets are stored in an internal Kafka topic called `__consumer_offsets`. By default, Kafka keeps messages for **7 days**. Its producer has the `acks` setting (`0`, `1` or `all`) described above.
 
-**Kafka replaced ZooKeeper with KRaft.** Older Kafka used a separate system, ZooKeeper, to store metadata and choose leaders. Newer versions use **KRaft**, Kafka's own Raft-based controller, so no extra system is needed.
+**Kafka replaced ZooKeeper with KRaft.** Older Kafka used a separate system, ZooKeeper, to store metadata and choose leaders. Newer versions use **KRaft**, Kafka's own Raft-based controller, so no extra system is needed. **Kafka 4.0** (2025) removed ZooKeeper support completely: KRaft is the only mode.
 
 **Amazon SQS works differently.** When a consumer takes a message, SQS hides it for a while (the **visibility timeout**). If the consumer deletes it in time, it is gone for good. If not, it shows up again for another consumer. There are no offsets and no replay.
 
@@ -285,7 +285,7 @@ All messages with that key go to **one partition**, so one broker and one consum
 </Accordion>
 <Accordion title="One message always makes the consumer crash. What now?">
 
-Otherwise the consumer would retry it forever and the partition would be stuck. After a few tries, move the message to a separate **dead-letter topic**, commit the offset and move on. A person or a job looks at it later. See [Dead-Letter Queues](../messaging/dead-letter-queues.mdx).
+If we do nothing, the consumer retries it forever, and the whole partition is stuck behind it. After a few tries, move the message to a separate **dead-letter topic**, commit the offset and move on. A person or a job looks at it later. See [Dead-Letter Queues](../messaging/dead-letter-queues.mdx).
 
 </Accordion>
 <Accordion title="Push or pull: why do consumers pull?">

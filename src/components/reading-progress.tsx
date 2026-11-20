@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from 'react';
 import { BookOpen } from 'lucide-react';
+import { ProgressBar } from './progress-bar';
 
 function subscribe(onChange: () => void) {
   window.addEventListener('scroll', onChange, { passive: true });
@@ -36,19 +37,7 @@ export function ReadingProgress() {
           <BookOpen className="size-3.5" />
         </span>
       </div>
-      <div
-        className="h-1.5 overflow-hidden rounded-full bg-fd-muted"
-        role="progressbar"
-        aria-label="Reading progress"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={progress}
-      >
-        <div
-          className="h-full rounded-full bg-linear-to-r from-indigo-500 to-violet-500 transition-[width] duration-150"
-          style={{ width: `${progress}%` }}
-        />
-      </div>
+      <ProgressBar percent={progress} label="Reading progress" />
     </div>
   );
 }

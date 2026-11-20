@@ -63,11 +63,11 @@ Full lesson: [Capacity Estimation](./hld-basics/capacity-estimation.mdx).
 
 **Uptime**
 
-| Availability | Down per year | Down per month |
+| Availability | Down per year | Down per month (30 days) |
 | --- | --- | --- |
-| 99.9% (three nines) | about 8.8 hours | about 44 minutes |
-| 99.99% (four nines) | about 53 minutes | about 4.4 minutes |
-| 99.999% (five nines) | about 5 minutes | about 26 seconds |
+| 99.9% (three nines) | about 8.8 hours | about 43 minutes |
+| 99.99% (four nines) | about 53 minutes | about 4.3 minutes |
+| 99.999% (five nines) | about 5.3 minutes | about 26 seconds |
 
 ## Which tool for which problem
 
@@ -86,9 +86,9 @@ Full lesson: [Capacity Estimation](./hld-basics/capacity-estimation.mdx).
 | Count in real time (views, clicks) | [Stream processing](./advanced-components/batch-vs-stream.mdx) with time windows |
 | Count unique users or top items cheaply | [HyperLogLog, Count-Min Sketch](./advanced-components/probabilistic-data-structures.mdx) |
 | Push updates to users instantly | [WebSockets or SSE](./foundations/polling-websockets-sse.mdx) |
-| Counters, leaderboards, rate limits, locks | [Redis](./caching/redis.mdx) |
+| Counters, leaderboards, rate limits, locks (with a fencing token) | [Redis](./caching/redis.mdx) |
 | Unique IDs across many servers | [Snowflake IDs](./distributed-systems/distributed-id-generation.mdx) |
-| Never sell the same seat twice | [Locks](./databases/locking.mdx) or a reservation that expires |
+| Never sell the same seat twice | An [atomic conditional update](./databases/locking.mdx) + a hold that expires |
 | Never charge twice | [Idempotency keys](./messaging/idempotency.mdx) |
 | Many steps across services | [Saga](./distributed-systems/saga-pattern.mdx) |
 | Save data and send an event safely | [Outbox](./distributed-systems/outbox-pattern.mdx) or [CDC](./distributed-systems/change-data-capture.mdx) |
@@ -109,7 +109,7 @@ Full lesson: [Capacity Estimation](./hld-basics/capacity-estimation.mdx).
 | **Normalize vs denormalize** | No duplicate data | Fast reads without joins |
 | **Fan-out on write vs on read** | Fast feed reads | Cheap posting for celebrities |
 | **Sync vs async calls** | Instant answer, simple | Survives slow or broken services |
-| **Polling vs WebSockets** | Simple, stateless | Real-time, but open connections to manage |
+| **Polling vs WebSockets** | Simple, stateless | Real-time push |
 | **Pessimistic vs optimistic locking** | Safe when many fight for the same row | Fast when conflicts are rare |
 | **Sessions vs JWT** | Easy logout | No lookup on every request |
 | **Batch vs stream** | Simple and cheap | Fresh results |
@@ -123,14 +123,14 @@ Full lesson: [Capacity Estimation](./hld-basics/capacity-estimation.mdx).
 | --- | --- |
 | [URL Shortener](./questions/url-shortener.mdx) | Read-heavy, so cache. Counter + base62 for unique codes |
 | [Rate Limiter](./questions/rate-limiter.mdx) | Token bucket, counters in Redis, return `429` |
-| [Notification Service](./questions/notification-service.mdx) | Queue per channel, workers, retries, never send twice |
+| [Notification Service](./questions/notification-service.mdx) | Queue per channel, workers, retries, dedupe so duplicates are rare |
 | [WhatsApp](./questions/whatsapp.mdx) | WebSockets, pub/sub between servers, store until delivered |
 | [News Feed](./questions/news-feed.mdx) | Fan-out on write, pull for celebrities, cached feeds |
 | [Web Crawler](./questions/web-crawler.mdx) | URL frontier, politeness per site, skip duplicates |
 | [Search Autocomplete](./questions/search-autocomplete.mdx) | Trie with top suggestions saved at each prefix, cache |
-| [Job Scheduler](./questions/job-scheduler.mdx) | Index jobs by run time, workers, run each job once |
+| [Job Scheduler](./questions/job-scheduler.mdx) | Index runs by time, queue + workers, at-least-once + idempotent tasks |
 | [E-commerce](./questions/e-commerce.mdx) | Reserve stock at checkout, payment with idempotency |
-| [Ticket Booking](./questions/ticket-booking.mdx) | Hold a seat with an expiry, no double booking, waiting room |
+| [Ticket Booking](./questions/ticket-booking.mdx) | An atomic conditional update + a hold that expires, waiting room |
 | [Google Drive](./questions/google-drive.mdx) | Chunked uploads, store file data and file info apart, sync |
 | [YouTube](./questions/youtube.mdx) | Upload to S3, process into many qualities, stream from a CDN |
 | [Uber](./questions/uber.mdx) | Location updates every few seconds, geospatial search, lock the driver |

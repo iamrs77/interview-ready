@@ -488,6 +488,12 @@
       "a": "Two different messages, like \"No account with this email\" and \"Wrong password\", let an attacker find out which emails have accounts."
     },
     {
+      "id": "reliability-security/authn-vs-authz-11",
+      "lesson": "reliability-security/authn-vs-authz",
+      "q": "The gateway passes the user ID to services in a header like `X-User-Id`. What must it do with that header first?",
+      "a": "Remove any `X-User-Id` header the client sent, then fill it in from the checked token. Otherwise a user could send the header themselves and pretend to be someone else."
+    },
+    {
       "id": "reliability-security/oauth-oidc-1",
       "lesson": "reliability-security/oauth-oidc",
       "q": "What is OAuth 2.0?",
@@ -509,7 +515,7 @@
       "id": "reliability-security/oauth-oidc-4",
       "lesson": "reliability-security/oauth-oidc",
       "q": "What are OAuth scopes?",
-      "a": "The exact permissions the app asks for, like \"read your photos\". The user sees them on the consent screen. A good app asks for as few as it can."
+      "a": "The exact permissions the app asks for, like \"read your calendar\". The user sees them on the consent screen. A good app asks for as few as it can."
     },
     {
       "id": "reliability-security/oauth-oidc-5",
@@ -545,7 +551,7 @@
       "id": "reliability-security/oauth-oidc-10",
       "lesson": "reliability-security/oauth-oidc",
       "q": "Access token vs refresh token: where is each sent, and how long does it live?",
-      "a": "The access token is sent to the API with every request and lives a short time, up to about an hour. The refresh token is sent only to the authorization server to get new access tokens, lives days or months, and is kept safely on the server."
+      "a": "The access token is sent to the API with every request and lives a short time, up to about an hour. The refresh token is sent only to the authorization server to get new access tokens, lives days or months, and is kept safely on the server, or in the device's secure storage for mobile apps."
     },
     {
       "id": "reliability-security/oauth-oidc-11",
@@ -575,7 +581,7 @@
       "id": "reliability-security/rbac-3",
       "lesson": "reliability-security/rbac",
       "q": "What is the risk of putting a user's roles inside their JWT?",
-      "a": "It is fast, but it can go stale: if you remove someone's admin role, their token still says \"admin\" until it expires. Keep such tokens short-lived, or cache each user's permissions in Redis instead."
+      "a": "It is fast, but it can go stale: if you remove someone's admin role, their token still says \"admin\" until it expires. Keep such tokens short-lived, or look up important permissions fresh. A Redis cache of permissions goes stale too, unless you delete the entry when roles change."
     },
     {
       "id": "reliability-security/rbac-4",
@@ -695,7 +701,7 @@
       "id": "reliability-security/api-security-4",
       "lesson": "reliability-security/api-security",
       "q": "What is mass assignment, and how do you stop it?",
-      "a": "An endpoint copies the whole request body into a record, so an attacker adds `\"role\": \"admin\"` and becomes an admin. Accept only the fields you list (like zod's `.strict()`), and choose the fields you return too."
+      "a": "An endpoint copies the whole request body into a record, so an attacker adds `\"role\": \"admin\"` and becomes an admin. Accept only the fields you list (like zod's `z.strictObject`), and choose the fields you return too."
     },
     {
       "id": "reliability-security/api-security-5",
@@ -738,6 +744,78 @@
       "lesson": "reliability-security/api-security",
       "q": "Which of the OWASP API top risks are authorization mistakes?",
       "a": "Numbers 1 (broken object level), 3 (broken object property level) and 5 (broken function level authorization). Three of the top five come down to a missing \"is this user allowed to do this?\" check."
+    },
+    {
+      "id": "reliability-security/csrf-cors-1",
+      "lesson": "reliability-security/csrf-cors",
+      "q": "What is an origin, and what does the same-origin policy block?",
+      "a": "An origin is **scheme + host + port**, so `https://shop.com` and `https://api.shop.com` are different origins. A page can **send** requests to other origins, but its JavaScript can't **read** their responses unless that origin allows it with CORS."
+    },
+    {
+      "id": "reliability-security/csrf-cors-2",
+      "lesson": "reliability-security/csrf-cors",
+      "q": "How does a CSRF attack work?",
+      "a": "The user is logged in to bank.com. A page on evil.com makes their browser send a request to bank.com, like a hidden form that POSTs a transfer. The browser adds bank.com's cookies by itself, so the bank thinks the user asked for it."
+    },
+    {
+      "id": "reliability-security/csrf-cors-3",
+      "lesson": "reliability-security/csrf-cors",
+      "q": "What do `SameSite=Strict`, `Lax` and `None` do?",
+      "a": "**Strict:** never sent on requests another site starts. **Lax:** sent only when the user goes to the site with a `GET`, like clicking a link. Not on cross-site form POSTs, images or `fetch`. **None:** always sent, and must be `Secure`."
+    },
+    {
+      "id": "reliability-security/csrf-cors-4",
+      "lesson": "reliability-security/csrf-cors",
+      "q": "How does a CSRF token stop CSRF?",
+      "a": "The server puts a random secret token, tied to the session, in its own pages, and every request that changes data must send it back. evil.com can't read bank.com's pages (same-origin policy), so it can't know the token."
+    },
+    {
+      "id": "reliability-security/csrf-cors-5",
+      "lesson": "reliability-security/csrf-cors",
+      "q": "Besides SameSite cookies and CSRF tokens, what else defends against CSRF?",
+      "a": "Check the `Origin` header (or `Sec-Fetch-Site`) on every request that changes data, and reject origins you don't trust, or a missing or `null` one. And never change data with `GET`, because `Lax` cookies are still sent when a user follows a link."
+    },
+    {
+      "id": "reliability-security/csrf-cors-6",
+      "lesson": "reliability-security/csrf-cors",
+      "q": "Why are APIs that use `Authorization: Bearer` tokens not open to CSRF, and what is the catch?",
+      "a": "The browser never adds a bearer token by itself, and other sites can't read the token. But your own JavaScript must read it to send it, so an XSS bug can steal it. An `HttpOnly` cookie is safe from scripts, but needs CSRF defenses."
+    },
+    {
+      "id": "reliability-security/csrf-cors-7",
+      "lesson": "reliability-security/csrf-cors",
+      "q": "What does the `Access-Control-Allow-Origin` header do?",
+      "a": "The server names the origin (or `*` for any) whose JavaScript may read its response. Without it, the request may still reach the server, but the browser hides the response and shows a CORS error."
+    },
+    {
+      "id": "reliability-security/csrf-cors-8",
+      "lesson": "reliability-security/csrf-cors",
+      "q": "What is a CORS preflight, and when does the browser send one?",
+      "a": "An `OPTIONS` request sent first to ask permission, for non-simple requests: methods like `PUT` or `DELETE`, a JSON content type, or custom headers like `Authorization`. If the answer doesn't allow it, the real request is never sent."
+    },
+    {
+      "id": "reliability-security/csrf-cors-9",
+      "lesson": "reliability-security/csrf-cors",
+      "q": "Why can't `Access-Control-Allow-Origin: *` be used with credentials?",
+      "a": "With cookies, `*` would let any website read a logged-in user's private data. So the server must send `Access-Control-Allow-Credentials: true` and the **exact** origin. Never echo back whatever `Origin` arrives."
+    },
+    {
+      "id": "reliability-security/csrf-cors-10",
+      "lesson": "reliability-security/csrf-cors",
+      "q": "Why is CORS not a CSRF defense?",
+      "a": "CSRF doesn't need to read the response. A form POST is a simple request, with no preflight, so it reaches the server with the cookies and does the damage. CORS only hides the reply."
+    },
+    {
+      "id": "reliability-security/csrf-cors-11",
+      "lesson": "reliability-security/csrf-cors",
+      "q": "Does CORS protect your server?",
+      "a": "No. The **browser** enforces CORS, to protect **users' data** inside the browser. Simple requests still reach your server, and curl, mobile apps and other servers ignore CORS completely. Your API still needs authentication and authorization on every request."
+    },
+    {
+      "id": "reliability-security/csrf-cors-12",
+      "lesson": "reliability-security/csrf-cors",
+      "q": "Why doesn't `SameSite` protect you from a sibling subdomain like `user-content.shop.com`?",
+      "a": "`SameSite` works by **site**, not origin. `user-content.shop.com` and `shop.com` are the same site, so requests from pages there carry even `Strict` cookies. Put content that users upload on a separate domain."
     }
   ]
 }

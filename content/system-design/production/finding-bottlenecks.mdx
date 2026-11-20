@@ -88,7 +88,7 @@ The database is the most common bottleneck. Two tools find the bad queries.
 
 Tell the database to write down every query slower than a limit:
 
-```bash
+```ini
 # PostgreSQL (postgresql.conf): log queries slower than 200 ms
 log_min_duration_statement = 200
 
@@ -128,7 +128,9 @@ Planning Time: 0.112 ms
 Execution Time: 0.204 ms
 ```
 
-From 92 ms to 0.2 ms. More about how this works in [Indexes](../databases/indexes.mdx) and [How a Query Runs](../databases/how-a-query-runs.mdx).
+From 92 ms to 0.2 ms. (These plans are in the PostgreSQL 17 format. PostgreSQL 18 and newer also print `Buffers` lines.)
+
+More about how this works in [Indexes](../databases/indexes.mdx) and [How a Query Runs](../databases/how-a-query-runs.mdx).
 
 ## Common database fixes
 
@@ -140,21 +142,22 @@ From 92 ms to 0.2 ms. More about how this works in [Indexes](../databases/indexe
 | **Deep pages are slow** | `OFFSET 100000` reads and throws away 100,000 rows | Cursor pagination. See [API Pagination and Versioning](../advanced-components/api-pagination-versioning.mdx) |
 | **Too many connections** | "Too many connections" errors, requests waiting for a connection | A connection pool. See [Connection Pooling](../databases/connection-pooling.mdx) |
 | **The same reads again and again** | High database CPU from repeated simple queries | A cache, read replicas. See [Scaling Reads](../hld-basics/scaling-reads.mdx) |
-| **Lock waits** | Queries waiting on each other, often on one busy row | Shorter transactions. See [Locking](../databases/locking.mdx) |
+| **Lock waits** | Queries waiting on each other, often on one busy row | Shorter transactions. See [Locks and Deadlocks](../databases/locking.mdx) |
 
 The **N+1 problem** deserves a closer look, because it hides in friendly-looking code:
 
 ```js
 // N+1: 1 query for the orders, then 1 more query PER order
-const orders = await db.query('SELECT * FROM orders WHERE user_id = $1', [userId]);
+const { rows: orders } = await db.query('SELECT * FROM orders WHERE user_id = $1', [userId]);
 for (const order of orders) {
-  order.items = await db.query('SELECT * FROM order_items WHERE order_id = $1', [order.id]);
+  const { rows } = await db.query('SELECT * FROM order_items WHERE order_id = $1', [order.id]);
+  order.items = rows;
 }
 // 50 orders = 51 queries
 
 // Fix: 2 queries in total, no matter how many orders
 const ids = orders.map((o) => o.id);
-const items = await db.query('SELECT * FROM order_items WHERE order_id = ANY($1)', [ids]);
+const { rows: items } = await db.query('SELECT * FROM order_items WHERE order_id = ANY($1)', [ids]);
 ```
 
 Each query may take only 2 ms, but 51 of them in a row is over 100 ms.

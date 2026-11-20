@@ -84,12 +84,14 @@ A real checkout uses **both**. The simple rule:
 ```mermaid
 flowchart TB
   U["Phone App"]:::client -->|"place order (sync)"| O["Order Service"]:::service
-  O -->|"charge card (sync)"| P["Payment Service"]:::service
   O -->|"save order (sync)"| DB[("Orders DB")]:::db
-  O -->|"OrderPlaced (async)"| T[["orders topic"]]:::queue
+  O -->|"charge card (sync)"| P["Payment Service"]:::service
+  P -->|"PaymentSucceeded (async)"| T[["payments topic"]]:::queue
   T --> M["Email Worker"]:::service
   T --> W["Warehouse Service"]:::service
 ```
+
+The warehouse listens to `PaymentSucceeded`, not to the order being placed, so it never packs an unpaid order.
 
 One event, two readers that each need **their own copy**: that is a **topic** (pub/sub), not a single queue. In a plain queue, each message goes to only one reader. See [Message Queues and Pub/Sub](./message-queues-pub-sub.mdx).
 
@@ -123,7 +125,7 @@ The same goes for other slow work: making a PDF invoice, resizing an uploaded ph
 
 When you draw the design, mark which arrows are sync and which go through a queue, and say why:
 
-> "Checking stock and charging the card are synchronous, because the user needs the answer. Everything after that, like the email, the warehouse and analytics, reacts to an OrderPlaced event on a topic, so a slow email provider can never slow down checkout."
+> "Checking stock and charging the card are synchronous, because the user needs the answer. Everything after that, like the email, the warehouse and analytics, reacts to a PaymentSucceeded event on a topic, so a slow email provider can never slow down checkout."
 
 <Callout title="Remember this" type="success">
   - **Sync** = phone call: wait for the answer. Simple, but delays and failures **add up** along a chain.

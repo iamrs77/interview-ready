@@ -72,6 +72,8 @@ Now the database says 120 and the cache says 100, and it stays wrong until the T
 
 If you delete the cache key first, a read can sneak in between: it misses, reads the **old** price from the database (not updated yet), and puts it back in the cache. Updating the database first makes this much less likely.
 
+One rare race is still left. A slow reader can read the **old** price just before the update, and write it into the cache **after** the writer's delete. The stale copy then lives until the TTL ends. A short TTL limits the damage. Facebook's **leases** block it: the delete cancels the slow reader's lease, so its late write is refused (leases are in [Cache Problems](./cache-problems.mdx)).
+
 ### What if the delete fails?
 
 The database is updated, but the cache delete fails (a network error). The cache now holds stale data. Options:

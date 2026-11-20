@@ -256,6 +256,12 @@
       "q": "What do the Facebook outage (2021) and the attack on Dyn (2016) teach about DNS?",
       "a": "If DNS breaks, nobody can find your site, even when every server is healthy. Since the Dyn attack, many big companies use **more than one DNS provider**."
     },
+    {
+      "id": "foundations/dns-14",
+      "lesson": "foundations/dns",
+      "q": "What is anycast?",
+      "a": "Many servers around the world share the **same IP address**, and the internet's routers send each user to the nearest one. Cloudflare's `1.1.1.1` resolver and its CDN work this way."
+    },
 
     {
       "id": "foundations/tcp-vs-udp-1",
@@ -320,8 +326,8 @@
     {
       "id": "foundations/tcp-vs-udp-11",
       "lesson": "foundations/tcp-vs-udp",
-      "q": "What are common uses of TCP and of UDP?",
-      "a": "**TCP:** web pages, APIs, chat messages, payments, database connections. **UDP:** voice and video calls (WebRTC), online games, DNS lookups."
+      "q": "Which things run on TCP, and why?",
+      "a": "Web pages, APIs, chat messages, payments and database connections, because every piece must arrive, in order. Everything that uses HTTP already runs on TCP (or QUIC)."
     },
 
     {
@@ -382,7 +388,7 @@
       "id": "foundations/http-and-https-10",
       "lesson": "foundations/http-and-https",
       "q": "What is TLS termination?",
-      "a": "HTTPS ends at the **load balancer**. It decrypts the request and passes it to the app servers over the private network. Very sensitive systems, like banks, encrypt the inside traffic too."
+      "a": "HTTPS ends at the **load balancer**. It decrypts the request and passes it to the app servers over the private network. Many companies now encrypt the inside traffic too, especially for sensitive data (**zero trust**)."
     },
     {
       "id": "foundations/http-and-https-11",
@@ -401,6 +407,12 @@
       "lesson": "foundations/http-and-https",
       "q": "What did Firesheep (2010) show about HTTPS?",
       "a": "On café Wi-Fi, anyone could take over other people's Facebook and Twitter accounts with one click, because those sites didn't use HTTPS for everything. After that, big sites moved to HTTPS for every page."
+    },
+    {
+      "id": "foundations/http-and-https-14",
+      "lesson": "foundations/http-and-https",
+      "q": "How do HTTP, TLS and TCP fit together in HTTPS?",
+      "a": "In layers. **HTTP** writes the message, **TLS** (under HTTP) locks it, and **TCP** (under TLS) carries it. HTTP/3 swaps TCP for QUIC, which runs on UDP."
     },
 
     {
@@ -425,7 +437,7 @@
       "id": "foundations/http-methods-status-codes-headers-4",
       "lesson": "foundations/http-methods-status-codes-headers",
       "q": "Which HTTP methods are safe, and which are idempotent?",
-      "a": "Only `GET` is safe. `GET`, `PUT` and `DELETE` are idempotent. `PATCH` is not always idempotent, and `POST` is not."
+      "a": "Of the five main methods, only `GET` is safe (`HEAD` and `OPTIONS` are safe too). `GET`, `PUT` and `DELETE` are idempotent. `PATCH` is not always idempotent, and `POST` is not."
     },
     {
       "id": "foundations/http-methods-status-codes-headers-5",
@@ -522,7 +534,7 @@
       "id": "foundations/rest-apis-4",
       "lesson": "foundations/rest-apis",
       "q": "How should you name resources in REST URLs?",
-      "a": "Plural nouns, lowercase, with hyphens: `/orders` for the list, `/orders/42` for one order, and `/menu-items`, not `/Menu_Items`."
+      "a": "Plural nouns, lowercase, with hyphens: `/orders` for the list, `/orders/42` for one order, and `/menu-items`, not `/Menu_Items`. A thing each user has only one of, like `/cart`, stays singular."
     },
     {
       "id": "foundations/rest-apis-5",
@@ -601,13 +613,13 @@
       "id": "foundations/grpc-and-graphql-4",
       "lesson": "foundations/grpc-and-graphql",
       "q": "What are the good and bad sides of gRPC?",
-      "a": "**Good:** very fast, and both sides must follow the same contract, so mistakes show up early. **Bad:** browsers can't call it directly (you need gRPC-Web), and binary data is hard to read when you debug."
+      "a": "**Good:** very fast, and both sides must follow the same contract, so mistakes show up early. **Bad:** browsers can't call it directly (you need **gRPC-Web**, usually with a proxy like Envoy in between), and binary data is hard to read when you debug."
     },
     {
       "id": "foundations/grpc-and-graphql-5",
       "lesson": "foundations/grpc-and-graphql",
-      "q": "Where is gRPC mostly used, and why?",
-      "a": "**Between your own services.** Browsers can't call gRPC directly, so apps and browsers talk REST or GraphQL at the front door, and services call each other with gRPC inside."
+      "q": "Where does gRPC usually sit in a system?",
+      "a": "**Inside**, between your own services: the API gateway calls the services with gRPC, and the services call each other with it. Apps and browsers talk REST or GraphQL (JSON) to the gateway at the front door."
     },
     {
       "id": "foundations/grpc-and-graphql-6",
@@ -698,7 +710,7 @@
       "id": "foundations/polling-websockets-sse-7",
       "lesson": "foundations/polling-websockets-sse",
       "q": "What is SSE good for?",
-      "a": "Notifications, live scores, stock prices, and AI answers that appear word by word. ChatGPT's answers stream over SSE."
+      "a": "Notifications, live scores, stock prices, and AI answers that appear word by word. OpenAI's API streams its answers over SSE."
     },
     {
       "id": "foundations/polling-websockets-sse-8",
@@ -736,6 +748,18 @@
       "q": "What else must you plan for when servers hold open connections?",
       "a": "The **load balancer** must support long-lived connections. And when a server restarts, its users get disconnected, so clients must **reconnect automatically**."
     },
+    {
+      "id": "foundations/polling-websockets-sse-14",
+      "lesson": "foundations/polling-websockets-sse",
+      "q": "Why do open connections need a heartbeat?",
+      "a": "Load balancers and proxies close a connection that stays quiet too long (often after about 60 seconds). A tiny ping every 30 seconds or so keeps it open, and shows quickly when the other side is gone."
+    },
+    {
+      "id": "foundations/polling-websockets-sse-15",
+      "lesson": "foundations/polling-websockets-sse",
+      "q": "Why can SSE run into trouble over HTTP/1.1?",
+      "a": "A browser opens only about 6 connections per site, and each SSE stream keeps one busy. With many tabs open, the site can run out. Over HTTP/2, many streams share one connection."
+    },
 
     {
       "id": "foundations/cookies-sessions-jwt-1",
@@ -747,7 +771,7 @@
       "id": "foundations/cookies-sessions-jwt-2",
       "lesson": "foundations/cookies-sessions-jwt",
       "q": "What do the cookie flags `HttpOnly`, `Secure` and `SameSite` do?",
-      "a": "`HttpOnly`: JavaScript can't read it, so a malicious script can't steal it. `Secure`: only sent over HTTPS. `SameSite`: not sent when another site triggers the request, which protects against CSRF."
+      "a": "`HttpOnly`: JavaScript can't read it, so a malicious script can't steal it. `Secure`: only sent over HTTPS. `SameSite`: limits sending it on requests another site starts (CSRF). `Strict`: never. `Lax`: only when the user clicks a link to the site. `None`: always."
     },
     {
       "id": "foundations/cookies-sessions-jwt-3",
@@ -765,7 +789,7 @@
       "id": "foundations/cookies-sessions-jwt-5",
       "lesson": "foundations/cookies-sessions-jwt",
       "q": "What are the good and bad sides of sessions?",
-      "a": "**Good:** logging out is easy. Delete the session, and the user is logged out everywhere, instantly. **Bad:** every request needs a lookup in the session store."
+      "a": "**Good:** logging out is easy. Delete the session, and the user is logged out at once, on every server (delete all their sessions to log out every device). **Bad:** every request needs a lookup in the session store."
     },
     {
       "id": "foundations/cookies-sessions-jwt-6",
@@ -887,6 +911,79 @@
       "lesson": "foundations/proxies",
       "q": "How does Cloudflare work as a giant reverse proxy?",
       "a": "Your browser actually connects to Cloudflare's servers. Cloudflare blocks attacks, serves cached files, and passes the rest to the site's real servers, which stay hidden."
+    },
+
+    {
+      "id": "foundations/what-happens-when-you-type-a-url-1",
+      "lesson": "foundations/what-happens-when-you-type-a-url",
+      "q": "What are the main steps when you type a URL and press Enter?",
+      "a": "Read the URL and check the browser cache → **DNS** finds the IP → **TCP** handshake → **TLS** handshake → **HTTP request** with the cookie → CDN / load balancer → app server → cache / database → **response** → the browser builds the page, with more requests for CSS, JS and images."
+    },
+    {
+      "id": "foundations/what-happens-when-you-type-a-url-2",
+      "lesson": "foundations/what-happens-when-you-type-a-url",
+      "q": "What do the parts of `https://shop.example.com/products/42` tell the browser?",
+      "a": "**Scheme** `https`: how to talk, HTTP inside TLS, on port 443 by default. **Host** `shop.example.com`: which server, found with DNS. **Path** `/products/42`: what you want on that server."
+    },
+    {
+      "id": "foundations/what-happens-when-you-type-a-url-3",
+      "lesson": "foundations/what-happens-when-you-type-a-url",
+      "q": "How can a page, image or script load with no network request at all?",
+      "a": "The browser checks its own cache first. If `Cache-Control` from the last visit says the saved copy is still fresh, it uses it. HTML is usually kept only briefly, but images, CSS and JavaScript often come straight from the cache."
+    },
+    {
+      "id": "foundations/what-happens-when-you-type-a-url-4",
+      "lesson": "foundations/what-happens-when-you-type-a-url",
+      "q": "When a request reaches a website, which machines does it pass through?",
+      "a": "A **CDN edge** answers if it has a copy. If not, a **load balancer** picks a healthy **app server**. The app server reads the cookie to find out who you are, checks the **cache** first, and goes to the **database** only on a cache miss."
+    },
+    {
+      "id": "foundations/what-happens-when-you-type-a-url-5",
+      "lesson": "foundations/what-happens-when-you-type-a-url",
+      "q": "About how long before the first byte, for a new HTTPS connection from India to a server in the USA?",
+      "a": "Three round trips of about 200 ms: the TCP handshake, the TLS 1.3 handshake, then request + response. So about **600 ms plus server time**, and more if DNS was not cached. Most of the wait is travel, not the server."
+    },
+    {
+      "id": "foundations/what-happens-when-you-type-a-url-6",
+      "lesson": "foundations/what-happens-when-you-type-a-url",
+      "q": "How does a nearby CDN edge server cut the wait for a user in India?",
+      "a": "The handshakes become short trips, about 10 ms each. If the edge has a copy, it all takes about 30 ms. If not, the edge reuses its open connection to the origin, so only **one** long trip is left: about 280 ms instead of 650 ms."
+    },
+    {
+      "id": "foundations/what-happens-when-you-type-a-url-7",
+      "lesson": "foundations/what-happens-when-you-type-a-url",
+      "q": "How many round trips does the TLS handshake cost in TLS 1.3, and in TLS 1.2?",
+      "a": "**TLS 1.3:** one round trip. **TLS 1.2:** two. TLS 1.3, finished in 2018, removed a whole round trip from every new HTTPS connection."
+    },
+    {
+      "id": "foundations/what-happens-when-you-type-a-url-8",
+      "lesson": "foundations/what-happens-when-you-type-a-url",
+      "q": "How does HTTP/3 make a new connection faster?",
+      "a": "It runs on QUIC, which does the connection setup and the TLS handshake **together, in one round trip**. So a new connection needs 2 round trips before the first byte instead of 3: about 450 ms instead of 650 ms from India to the USA."
+    },
+    {
+      "id": "foundations/what-happens-when-you-type-a-url-9",
+      "lesson": "foundations/what-happens-when-you-type-a-url",
+      "q": "After the HTML arrives, how does the browser load the rest of the page?",
+      "a": "It finds links to CSS, JavaScript and images, and asks for them on the **connection that is already open**, many at once with HTTP/2. Then it draws the page, and the JavaScript calls APIs, like `GET /api/cart`, to fill in personal data."
+    },
+    {
+      "id": "foundations/what-happens-when-you-type-a-url-10",
+      "lesson": "foundations/what-happens-when-you-type-a-url",
+      "q": "How should you answer \"What happens when you type a URL?\" in an interview?",
+      "a": "Go through **every step briefly, in order**: cache, DNS, TCP, TLS, request, servers, response, page. Give the round-trip numbers. Then ask the interviewer which part to go deeper on."
+    },
+    {
+      "id": "foundations/what-happens-when-you-type-a-url-11",
+      "lesson": "foundations/what-happens-when-you-type-a-url",
+      "q": "From India to a server in the USA, how much does reusing an open connection save?",
+      "a": "A second request on the same connection skips the TCP and TLS handshakes. It costs one round trip plus server time: about **250 ms** instead of about **650 ms** on a new connection."
+    },
+    {
+      "id": "foundations/what-happens-when-you-type-a-url-12",
+      "lesson": "foundations/what-happens-when-you-type-a-url",
+      "q": "Why send a personal page with `Cache-Control: private, no-cache` and an `ETag`?",
+      "a": "`private`: only the browser may keep it, never a CDN, so no one else gets your page. `no-cache`: the browser must ask first. It sends the `ETag` back, and if nothing changed, the server answers `304 Not Modified` with no body."
     }
   ]
 }

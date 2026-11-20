@@ -6,6 +6,8 @@ import { useDonePages } from '@/lib/progress';
  * Marks done lessons in the sidebar: green text and a green tick on the right.
  * Fumadocs renders each sidebar item as <a data-active="true|false" href="...">, so a small
  * stylesheet built from the "Mark as done" list can style exactly those links.
+ * The a[data-active] markup copies Fumadocs 16.19 internals. Re-check after a Fumadocs upgrade:
+ * done lessons should still show green text and a tick in the sidebar.
  */
 export function SidebarDoneMarks() {
   const done = [...useDonePages()].filter((url) => /^\/learn\/[a-z0-9/-]+$/.test(url));

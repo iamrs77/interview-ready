@@ -77,6 +77,8 @@ COMMIT;
 
 Use `SET LOCAL`, not plain `SET`. `SET LOCAL` lasts only until the transaction ends. A plain `SET` stays on the connection, and with a connection pool the next request, maybe for Globex, could get that same connection with Acme's tenant still set.
 
+`SET LOCAL` can't take a query parameter like `$1`, so app code is tempted to paste the tenant ID into the SQL text, which risks SQL injection (see [API Security Basics](../reliability-security/api-security.mdx)). From app code, use `SELECT set_config('app.tenant_id', $1, true)` instead. It does the same thing, and `true` means "only until this transaction ends".
+
 The app must connect as a normal database user. Superusers and (by default) the table's owner skip these rules.
 
 **4. Tenant ID everywhere, not just the database.** Put it in **cache keys** (`acme:user:42`), **file paths** in S3 (`acme/invoices/...`), **search indexes** and **logs**. A cache key without the tenant is a classic way to leak data: Acme's dashboard gets cached as `dashboard:home`, and Globex sees it.

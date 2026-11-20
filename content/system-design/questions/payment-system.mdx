@@ -97,7 +97,7 @@ PSP-Signature: v1=5f2b9c...
 Anyone on the internet can call this URL. So we never trust a webhook just because it arrived:
 
 - **Check the signature.** The PSP signs each webhook with a secret that only it and we know. We compute the signature again on our side. If it doesn't match, we reject the call. Without this check, anyone could send "payment succeeded" and get a free order.
-- **De-duplicate by event ID.** The PSP may send the same webhook more than once. We save each `eventId` in a `processed_webhooks` table with a **unique** rule. If the insert fails, we have seen this event already, so we answer `200 OK` and do nothing.
+- **De-duplicate by event ID.** The PSP may send the same webhook more than once. We save each `eventId` in a `processed_webhooks` table with a **unique** rule. If the insert fails, we have seen this event already, so we answer `200 OK` and do nothing. This insert goes in the **same transaction** as the status update and the ledger lines. If it were saved on its own and we crashed right after, the event would be marked "seen" but never applied, and the PSP's resend would be skipped.
 - **Find the payment by our own ID.** When we charge, we send our `paymentId` to the PSP as **metadata** (extra fields the PSP stores and sends back). The webhook carries it back. We can't match by `pspPaymentId` alone: after a timeout we never got the PSP's ID, so it is still empty in our database.
 
 ## Step 4: High-level design
@@ -125,15 +125,15 @@ flowchart LR
 
 **Check the status:** read the payment row by its ID.
 
-**Slow answers:** sometimes the bank needs the buyer to approve the payment in their banking app. Then the PSP says "pending" now and calls our **webhook** later. When the webhook arrives, we check its signature, skip it if we have seen its event ID, find the payment by our `paymentId`, and update it.
+**Slow answers:** sometimes the bank needs the buyer to approve the payment in their banking app. Then the PSP says "pending" now and calls our **webhook** later. When the webhook arrives, we check its signature, skip it if we have seen its event ID, find the payment by our `paymentId`, and update it. The event ID and the update are saved in one transaction.
 
 The status of a payment only moves forward:
 
 ```mermaid
 flowchart LR
   P["PENDING"] -->|"PSP says yes"| S["SUCCEEDED"]
-  P -->|"PSP says no"| F["FAILED"]
-  S -->|"refund"| R["REFUNDED"]
+  P -->|"PSP says no, or never<br/>got it (after 15 min)"| F["FAILED"]
+  S -->|"refunded in full"| R["REFUNDED"]
 ```
 
 ## Step 5: Deep dives
@@ -170,6 +170,7 @@ CREATE TABLE payments (
   idempotency_key  TEXT NOT NULL UNIQUE,  -- a second insert with the same key fails
   order_id         TEXT NOT NULL,
   amount_cents     BIGINT NOT NULL,
+  refunded_cents   BIGINT NOT NULL DEFAULT 0,  -- refunds so far (deep dive 2)
   currency         TEXT NOT NULL,
   status           TEXT NOT NULL,         -- PENDING, SUCCEEDED, FAILED, REFUNDED
   psp_payment_id   TEXT                   -- empty until the PSP answers (still empty after a timeout)
@@ -181,8 +182,9 @@ CREATE UNIQUE INDEX one_live_payment_per_order
 ```
 
 1. A request arrives with key `7c1e...`. We read the order's amount on the server and try to insert a `PENDING` row with that key.
-2. If the insert fails because the key already exists, this is a retry. We **return the saved result** instead of charging again.
+2. If the insert fails because the key already exists, this is a retry. If the saved payment is final (`SUCCEEDED` or `FAILED`), we **return the saved result** instead of charging again.
 3. When we call the PSP, we send the same key. Stripe, for example, accepts an `Idempotency-Key` header. If the PSP already charged with that key, it returns the first result instead of charging again.
+4. If the saved payment is still `PENDING`, maybe we crashed after saving it but before calling the PSP. So a retry **calls the PSP again with the same key**. That is safe: the PSP charges at most once per key. So a retry always ends with the first result, never a second charge.
 
 **Two tabs, two keys.** The idempotency key stops retries of the *same* attempt. But a buyer can open the order in two browser tabs and press "Pay" in both. Each tab makes its own key, so the key alone lets both through. The **partial unique index** above closes this gap: it allows only one `PENDING` or `SUCCEEDED` payment per order. The second tab's insert fails, and we tell it "this order is already being paid".
 
@@ -247,7 +249,7 @@ INSERT INTO ledger_entries (payment_id, source_id, account, amount_cents) VALUES
 COMMIT;
 ```
 
-Why both checks? The same "succeeded" news can reach us three ways: the PSP's answer, the webhook, and the stuck-payment checker. Only the one whose `UPDATE` changes 1 row writes ledger lines. The unique rule on `(source_id, account)` is a second lock on the door: even if a bug skips the row check, the database refuses duplicate lines.
+Why both checks? The same "succeeded" news can reach us four ways: the PSP's answer, the webhook, the stuck-payment checker, and the nightly reconciliation (deep dive 3). Only the one whose `UPDATE` changes 1 row writes ledger lines. The unique rule on `(source_id, account)` is a second lock on the door: even if a bug skips the row check, the database refuses duplicate lines.
 
 **Refunds.** A refund adds **new** lines with its own `source_id` (the refund's ID). Nothing old is touched. Careful with the fee: the PSP may keep its fee on a refund (Stripe does). Then the fee line is not reversed. The store pays it:
 
@@ -258,6 +260,18 @@ Why both checks? The same "succeeded" news can reach us three ways: the PSP's an
 | **Total** | **0.00** |
 
 The store got $24.00 and gave back $25.00, so the refund cost it the $1.00 fee. The ledger shows this clearly, and the lines still add up to zero.
+
+**Partial refunds.** A refund carries an `amount`, so the store can give back part of a payment. It must never give back more than was paid, even when two refunds run at the same moment. So each refund first takes its share with one conditional update:
+
+```sql
+-- Refund $10.00 of pay_789: only if that much is still left to refund.
+UPDATE payments SET refunded_cents = refunded_cents + 1000
+WHERE id = 'pay_789' AND status = 'SUCCEEDED'
+  AND refunded_cents + 1000 <= amount_cents;
+-- 0 rows changed: more than what is left (or not paid). Refuse the refund.
+```
+
+In the same transaction we save the refund as `PENDING`. Then it goes through the same steps as a payment: call the PSP with the refund's own key, and let the checker fix stuck ones. If the PSP refuses it, we take the 1000 back off `refunded_cents`. When `refunded_cents` reaches `amount_cents`, the payment becomes `REFUNDED`.
 
 **Telling other services.** When a payment succeeds, the Order Service must ship the book. We could save to the database and then send a Kafka message, but the server might crash between the two. So we use the [Outbox Pattern](../distributed-systems/outbox-pattern.mdx): in the same transaction, we also write the event to an `outbox` table. A small relay process reads that table and sends the events to Kafka.
 
@@ -273,6 +287,10 @@ Even with all of this, our records and the PSP's records can disagree:
 
 **Fast: the stuck-payment checker.** Every few minutes, a job finds payments that have been `PENDING` for too long. It asks the PSP "what happened to this payment?", looking it up by our `paymentId` (the PSP's ID may be missing after a timeout). Then it updates the status with the same "only if still `PENDING`" update as above. This fixes most timeouts within minutes.
 
+What if the PSP has **no record** of the payment? Then our server crashed after saving `PENDING`, before the charge reached the PSP. If the payment is old enough (say 15 minutes), the checker marks it `FAILED`, with the same "only if still `PENDING`" update. Now the order is free again: the partial unique index ignores `FAILED` payments, so the buyer can press "Pay" once more. If a late charge does reach the PSP after all, the nightly reconciliation catches it (the table below).
+
+This is the usual fix for "a crash between two steps": either save both steps in one transaction (the [Outbox Pattern](../distributed-systems/outbox-pattern.mdx)), or run a **sweeper** that finds rows stuck in the middle and finishes them. A PSP call can't join our transaction, so here the checker is the sweeper.
+
 **Slow but complete: the daily report.** Each day the PSP gives us a **settlement report**: a file with every charge, refund and fee it processed. A nightly job compares it with our database.
 
 ```mermaid
@@ -287,6 +305,7 @@ flowchart TB
 | What we find | What it means | What we do |
 | --- | --- | --- |
 | PSP says paid, we say `PENDING` | We missed the answer | Mark it `SUCCEEDED`, add ledger lines |
+| PSP says paid, we say `FAILED` | We gave up too early, and a late charge got through | Refund that charge, or alert a human |
 | We say paid, PSP has no record | Something is badly wrong | Alert a human right away |
 | Amounts are different | Fees or a bug | Send to the finance team to check |
 
@@ -348,7 +367,7 @@ We can't. The PSP is another company, and it will not join our database transact
 </Accordion>
 <Accordion title="How does a refund work?">
 
-A refund is its own request with its own idempotency key. We call the PSP's refund API, then add **new** ledger lines that move the money back. We never edit or delete the original payment lines. If the PSP keeps its fee, the fee line stays, and the store's account pays it.
+A refund is its own request with its own idempotency key. We check its amount against what is left to refund (a conditional update on `refunded_cents`), call the PSP's refund API, then add **new** ledger lines that move the money back. We never edit or delete the original payment lines. If the PSP keeps its fee, the fee line stays, and the store's account pays it.
 
 </Accordion>
 <Accordion title="How do we pay sellers in a marketplace?">
@@ -393,8 +412,8 @@ The ledger already knows how much each seller is owed: it is the sum of their ac
   - **Never touch card numbers.** The PSP gives us a **token**.
   - **The server sets the amount** from the order. The browser sends only the order ID.
   - **Save PENDING first**, then call the PSP. A timeout means "we don't know yet".
-  - **Idempotency key end to end:** unique in our database, and passed to the PSP.
-  - **Webhooks are signed and de-duplicated** by event ID.
+  - **Idempotency key end to end:** unique in our database, and passed to the PSP. A retry of a `PENDING` payment calls the PSP again with the same key. If the PSP never got it, the checker marks it `FAILED` after a set time.
+  - **Webhooks are signed and de-duplicated** by event ID, saved in the same transaction as the status update.
   - **Double-entry ledger:** every movement is lines that add up to zero. Append-only. Written only when the status update changed 1 row.
   - **Reconciliation** with the PSP every day catches whatever slipped through.
 </Callout>

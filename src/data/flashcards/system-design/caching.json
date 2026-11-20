@@ -41,7 +41,7 @@
       "id": "caching/what-is-caching-7",
       "lesson": "caching/what-is-caching",
       "q": "Why is a Redis read much faster than a database query?",
-      "a": "A Redis read is about one memory read plus one short network trip in the data center. A database query often needs disk reads and real work (search, join, sort), so it takes 5 to 50 ms or more."
+      "a": "A Redis read is about one memory read plus one short network trip in the data center: well under 1 ms. A database query often needs disk reads and real work. A simple query using an index takes about 1 to 10 ms; joins and sorts take tens of ms or more."
     },
     {
       "id": "caching/what-is-caching-8",
@@ -230,6 +230,12 @@
       "a": "It runs on Facebook's database servers, reads the database's change log, and sends the matching deletes to the caches. This is invalidation by events."
     },
     {
+      "id": "caching/cache-invalidation-ttl-14",
+      "lesson": "caching/cache-invalidation-ttl",
+      "q": "You update the database first, then delete the key. What race can still leave stale data in the cache?",
+      "a": "A slow reader reads the old value just before the update, then writes it into the cache after the writer's delete. It stays until the TTL ends. A short TTL limits the damage. Leases block it: the delete cancels the reader's lease, so its late write is refused."
+    },
+    {
       "id": "caching/cache-eviction-1",
       "lesson": "caching/cache-eviction",
       "q": "What is cache eviction?",
@@ -334,8 +340,8 @@
     {
       "id": "caching/redis-5",
       "lesson": "caching/redis",
-      "q": "How do you take a simple lock in Redis?",
-      "a": "`SET lock:driver:42 7f3a9c NX EX 10`: set only if the key does not exist (`NX`), and expire after 10 seconds (`EX`). Only one server can hold the key at a time."
+      "q": "How do you take and release a simple lock in Redis?",
+      "a": "`SET lock:driver:42 7f3a9c NX EX 10`: set only if the key does not exist (`NX`), and expire after 10 seconds (`EX`). The value is a random token. To release, a small Lua script deletes the key only if it still holds your token. A plain `DEL` could delete another server's lock."
     },
     {
       "id": "caching/redis-6",
@@ -467,7 +473,7 @@
       "id": "caching/cache-problems-4",
       "lesson": "caching/cache-problems",
       "q": "How does a lock stop a cache stampede?",
-      "a": "The first request that misses takes a lock (`SET` with `NX`) and loads the data. The others wait a few milliseconds and read the cache again. 1,000 misses become 1 database query."
+      "a": "The first request that misses takes a lock (`SET` with `NX`) and loads the data. The others wait a few milliseconds and read the cache again. 1,000 misses become 1 database query. If the reload takes over about 1 second, waiters read the database themselves instead of failing."
     },
     {
       "id": "caching/cache-problems-5",

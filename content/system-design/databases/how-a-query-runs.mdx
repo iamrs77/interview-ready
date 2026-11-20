@@ -63,7 +63,9 @@ Execution Time: 0.131 ms
 
 On a big table, PostgreSQL may also split a full scan across several workers. Then the plan shows `Gather` with a `Parallel Seq Scan` under it. The idea is the same.
 
-What to look for: the **type of scan**, the **time**, and whether the **guessed rows** (98) are close to the **actual rows** (97). A big gap, like a guess of 98 but 50,000 actual, means the statistics are out of date, and the planner may pick a bad route.
+These plans are in the PostgreSQL 17 format. Since PostgreSQL 18 (2025), `EXPLAIN ANALYZE` also prints `Buffers` lines (how many pages came from memory or disk), shows actual rows with decimals (`rows=97.00`), and adds `Index Searches` to index scans.
+
+What to look for: the **type of scan**, the **time**, and whether the **guessed rows** (98) are close to the **actual rows** (97). A big gap, like a guess of 98 but 50,000 actual, often means the statistics are out of date. It can also happen when you filter on two columns that depend on each other, like city and postal code: the planner treats them as unrelated and guesses too few rows. Either way, the planner may pick a bad route.
 
 ## Full scan vs index scan
 

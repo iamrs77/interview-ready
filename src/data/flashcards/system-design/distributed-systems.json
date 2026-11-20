@@ -134,6 +134,42 @@
       "a": "Eric Brewer presented it as an idea in 2000. Two years later, Seth Gilbert and Nancy Lynch of MIT proved it mathematically."
     },
     {
+      "id": "distributed-systems/cap-theorem-12",
+      "lesson": "distributed-systems/cap-theorem",
+      "q": "What does PACELC mean, and who proposed it?",
+      "a": "**If** there is a **P**artition, choose **A**vailability or **C**onsistency. **E**lse (normal times), choose **L**atency or **C**onsistency. Proposed by Daniel Abadi (first in 2010, fully in a 2012 article)."
+    },
+    {
+      "id": "distributed-systems/cap-theorem-13",
+      "lesson": "distributed-systems/cap-theorem",
+      "q": "Why is there a latency vs consistency trade-off even when nothing is broken?",
+      "a": "Keeping copies in sync means waiting for the other copies to confirm, and that wait is added to **every write**. Like a bank branch that phones the other branch before every withdrawal: always right, but every customer waits."
+    },
+    {
+      "id": "distributed-systems/cap-theorem-14",
+      "lesson": "distributed-systems/cap-theorem",
+      "q": "Why is Cassandra with default settings called PA/EL?",
+      "a": "During a partition it keeps answering (**PA**). In normal times it doesn't wait for every copy, so it is fast but may return slightly old data (**EL**). Amazon's original Dynamo and Riak are in the same group."
+    },
+    {
+      "id": "distributed-systems/cap-theorem-15",
+      "lesson": "distributed-systems/cap-theorem",
+      "q": "Why is Google Spanner called PC/EC?",
+      "a": "During a partition it picks consistency (**PC**). On a normal day, every write waits until a majority of its copies agree (**EC**): always correct, but it pays some latency on every write."
+    },
+    {
+      "id": "distributed-systems/cap-theorem-16",
+      "lesson": "distributed-systems/cap-theorem",
+      "q": "Why is \"CA\" not a real choice for a distributed system?",
+      "a": "Partitions will happen (cut cables, failed switches, frozen servers), so you can't opt out of P. A single-node database can be consistent and available only because it is not distributed: if that one machine dies, nothing answers."
+    },
+    {
+      "id": "distributed-systems/cap-theorem-17",
+      "lesson": "distributed-systems/cap-theorem",
+      "q": "In PACELC terms, what are you choosing when you pick a stronger read for one request?",
+      "a": "The **E** part: in normal times, **L**atency or **C**onsistency. A fast default read answers right away, but may be old (EL). A stronger read waits for more copies to agree (EC): more up to date, but each request waits longer."
+    },
+    {
       "id": "distributed-systems/consistency-models-1",
       "lesson": "distributed-systems/consistency-models",
       "q": "What is a consistency model?",
@@ -244,8 +280,8 @@
     {
       "id": "distributed-systems/acid-vs-base-4",
       "lesson": "distributed-systems/acid-vs-base",
-      "q": "What do ACID and BASE systems usually do when the network breaks?",
-      "a": "ACID systems usually refuse requests rather than give old data: CAP's **C**. BASE systems keep answering: CAP's **A**."
+      "q": "What do a single-primary SQL setup and a BASE system usually do when the network breaks?",
+      "a": "The single-primary SQL setup usually refuses requests rather than give old data: CAP's **C**. BASE systems keep answering: CAP's **A**. ACID itself says nothing about copies: a read replica can still return old data."
     },
     {
       "id": "distributed-systems/acid-vs-base-5",
@@ -365,7 +401,7 @@
       "id": "distributed-systems/saga-pattern-5",
       "lesson": "distributed-systems/saga-pattern",
       "q": "Where should steps that can't be undone go in a saga?",
-      "a": "**Last**, after everything that might fail. You can't un-send an email or un-ship a parcel."
+      "a": "**Last**, after everything that might fail. You can't un-send an email or un-ship a parcel. Since there is no undo, retry them with an idempotency key until they work."
     },
     {
       "id": "distributed-systems/saga-pattern-6",
@@ -395,7 +431,7 @@
       "id": "distributed-systems/saga-pattern-10",
       "lesson": "distributed-systems/saga-pattern",
       "q": "In saga code, why add each undo step before its step runs?",
-      "a": "A step like `chargeCard` can work but lose its reply and time out. If the refund were added only after success, it would never run. So every undo must be safe even if its step never happened."
+      "a": "A step like `chargeCard` can work but lose its reply and time out. If the refund were added only after success, it would never run. This holds for the last step too: `rentCar` needs `cancelCar`. So every undo must be safe even if its step never happened."
     },
     {
       "id": "distributed-systems/saga-pattern-11",
@@ -449,7 +485,7 @@
       "id": "distributed-systems/outbox-pattern-8",
       "lesson": "distributed-systems/outbox-pattern",
       "q": "How does the outbox keep one order's events in order?",
-      "a": "The relay sends rows in `created_at` order and uses `aggregate_id` (the order ID) as the Kafka key, so all events for one order go to the same partition."
+      "a": "The relay sends rows in `seq` order (a `BIGSERIAL` set on insert) and uses `aggregate_id` (the order ID) as the Kafka key, so all events for one order go to the same partition. Not `created_at`: `now()` is when the transaction started, not when it was saved."
     },
     {
       "id": "distributed-systems/outbox-pattern-9",
@@ -594,6 +630,12 @@
       "lesson": "distributed-systems/distributed-locking",
       "q": "What is Redlock, and what was the debate about it?",
       "a": "It takes a lock on 5 Redis servers and needs a majority (3). In 2016, Martin Kleppmann argued it isn't safe for correctness, as pauses and clock jumps can let two workers hold it. Takeaway: Redis for saving work, fencing for correctness."
+    },
+    {
+      "id": "distributed-systems/distributed-locking-12",
+      "lesson": "distributed-systems/distributed-locking",
+      "q": "Why are a lock and fencing tokens not enough for a monthly billing job?",
+      "a": "Fencing only protects storage that checks the token. It can't stop a second invoice email. So also make the work safe to repeat: a unique rule allows one invoice per customer per month, and the email is queued in the same transaction (outbox)."
     },
     {
       "id": "distributed-systems/leader-election-consensus-1",
@@ -857,7 +899,7 @@
       "id": "distributed-systems/cqrs-7",
       "lesson": "distributed-systems/cqrs",
       "q": "Why does the order projector set the status with `$setOnInsert`?",
-      "a": "Events can arrive twice. If an old `OrderPlaced` arrives when the order is `SHIPPED`, a plain `$set` would put it back to `PLACED`. `$setOnInsert` only sets it on create. A general fix: skip events older than the last one applied."
+      "a": "Events can arrive twice. If an old `OrderPlaced` arrives when the order is `SHIPPED`, a plain `$set` would put it back to `PENDING`. `$setOnInsert` only sets it on create. A general fix: skip events older than the last one applied."
     },
     {
       "id": "distributed-systems/cqrs-8",

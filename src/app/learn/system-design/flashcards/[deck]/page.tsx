@@ -27,7 +27,7 @@ export default async function DeckPage(props: PageProps<'/learn/system-design/fl
   const deck = getDeck(key);
   if (!deck) notFound();
 
-  const section = key === 'all' ? undefined : sections[deck.key];
+  const section = deck.key === 'all' ? undefined : sections[deck.key];
 
   return (
     <DocsPage
@@ -62,7 +62,7 @@ export default async function DeckPage(props: PageProps<'/learn/system-design/fl
       <DocsDescription className="mb-0">
         {deck.cards.length} cards{key === 'all' ? ' from every module.' : ` from the ${deckLabel(key)} lessons.`}
       </DocsDescription>
-      <StudySession key={key} cards={deck.cards} />
+      <StudySession key={key} cards={deck.cards} lessons={deck.lessons} />
     </DocsPage>
   );
 }

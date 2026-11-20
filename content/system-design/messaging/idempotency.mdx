@@ -17,7 +17,7 @@ Networks fail all the time. Every retry, whether by the user, the app, a proxy o
 ## Where duplicates come from
 
 - A user **double-clicks** a button.
-- The app **times out and retries**, but the first request actually worked. Only the reply was lost. The [HTTP lesson](../foundations/http-methods-status-codes-headers.mdx) shows this with a diagram.
+- The app **times out and retries**, but the first request actually worked. Only the reply was lost. (See [HTTP Methods, Status Codes and Headers](../foundations/http-methods-status-codes-headers.mdx).)
 - A **load balancer or proxy** retries a request on its own.
 - A **message queue** delivers a message again (see [Delivery Guarantees](./delivery-guarantees.mdx)).
 
@@ -83,7 +83,8 @@ CREATE TABLE idempotency_keys (
   idempotency_key TEXT        NOT NULL,
   request_hash    TEXT        NOT NULL, -- to spot the same key with a different body
   status          TEXT        NOT NULL, -- 'in_progress' or 'done'
-  response        JSONB,                -- the answer we sent the first time
+  response_code   INT,                  -- the status code we sent the first time
+  response        JSONB,                -- the body we sent the first time
   locked_at       TIMESTAMPTZ NOT NULL DEFAULT now(), -- when a request claimed it, to spot crashed ones
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, idempotency_key)
@@ -109,16 +110,20 @@ async function createPayment(req, res) {
   // 2. Seen before: never do the work again.
   if (claimed.rowCount === 0) {
     const row = await findKey(userId, key);
+    if (!row) return res.status(409).json({ error: 'Try again' }); // freed a moment ago
     if (row.request_hash !== hash(req.body)) return res.status(422).json({ error: 'Key reused' });
-    if (row.status === 'in_progress') return res.status(409).json({ error: 'Still running' });
-    return res.status(201).json(row.response); // the first answer, sent again
+    if (row.status === 'done') return res.status(row.response_code).json(row.response); // the first answer, sent again
+    // Still 'in_progress'. Take it over only if its request crashed (the UPDATE below).
+    const tookOver = await takeOverStaleKey(userId, key);
+    if (!tookOver) return res.status(409).json({ error: 'Still running' });
   }
 
-  // 3. New key: do the work once, then save the answer.
+  // 3. We own the key: do the work once, then save the answer.
   try {
-    const payment = await chargeCard(req.body, key); // pass the key down
-    await saveResponse(userId, key, payment);        // sets status = 'done'
-    return res.status(201).json(payment);
+    const result = await chargeCard(req.body, key);  // pass the key down
+    const code = result.declined ? 402 : 201;        // a declined card is an answer too
+    await saveResponse(userId, key, code, result);   // saves code + body, sets status = 'done'
+    return res.status(code).json(result);
   } catch (err) {
     // An error, or no answer (a timeout). Free the key, so the client's retry can run the work.
     // Safe even if the charge went through: the card provider got the same key and won't charge twice.
@@ -132,31 +137,31 @@ The failure paths:
 
 - **The work fails or times out.** The `catch` deletes the key, so the client's next retry runs the work again. That is only safe because the key was **passed down** to the card provider.
 - **A final answer, like a declined card, is not an error here.** `chargeCard` returns it, and it is saved like any other answer, so a retry gets the same "declined".
-- **The server crashes in the middle.** The `catch` never runs, and the key stays `in_progress`. Without a fix, every retry gets `409` forever. So treat a key that has been `in_progress` for more than a few minutes as abandoned. A retry takes it over with one conditional update, and then runs the work again:
+- **The server crashes in the middle.** The `catch` never runs, and the key stays `in_progress`. Without a fix, every retry gets `409` forever. So treat a key that has been `in_progress` for more than a few minutes as abandoned. A retry takes it over with one conditional update, and then runs the work again. This is what `takeOverStaleKey` runs:
 
 ```sql
 -- Take over a key whose request crashed. Only one retry can win this.
 UPDATE idempotency_keys SET locked_at = now()
 WHERE user_id = $1 AND idempotency_key = $2
   AND status = 'in_progress' AND locked_at < now() - interval '5 minutes';
--- 1 row updated: we own it now, run the work. 0 rows: answer 409 as before.
+-- 1 row updated: we own it now, so run the work. 0 rows: it is still running, so answer 409.
 ```
 
 ## Idempotent HTTP methods
 
-Some HTTP methods are idempotent by design: `GET`, `PUT` and `DELETE`. `POST` and `PATCH` are not. The [HTTP lesson](../foundations/http-methods-status-codes-headers.mdx) explains why. Idempotency keys are for the methods that are **not** idempotent, mostly `POST`.
+Some HTTP methods are idempotent by design: `GET`, `PUT` and `DELETE`. `POST` and `PATCH` are not. [HTTP Methods, Status Codes and Headers](../foundations/http-methods-status-codes-headers.mdx) explains why. Idempotency keys are for the methods that are **not** idempotent, mostly `POST`.
 
 One more trick: let the **client** choose the ID. `PUT /orders/5f1c2e8a` with a client-made ID creates the order the first time, and simply replaces it with the same data on a retry. No key table needed.
 
 ## Idempotent message consumers
 
-Messages work the same way. The message's own **event ID** is the key. The consumer saves the ID **in the same transaction** as its work:
+Messages work the same way. The message's own **event ID** is the key. Say the Order Service gets a `PaymentSucceeded` event for order 42. It saves the event ID **in the same transaction** as its work:
 
 ```sql
 BEGIN;
 -- event_id is the primary key, so this fails if we handled the event before
-INSERT INTO processed_events (event_id) VALUES ('e-7f3a9c');
-UPDATE orders SET status = 'paid' WHERE id = 42;
+INSERT INTO processed_events (event_id) VALUES ('e-4d81b7');
+UPDATE orders SET status = 'PAID' WHERE id = 42;
 COMMIT;
 ```
 
@@ -166,8 +171,8 @@ If the insert fails with a duplicate key error, the transaction stops, nothing c
 
 Sometimes you don't need a key table at all, because the work itself is safe to repeat:
 
-- **Set, don't add.** `SET status = 'paid'` is safe twice. `balance = balance + 10` is not.
-- **Only change from the expected state.** `UPDATE orders SET status = 'paid' WHERE id = 42 AND status = 'pending'`. The second time, it changes 0 rows.
+- **Set, don't add.** `SET status = 'PAID'` is safe twice. `balance = balance + 10` is not.
+- **Only change from the expected state.** `UPDATE orders SET status = 'PAID' WHERE id = 42 AND status = 'PENDING'`. The second time, it changes 0 rows.
 - **Unique constraints.** A unique `order_id` on the payments table means the database refuses a second payment for the same order.
 - **Upsert.** "Insert, or update if it already exists" gives the same row however many times it runs.
 

@@ -98,6 +98,7 @@ flowchart TB
 ```
 
 - **Partitions limit how many consumers can work.** With 3 partitions, a 4th consumer in the same group sits idle. So pick enough partitions up front for the speed you need.
+- **Share groups change this.** Since Kafka 4.2 (2026), a **share group** lets more consumers than partitions read together, like a classic queue. Each message is acked on its own, redelivered if it fails, and its tries are counted. The price: **no order**, even inside a partition.
 - When a consumer joins, leaves or crashes, Kafka **rebalances**: it hands that consumer's partitions to the others. Reading can pause for a moment while this happens.
 
 ## Message ordering
@@ -129,7 +130,7 @@ Older Kafka versions needed a separate system called ZooKeeper to manage the clu
 
 | Use | Example |
 | --- | --- |
-| **Event bus between services** | `OrderPlaced` goes to payment, email and analytics ([Event-Driven Architecture](./event-driven-architecture.mdx)) |
+| **Event bus between services** | `OrderPlaced` goes to inventory, email and analytics ([Event-Driven Architecture](./event-driven-architecture.mdx)) |
 | **Activity tracking** | Clicks, page views and searches from millions of users |
 | **Collecting logs and metrics** | Thousands of servers send logs to one place |
 | **Stream processing** | Count ad clicks per minute as they happen ([Batch vs Stream](../advanced-components/batch-vs-stream.mdx)) |

@@ -38,10 +38,10 @@ Two words to know:
 
 An image is described in a `Dockerfile`:
 
-```bash
+```dockerfile
 # Dockerfile for a small Node.js service
 # Start from a small image that already has Node.js
-FROM node:22-alpine
+FROM node:26-alpine
 WORKDIR /app
 # Install libraries, then copy the app code
 COPY package*.json ./
@@ -86,8 +86,12 @@ flowchart TB
 **It scales.** One command tells Kubernetes to keep CPU around 70%, with 3 to 20 pods:
 
 ```bash
-kubectl autoscale deployment orders --cpu-percent=70 --min=3 --max=20
+kubectl autoscale deployment orders --cpu=70% --min=3 --max=20
 ```
+
+(Before kubectl 1.34, the flag was `--cpu-percent=70`.)
+
+The 70% is a share of each pod's **CPU request**: the amount of CPU the pod asks for in its settings. So the HPA only works when the pods have CPU requests set.
 
 ## In the real world
 
@@ -105,5 +109,5 @@ You rarely draw this, but one sentence shows you know how services run:
   - **CI:** build and test every change automatically. **CD:** always ready to deploy, or deployed automatically.
   - **Docker image** = the packed box. **Container** = a running copy of it.
   - Kubernetes: **pod** (running container), **deployment** (keeps N pods), **service** (stable address + load balancing).
-  - **HPA** adds and removes pods with load. Crashed pods are **replaced automatically**.
+  - **HPA** adds and removes pods with load. For CPU, the pods need **CPU requests** set. Crashed pods are **replaced automatically**.
 </Callout>

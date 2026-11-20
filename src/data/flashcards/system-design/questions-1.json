@@ -35,7 +35,7 @@
       "id": "questions/url-shortener-6",
       "lesson": "questions/url-shortener",
       "q": "In a URL shortener, what are the two fixes for a custom alias taking a future counter code?",
-      "a": "(1) The insert fails on a taken code (the primary key does this), and we skip to the next number. (2) Keep aliases in their own space: aliases have 8 or more characters, counter codes at most 7."
+      "a": "(1) The insert fails on a taken code (the primary key does this), and we skip to the next number. (2) Keep aliases in their own space: 8 or more characters, or a `-` (not a base62 character). Counter codes have at most 7 base62 characters."
     },
     {
       "id": "questions/url-shortener-7",
@@ -191,7 +191,7 @@
       "id": "questions/notification-service-5",
       "lesson": "questions/notification-service",
       "q": "In a notification service, what if we crash after saving the delivery rows but before putting them on the queue?",
-      "a": "This is a **dual write**. A **scheduler** job runs every minute, finds deliveries that are due but still not on the queue, and puts them there. The database is the source of truth: the outbox idea."
+      "a": "This is a **dual write**. Each delivery row has an `enqueued_at`, empty until it is on the queue. A **scheduler** runs every minute, finds due deliveries with `enqueued_at IS NULL`, and queues them. The database is the source of truth: the outbox idea."
     },
     {
       "id": "questions/notification-service-6",
@@ -246,6 +246,24 @@
       "lesson": "questions/notification-service",
       "q": "In a notification service, the SMS provider is down for an hour. What happens?",
       "a": "Messages wait in the queue, so nothing is lost. A **circuit breaker** stops workers calling the broken provider. Better: switch to a second SMS provider, or fall back to email for login codes."
+    },
+    {
+      "id": "questions/notification-service-15",
+      "lesson": "questions/notification-service",
+      "q": "In a notification service, why is there no `priority` field in `POST /notifications`?",
+      "a": "The service sets the priority from the type: login codes are high, marketing is low. Otherwise a caller could mark its own messages high and push them to the front of the line."
+    },
+    {
+      "id": "questions/notification-service-16",
+      "lesson": "questions/notification-service",
+      "q": "In a notification service, how does the webhook receiver handle provider callbacks safely?",
+      "a": "It **checks the signature**, skips event IDs it has already handled, and changes status only with a conditional update. A `delivered` that arrives before the worker's `sent` is kept, because the worker's update needs a row that is still `sending`."
+    },
+    {
+      "id": "questions/notification-service-17",
+      "lesson": "questions/notification-service",
+      "q": "In a notification service, how do you find out that a device token is dead?",
+      "a": "APNs and FCM don't tell you on their own. The answer to your **next** push says so: APNs answers `410` with the reason `Unregistered`, and FCM answers `UNREGISTERED`. Then delete the token."
     },
     {
       "id": "questions/whatsapp-1",
@@ -311,7 +329,7 @@
       "id": "questions/whatsapp-11",
       "lesson": "questions/whatsapp",
       "q": "In Design WhatsApp, how do you stop a resent message from being saved twice?",
-      "a": "If the phone gets no `ack`, it keeps the message and sends it again later with the **same** `clientMsgId`. The server sees the ID and saves the message only once."
+      "a": "A **dedupe table** keyed by `(sender, clientMsgId)` stores the `messageId` given out, added with Cassandra `IF NOT EXISTS`. A repeat gets the first ID back, is saved under that same ID (an overwrite, not a new row), and gets the same `ack`."
     },
     {
       "id": "questions/whatsapp-12",
@@ -323,13 +341,25 @@
       "id": "questions/whatsapp-13",
       "lesson": "questions/whatsapp",
       "q": "In Design WhatsApp, how do you keep messages in order?",
-      "a": "The **server** decides the order, because phone clocks can be wrong. Each message gets an ID that grows over time, like a Snowflake ID, and every phone sorts the chat by this ID."
+      "a": "The **server** decides, because phone clocks can be wrong. Each message gets a time-ordered ID, like a Snowflake ID (time, machine number, counter), and phones sort by it. Server clocks differ by a few ms, so strict order needs a per-chat sequence number."
     },
     {
       "id": "questions/whatsapp-14",
       "lesson": "questions/whatsapp",
       "q": "In Design WhatsApp, how do you store billions of messages?",
       "a": "In a wide-column database like **Cassandra**, with `chatId` as the partition key. All messages of a chat sit together, sorted by message ID, so \"newest 50 messages of chat 9\" is one fast read."
+    },
+    {
+      "id": "questions/whatsapp-15",
+      "lesson": "questions/whatsapp",
+      "q": "In Design WhatsApp, with Pub/Sub routing, who decides to send a push notification to an offline user?",
+      "a": "The sender's chat server checks the user's **presence key** in Redis, like `online:bob`, kept alive by heartbeats with a 60-second expiry. If the key is missing, Bob is offline, so it calls the Push Service. The message is in his inbox either way."
+    },
+    {
+      "id": "questions/whatsapp-16",
+      "lesson": "questions/whatsapp",
+      "q": "In Design WhatsApp, why not resend every inbox message that has no receipt after 30 seconds?",
+      "a": "That means scanning every online user's inbox: 300 million ÷ 30 s = **10 million reads per second**. Instead, each chat server resends from its own in-memory list of pushed messages. A message that never reached the server waits in the inbox for the next reconnect."
     },
     {
       "id": "questions/news-feed-1",
@@ -389,7 +419,7 @@
       "id": "questions/news-feed-10",
       "lesson": "questions/news-feed",
       "q": "In a news feed, what is hydration?",
-      "a": "Turning post IDs into full posts: fetch the details of the chosen 20 from the posts cache in **one** batch call (Redis `MGET`), plus author names and like counts. Deleted posts are skipped."
+      "a": "Turning post IDs into full posts: fetch the chosen 20 from the posts cache in one batch, plus author names and like counts. Use a **pipeline** of `GET`s grouped by server, because `MGET` fails with `CROSSSLOT` in a Redis Cluster. Deleted posts are skipped."
     },
     {
       "id": "questions/news-feed-11",
@@ -408,6 +438,18 @@
       "lesson": "questions/news-feed",
       "q": "In a news feed, a celebrity's latest posts become a hot key. How do you fix it?",
       "a": "A hot key is one cache key that gets a huge share of all traffic. Keep copies of it on several cache servers, or in each Feed Service's own memory for a few seconds."
+    },
+    {
+      "id": "questions/news-feed-14",
+      "lesson": "questions/news-feed",
+      "q": "In a news feed, how much memory do 500-item Redis sorted-set feeds for 200 million users take?",
+      "a": "Over 128 items, a sorted set switches to a skiplist at roughly 100 bytes per item: about **10 TB**. Raise `zset-max-listpack-entries` to 512 to keep the compact listpack format: roughly 2 to 3 TB."
+    },
+    {
+      "id": "questions/news-feed-15",
+      "lesson": "questions/news-feed",
+      "q": "In a news feed, why can a \"less than the cursor's time\" page skip posts?",
+      "a": "Two posts can share the same millisecond. If a page ends on one of them, \"less than\" skips the other forever. Start **at** the cursor's time, and skip everything up to and including the cursor post."
     },
     {
       "id": "questions/web-crawler-1",
@@ -455,7 +497,7 @@
       "id": "questions/web-crawler-8",
       "lesson": "questions/web-crawler",
       "q": "In a web crawler, how do you avoid storing the same page twice under different URLs?",
-      "a": "Right after the download, **before** saving, the worker adds a **hash** of the page text to a set in one \"add if new\" step (like Redis `SADD`). If the hash was already there, it doesn't save or parse the page."
+      "a": "Check a **hash** of the page text against a set of seen hashes. If it is new, save the page in S3 **under its hash**, hand it to the parser, and only then add the hash to the set (`SADD`). A crash before that just repeats harmless work."
     },
     {
       "id": "questions/web-crawler-9",
@@ -492,6 +534,18 @@
       "lesson": "questions/web-crawler",
       "q": "In a web crawler, why does each worker keep its own DNS cache?",
       "a": "Every download needs an IP address. Asking DNS 23,000 times a second is slow and can overload the DNS servers."
+    },
+    {
+      "id": "questions/web-crawler-15",
+      "lesson": "questions/web-crawler",
+      "q": "In a web crawler, why mark a page hash or a URL as \"seen\" only after it is saved?",
+      "a": "If you mark it first and crash before the save, the retry sees \"already seen\" and skips it, so that page or URL is lost forever. Marking last means a crash just repeats harmless work, because pages are saved under their hash."
+    },
+    {
+      "id": "questions/web-crawler-16",
+      "lesson": "questions/web-crawler",
+      "q": "In a web crawler, how much memory does the set of content hashes need?",
+      "a": "Up to 10 billion 16-byte hashes. With Redis's overhead, about 70 bytes each = about **700 GB**: a Redis Cluster of about a dozen 64 GB servers. A Bloom filter would need about 12 GB, but would wrongly skip about 1% of new pages."
     },
     {
       "id": "questions/search-autocomplete-1",
@@ -545,7 +599,7 @@
       "id": "questions/search-autocomplete-9",
       "lesson": "questions/search-autocomplete",
       "q": "In search autocomplete, how do new trends show up within minutes?",
-      "a": "Keep the daily rebuild of the main trie, and add a small **trending layer**: a stream job counts searches in the last hour and finds queries that suddenly jumped. The service mixes them into its answers."
+      "a": "Keep the daily rebuild of the main trie, and add a small **trending layer**: a stream job counts searches in the last hour and finds queries that suddenly jumped. Each server loads that list into memory every minute and mixes it in."
     },
     {
       "id": "questions/search-autocomplete-10",
@@ -610,8 +664,8 @@
     {
       "id": "questions/job-scheduler-7",
       "lesson": "questions/job-scheduler",
-      "q": "In a job scheduler, what if the Job Service crashes after saving a `queued` run but before the timer queue has it?",
-      "a": "The Scheduler also picks up runs still `queued` 10 minutes after their due time, and queues them again. If one was only slow, not lost, it may run twice, which idempotent tasks make safe."
+      "q": "In a job scheduler, what if a crash happens after a run is saved as `queued` but before the timer queue has it?",
+      "a": "Always save first, then queue. The Scheduler also picks up runs still `queued` 10 minutes after their due time, and queues them again. It sets `queuedAt` each time, so a stuck run is re-queued at most every 10 minutes. Idempotent tasks make a rare double run safe."
     },
     {
       "id": "questions/job-scheduler-8",
@@ -654,6 +708,24 @@
       "lesson": "questions/job-scheduler",
       "q": "In a job scheduler, why can't a job run exactly once, and what do you build instead?",
       "a": "The network can always fail between \"the work is done\" and \"I told the queue\". So build **at-least-once delivery + idempotent tasks**: the job takes effect once."
+    },
+    {
+      "id": "questions/job-scheduler-15",
+      "lesson": "questions/job-scheduler",
+      "q": "In a job scheduler that loads due runs every 5 minutes, how does an every-minute cron job stay on time?",
+      "a": "When the Scheduler loads a cron run, it adds the next run. If that is due within 5 minutes, it is saved as `queued` and goes straight to the timer queue, and so on. The first run due later than that is saved as `scheduled` for the next load."
+    },
+    {
+      "id": "questions/job-scheduler-16",
+      "lesson": "questions/job-scheduler",
+      "q": "In a job scheduler using a Redis sorted set as the timer queue, how do many pollers avoid handing out the same run?",
+      "a": "Each poller **claims** a run with `ZREM` before it hands the run to a worker. `ZREM` returns 1 only to the poller that removed it. Every other poller gets 0 and skips that run."
+    },
+    {
+      "id": "questions/job-scheduler-17",
+      "lesson": "questions/job-scheduler",
+      "q": "In a job scheduler, why should the Jobs DB fail over to a synchronous standby?",
+      "a": "With async replicas, a failover can lose the last jobs that already got `201 Created`. A **synchronous standby** (like Amazon RDS Multi-AZ) has every write before the primary says \"done\", so no accepted job is lost."
     },
     {
       "id": "questions/e-commerce-1",
@@ -725,13 +797,25 @@
       "id": "questions/e-commerce-12",
       "lesson": "questions/e-commerce",
       "q": "In an e-commerce platform, how do you handle a flash sale where 100,000 people want 1,000 items?",
-      "a": "Put a **Redis counter** like `stock:ps5` in front, with a Lua script that takes one only if it is above 0. Only winners go on to the database. When a hold is released, give it back with `INCR`."
+      "a": "Put a **Redis counter** like `stock:ps5` in front, with a Lua script that takes one only if it is above 0. Only winners go on to the database. When a hold is released, or the database transaction rolls back, give it back with `INCR`."
     },
     {
       "id": "questions/e-commerce-13",
       "lesson": "questions/e-commerce",
       "q": "In an e-commerce platform, why can the \"Only 3 left!\" on a product page be a little wrong?",
       "a": "It comes from the cache. That is fine, because the **real** check happens at checkout with the atomic update."
+    },
+    {
+      "id": "questions/e-commerce-14",
+      "lesson": "questions/e-commerce",
+      "q": "In an e-commerce platform, what two rules keep `POST /checkout` safe?",
+      "a": "The client **never sends prices**: the server reads them itself, or anyone could buy a TV for 1 dollar. And the client sends an **Idempotency-Key**, so a double-click or a retry returns the first result instead of placing a second order."
+    },
+    {
+      "id": "questions/e-commerce-15",
+      "lesson": "questions/e-commerce",
+      "q": "In an e-commerce platform, how do you stop a fake \"payment succeeded\" webhook?",
+      "a": "Anyone can call the webhook URL. **Check its signature** (made with a secret only the provider and we know), and skip event IDs already handled. Then the conditional update only moves the order forward."
     },
     {
       "id": "questions/ticket-booking-1",
@@ -773,7 +857,7 @@
       "id": "questions/ticket-booking-7",
       "lesson": "questions/ticket-booking",
       "q": "In a ticket booking system, why do hold and confirm both take an `Idempotency-Key`?",
-      "a": "The key is saved with the booking, in the same transaction as the hold, so a retry returns the first booking. Without it, a retried hold would say Alice's own seat is taken, and a retried confirm could charge twice."
+      "a": "The hold transaction **first** inserts the key into a table with a unique index, then updates the seats. A retry or double-click waits, finds the key, and returns the first booking. Without it, a retried hold would say Alice's own seat is taken, and a retried confirm could charge twice."
     },
     {
       "id": "questions/ticket-booking-8",
@@ -785,7 +869,7 @@
       "id": "questions/ticket-booking-9",
       "lesson": "questions/ticket-booking",
       "q": "In a ticket booking system, payment finishes just after the hold ran out and someone else took the seat. What happens?",
-      "a": "The final update checks `reserved_by = 'alice' AND reserved_until > NOW()`, so it changes 0 rows, and we **refund** Alice right away. To make this rare, show a 9-minute timer while the real hold is 10 minutes."
+      "a": "The final update checks `status = 'reserved' AND booking_id = 'bk_9'`. If nobody took the seat, it still works. If Bob took it, 0 rows change, and we **refund** Alice right away. To make this rare, show a 9-minute timer while the real hold is 10 minutes."
     },
     {
       "id": "questions/ticket-booking-10",
@@ -814,8 +898,26 @@
     {
       "id": "questions/ticket-booking-14",
       "lesson": "questions/ticket-booking",
-      "q": "In a ticket booking system, how does the Booking Service know a user was let in by the waiting room?",
-      "a": "Each admitted user gets a **signed token**, valid for 15 minutes. It is made with a secret key, so nobody can fake one. The Booking Service rejects any request without a valid token."
+      "q": "In a ticket booking system, how does the system know a user was let in by the waiting room?",
+      "a": "Each admitted user gets a **signed token**, valid for 15 minutes. It is made with a secret key, so nobody can fake one. The API Gateway rejects any booking request without a valid token."
+    },
+    {
+      "id": "questions/ticket-booking-15",
+      "lesson": "questions/ticket-booking",
+      "q": "In a ticket booking waiting room, how do 10 million users see their place without overloading Redis?",
+      "a": "Look up each user's place **once** with `ZRANK`, and keep it in a signed cookie. Share one \"admitted so far\" number, cached on the CDN. Position = my place − admitted so far. Polling `ZRANK` would be about 2 million calls per second on one key."
+    },
+    {
+      "id": "questions/ticket-booking-16",
+      "lesson": "questions/ticket-booking",
+      "q": "In a ticket booking system, what idempotency key do you send to the payment provider?",
+      "a": "One per **payment attempt**, like `bk_9-1`, so a retry of that attempt never charges twice. The bare booking ID would block a retry with a new card, because providers like Stripe reject the same key with different details."
+    },
+    {
+      "id": "questions/ticket-booking-17",
+      "lesson": "questions/ticket-booking",
+      "q": "In a ticket booking system, what must the payment webhook do before it books the seats?",
+      "a": "**Check the signature** and skip event IDs already handled, so nobody can fake \"payment succeeded\". Then run the final update, which moves a seat from `reserved` to `booked` only if it is still held for that booking."
     }
   ]
 }

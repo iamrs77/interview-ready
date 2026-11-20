@@ -37,9 +37,11 @@ ZADD leaderboard 1800 "bob"
 ZRANGE leaderboard 0 9 REV WITHSCORES   # top 10 players, highest first
 
 # Lock: set only if the key does not exist (NX), expire after 10 seconds.
-# The value is a random token, so a server only ever deletes its own lock.
+# The value is a random token, so a server can tell its own lock apart.
 SET lock:driver:42 7f3a9c NX EX 10
 ```
+
+To release the lock, run a small Lua script that deletes the key **only if it still holds your token**, in one step (the code is in [Cache Problems](./cache-problems.mdx)). A plain `DEL`, or a `GET` and then a `DEL`, can delete a lock that another server took after yours expired.
 
 ## Things to know
 

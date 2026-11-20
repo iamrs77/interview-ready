@@ -88,6 +88,8 @@ data: Out for delivery
 
 **Good for:** notifications, live scores, stock prices, and AI answers that appear word by word.
 
+**Watch out:** over HTTP/1.1, a browser opens only about 6 connections per site, and each SSE stream keeps one busy. With many tabs open, the site can run out. Over HTTP/2, many streams share one connection, so this limit goes away.
+
 ## WebSockets
 
 A WebSocket starts as a normal HTTP request with the header `Upgrade: websocket`. Then the connection turns into a **two-way channel that stays open**. Both sides can send messages at any time, with very little extra data per message.
@@ -160,7 +162,7 @@ flowchart TB
 
 Two more things to plan for:
 
-- The **load balancer** must support long-lived connections.
+- The **load balancer** must support long-lived connections. Load balancers and proxies also close a connection that stays quiet too long (often after about 60 seconds). So send a tiny **heartbeat** message (a ping) every 30 seconds or so. It keeps the connection open and shows quickly when the other side is gone.
 - When a server restarts, its users get disconnected. Clients must **reconnect automatically**.
 
 See [Message Queues and Pub/Sub](../messaging/message-queues-pub-sub.mdx) and [Design WhatsApp](../questions/whatsapp.mdx) for more.
@@ -169,7 +171,7 @@ See [Message Queues and Pub/Sub](../messaging/message-queues-pub-sub.mdx) and [D
 
 **Slack uses WebSockets.** When you open Slack, the app keeps a WebSocket open to Slack's servers, and new messages arrive through it instantly.
 
-**ChatGPT's answers stream over SSE.** The text appears word by word because the server sends each new piece as an event on an open SSE connection. OpenAI's API streams answers the same way.
+**AI answers stream over SSE.** When you ask OpenAI's API to stream an answer, it sends it over SSE: each new piece of text arrives as an event on the open connection, so the answer appears word by word. Many AI chat apps show their answers this way.
 
 **Polling is still everywhere.** Many apps simply ask every few seconds for things that can wait a little, like the status of a payment or a report.
 

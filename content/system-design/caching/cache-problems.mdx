@@ -67,7 +67,7 @@ async function getWithLock(key, loadFromDb, triesLeft = 20) {
   if (gotLock) {
     try {
       const value = (await loadFromDb()) ?? null;
-      await redis.set(key, JSON.stringify(value), 'EX', 600);
+      await redis.set(key, JSON.stringify(value), 'EX', value ? 600 : 60);
       return value;
     } finally {
       await redis.eval(RELEASE, 1, `lock:${key}`, token);
@@ -75,7 +75,8 @@ async function getWithLock(key, loadFromDb, triesLeft = 20) {
   }
 
   // Someone else is loading it. Wait a moment, then check the cache again.
-  if (triesLeft === 0) throw new Error(`Timed out waiting for ${key}`);
+  // After about 1 second, stop waiting and read the database directly.
+  if (triesLeft === 0) return (await loadFromDb()) ?? null;
   await sleep(50);
   return getWithLock(key, loadFromDb, triesLeft - 1);
 }
@@ -85,7 +86,7 @@ Three details make it safe:
 
 - The lock's value is a **random token**. On release, we delete the lock only if it still holds our token. If our lock expired and another request took it, we don't delete theirs.
 - `finally` releases the lock even if the database call fails. Otherwise everyone would wait 10 seconds for it to expire.
-- The waiters retry only 20 times (about 1 second), then give up with an error. They never wait forever.
+- The waiters retry only 20 times (about 1 second). If the reload is still not done (likely when the database is overloaded), each waiter reads the database itself, so users get an answer, not an error. They never wait forever. For the hottest keys, serving the old value (fix 3) is gentler on the database.
 
 Now 1,000 misses turn into **1 database query** and 999 short waits. (Locks are covered in depth in [Distributed Locking](../distributed-systems/distributed-locking.mdx).)
 

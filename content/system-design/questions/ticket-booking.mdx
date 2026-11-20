@@ -145,9 +145,9 @@ Alice and Bob both click **seat A12** at 10:00:00. We must give it to one of the
 </Callout>
 
 ```sql
--- Hold seat A12 at event ev_42 for Alice for 10 minutes.
+-- Hold seat A12 at event ev_42 for Alice's booking bk_9, for 10 minutes.
 UPDATE tickets
-SET status = 'reserved', reserved_by = 'alice', reserved_until = NOW() + INTERVAL '10 minutes'
+SET status = 'reserved', booking_id = 'bk_9', reserved_until = NOW() + INTERVAL '10 minutes'
 WHERE event_id = 'ev_42' AND ticket_id = 'A12'
   AND (status = 'available'
        OR (status = 'reserved' AND reserved_until < NOW()));
@@ -172,21 +172,21 @@ sequenceDiagram
   S-->>B: Sorry, seat just taken
 ```
 
-**A retry must not fail on Alice's own hold.** Say Alice's hold worked, but the answer got lost, and her app sends the hold again. Now A12 is `reserved` by Alice, so the update changes 0 rows, and she would be told "someone else has it". The `Idempotency-Key` stops this. The key is saved with the booking, **in the same transaction** as the hold. A retry with the same key finds it and returns the first booking (`bk_9`) instead of running the update again.
+**A retry must not fail on Alice's own hold.** Say Alice's hold worked, but the answer got lost, and her app sends the hold again. Now A12 is `reserved` by Alice, so the update changes 0 rows, and she would be told "someone else has it". The `Idempotency-Key` stops this. The **first** step of the hold transaction inserts the key, with the new booking ID, into a table with a **unique** index. Only then does it update the seats. A retry, or a second click at the same moment, can't insert the same key. It waits for the first transaction to finish, then finds the key and returns the first booking (`bk_9`) instead of running the update again. If the key came second, a double-click could reach the seat row first and be told "taken".
 
 **Many seats at once:** run all the updates in **one transaction**, always in the same order, sorted by seat (`ticket_id`). If any seat fails, roll back. Alice gets all 4 seats she picked, or none. Why sorted? Say Alice wants A12 and A13, and Bob wants A13 and A12. If Alice locks A12 first and Bob locks A13 first, each then waits for the other's row. This is a **deadlock**: the database notices it and cancels one of the two. When everyone goes in the same order, both start with A12, and one simply waits for the other. See [Locks and Deadlocks](../databases/locking.mdx).
 
 **When Alice pays**, one more check makes it final:
 
 ```sql
-UPDATE tickets SET status = 'booked', booking_id = 'bk_9'
+UPDATE tickets SET status = 'booked'
 WHERE event_id = 'ev_42' AND ticket_id = 'A12'
-  AND reserved_by = 'alice' AND reserved_until > NOW();
+  AND status = 'reserved' AND booking_id = 'bk_9';
 ```
 
-**What if her payment finishes just after the hold ran out, and Bob already took the seat?** The update above changes 0 rows, so we **refund** Alice right away. To make this rare, show the user a 9-minute timer while the real hold is 10 minutes.
+**What if her payment finishes just after the hold ran out?** If nobody took the seat in the meantime, it is still reserved for `bk_9`, so the update works and Alice gets her seat. If Bob already took it, its `booking_id` is now Bob's. The update changes 0 rows, and we **refund** Alice right away. To make this rare, show the user a 9-minute timer while the real hold is 10 minutes.
 
-A background job can still reset old `reserved` rows to `available` now and then, but only to keep the table tidy. Correctness never depends on it.
+A background job can still reset long-expired `reserved` rows (say, an hour old) to `available` now and then, but only to keep the table tidy. Correctness never depends on it.
 
 ### 2. How do we show events and seat maps fast?
 
@@ -219,28 +219,35 @@ The seat map is allowed to be a little behind. The **truth** is the atomic updat
 ```mermaid
 sequenceDiagram
   participant F as Fan
+  participant C as CDN
   participant W as Waiting Room
   participant R as Line (Redis)
   participant A as Admitter
+  participant G as API Gateway
   participant B as Booking Service
   F->>W: Join the line
-  W->>R: Add fan to the line
-  W-->>F: You are number 48,213
-  A->>R: Take the next 2,000
-  A->>W: Admit these fans
-  W-->>F: Your turn! Here is a token
-  F->>B: Hold seats, with token
+  W->>R: Add fan, look up the place once
+  W-->>F: Signed cookie: you are number 48,213
+  loop every few seconds
+    F->>C: How many are admitted so far?
+    C-->>F: 46,213, so 2,000 people are ahead of you
+  end
+  A->>R: Admitted so far + 2,000
+  F->>W: My turn? (with cookie)
+  W-->>F: Yes! Here is a signed token
+  F->>G: Hold seats, with token
+  G->>B: Token OK, pass it on
   B-->>F: Seats held for 10 minutes
 ```
 
 How it works:
 
 1. Fans who arrive **before** the sale wait on a simple waiting page. At 10:00, they all get a **random** place in line. So arriving at 9:59 or at 9:30 gives the same chance, and bots gain nothing by being fast. People who arrive after 10:00 join at the back.
-2. The line is a **Redis sorted set**: `ZADD line:ev_42 <place> user-42`. `ZRANK` gives a user's position.
-3. The **Admitter** lets in the next 2,000 users every minute (`ZPOPMIN line:ev_42 2000`). It speeds up or slows down based on how fast seats are selling and how busy the Booking Service is.
-4. Each admitted user gets a **signed token** that is valid for 15 minutes. "Signed" means it is made with a secret key, so nobody can fake one. The Booking Service rejects any request without a valid token.
-5. Waiting users see their position, updated every few seconds.
-6. When the event sells out, **everyone still in line is told right away**, so they don't wait for nothing.
+2. The line is a **Redis sorted set**: `ZADD line:ev_42 <place> user-42`. `ZRANK` gives a user's place. We look it up **once** per user, and keep it in the user's **signed cookie**. Why only once? 10 million users asking every 5 seconds would be 2 million `ZRANK` calls per second, all on one key. One key lives on one Redis server, which handles roughly 100,000 commands per second.
+3. The **Admitter** does not remove anyone from the line. Every minute it raises one number, "admitted so far", by 2,000 (`INCRBY admitted:ev_42 2000`). It speeds up or slows down based on how fast seats are selling and how busy the Booking Service is. Only one Admitter runs at a time, or fans would be let in twice as fast. If it crashes, nobody loses their place: the number is still in Redis, and a standby Admitter carries on from it.
+4. Waiting pages ask for "admitted so far" every few seconds. It is one small answer for everyone, so the CDN caches it for a few seconds. Each page works out its own position: **my place − admitted so far**.
+5. When my place is within "admitted so far", the page asks the Waiting Room for a **signed token**, valid for 15 minutes. "Signed" means it is made with a secret key, so nobody can fake one (or fake a better place in the cookie). The API Gateway rejects any booking request without a valid token.
+6. When the event sells out, the same cached answer says "sold out", so **everyone still in line is told right away**, and they don't wait for nothing.
 
 The waiting room is a tiny, separate system: a static page and a small Redis. It can take millions of users because it does almost nothing. The real booking system behind it only ever sees a steady, safe flow of users. This idea of slowing input to match what the system can handle is called [backpressure](../reliability-security/backpressure.mdx).
 
@@ -249,9 +256,11 @@ The waiting room is a tiny, separate system: a static page and a small Redis. It
 ```mermaid
 flowchart TB
   Client(["Browser / App"]):::client
-  Client -->|"static pages"| CDN["CDN"]:::storage
-  Client --> WR["Waiting Room"]:::service
-  WR --> Line[("Line + tokens<br/>Redis")]:::cache
+  Client -->|"static pages,<br/>admitted so far"| CDN["CDN"]:::storage
+  Client -->|"join, get token"| WR["Waiting Room"]:::service
+  CDN -->|"every few seconds"| WR
+  WR --> Line[("Line + admitted so far<br/>Redis")]:::cache
+  Admitter["Admitter<br/>(one at a time)"]:::service -->|"+2,000 a minute"| Line
   Client --> GW["API Gateway<br/>(checks entry token)"]:::lb
   GW --> Search["Search Service"]:::service
   GW --> Event["Event Service"]:::service
@@ -261,7 +270,7 @@ flowchart TB
   Event --> DB[("Events + Tickets DB<br/>status, reserved_until")]:::db
   Booking --> DB
   Booking --> Pay["Payment Provider"]:::external
-  Pay -.->|"webhook"| Booking
+  Pay -.->|"signed webhook"| Booking
   DB -->|"changes"| Kafka["Kafka"]:::queue
   Kafka --> Indexer["Search Indexer"]:::service
   Indexer --> ES
@@ -299,7 +308,9 @@ There are no seats to pick, just a count. Use a counter with a check: `UPDATE ev
 </Accordion>
 <Accordion title="Payment succeeds but our server crashes before marking the seat booked. Then what?">
 
-The payment provider sends a **webhook** ("payment for `bk_9` succeeded"). When it arrives, we run the final update. If the hold is still Alice's, the seat becomes booked. If not, we refund. Pass the booking ID as an [idempotency key](../messaging/idempotency.mdx) when charging, so a retry never charges twice.
+The payment provider sends a **webhook** ("payment for `bk_9` succeeded"). Anyone can call that URL, so first we **check its signature** and **skip any event ID we have already handled**. Then we run the final update. It only moves the seat forward, from `reserved` to `booked`. If the seat is still held for `bk_9`, it becomes booked. If not, we refund. See [Design a Payment System](./payment-system.mdx).
+
+When charging, pass an [idempotency key](../messaging/idempotency.mdx) for each **payment attempt**, like `bk_9-1`, so a retry of that attempt never charges twice. Don't use the bare booking ID: if the card is declined and Alice tries another card, providers like Stripe reject the same key with different details. The new card is attempt `bk_9-2`.
 
 </Accordion>
 </Accordions>
@@ -327,7 +338,7 @@ The payment provider sends a **webhook** ("payment for `bk_9` succeeded"). When 
 <Tab value="Staff">
 
 - Everything from senior, but faster.
-- Waiting room details: random order, admission rate tied to system load, signed tokens.
+- Waiting room details: random order, admission rate tied to system load, signed tokens, and one cached "admitted so far" number instead of millions of position lookups.
 - Fairness and bots, beyond pure technology.
 - Sharding by event, and why hot events need the waiting room even after sharding.
 
@@ -338,9 +349,12 @@ The payment provider sends a **webhook** ("payment for `bk_9` succeeded"). When 
   - Booking = **hold** (a few minutes) + **pay**.
   - **No double booking:** one atomic update, `WHERE status = 'available' OR the hold has expired`. 0 rows = taken.
   - Hold many seats in **one transaction, sorted by seat**, so two buyers can't deadlock.
-  - Hold and confirm both take an **Idempotency-Key**, so a retry never fails on your own hold or charges twice.
+  - Hold and confirm both take an **Idempotency-Key**, inserted first, so a retry never fails on your own hold or
+    charges twice.
+  - Confirm with `status = 'reserved' AND booking_id = 'bk_9'`. Webhooks are signed and de-duplicated by event ID.
   - **Expired holds count as free**, so correctness never depends on a cleanup job.
   - Never hold a database lock while a human types a card number.
   - Seat maps can be a second old. **The truth is the atomic update.**
-  - **Huge rush → virtual waiting room:** random places, steady admission, signed entry tokens.
+  - **Huge rush → virtual waiting room:** random places, steady admission, signed entry tokens. Look up each place
+    once (signed cookie), and share one "admitted so far" number through the CDN.
 </Callout>

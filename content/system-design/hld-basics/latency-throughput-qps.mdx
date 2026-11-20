@@ -107,21 +107,25 @@ More on percentiles: [Latency Percentiles](../production/latency-percentiles.mdx
 
 ## How latency and throughput affect each other
 
-**Slower requests mean fewer requests per second.** A simple rule, called **Little's Law**, links them:
+A simple rule, called **Little's Law**, links them:
 
 **requests in progress = throughput × latency**
 
-Example: a server can work on 100 requests at the same time. Each one takes 0.1 seconds. So it can finish 100 ÷ 0.1 = **1,000 requests per second**. If the database gets slow and each request now takes 0.2 seconds, the same server can only finish **500 per second**. Latency doubled, throughput halved.
+**If a server can only work on a fixed number of requests at once, slower requests mean fewer requests per second.** Example: a server can work on 100 requests at the same time. Each one takes 0.1 seconds. So it can finish 100 ÷ 0.1 = **1,000 requests per second**. If the database gets slow and each request now takes 0.2 seconds, the same server can only finish **500 per second**. Latency doubled, throughput halved.
+
+If instead the traffic stays the same, slower requests mean **more requests in progress** at once, so threads and connections can run out (see [Queueing Basics](./queueing-basics.mdx)).
 
 **Busy servers get slow.** It also works the other way. Think of a supermarket. With a few shoppers, you walk straight to a free checkout. When every checkout is busy, a line forms, and each new shopper waits longer and longer.
 
 | How busy the server is | What happens to latency |
 | --- | --- |
-| Under about 50% | Fast. Requests rarely wait |
+| Under about 50% | Little waiting. Latency stays low |
 | About 70 to 80% | Some waiting. Latency starts to rise |
 | Over 90% | Long lines. Latency shoots up, and timeouts start |
 
-That is why teams add servers **before** they reach 100%, not after.
+These numbers are rough. A server with many workers (threads or cores) sharing one line waits less than a single worker at the same busyness, but the shape is the same.
+
+That is why teams add servers **before** they reach 100%, not after. [Queueing Basics](./queueing-basics.mdx) shows the math behind this curve.
 
 Some choices trade one for the other:
 
