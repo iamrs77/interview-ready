@@ -1,0 +1,149 @@
+---
+title: "Transactions and ACID"
+description: "All steps succeed together, or none of them do."
+icon: ListChecks
+---
+
+## The idea
+
+Asha sends ₹500 to Ravi. For the bank, that is **two steps**:
+
+1. Take ₹500 from Asha's account.
+2. Add ₹500 to Ravi's account.
+
+What if the server crashes after step 1, but before step 2? Asha has lost ₹500, and Ravi never got it. The money has vanished.
+
+A **transaction** groups steps into **one unit**: either all of them happen, or none of them do. It is like a deal at a shop counter. You hand over the money, and they hand over the item. If either side backs out, everyone gets their own thing back. Nobody walks away with both.
+
+## What a transaction is
+
+In SQL, you wrap the steps in `BEGIN` and `COMMIT`:
+
+```sql
+BEGIN;
+UPDATE accounts SET balance = balance - 500 WHERE id = 1;  -- Asha
+UPDATE accounts SET balance = balance + 500 WHERE id = 2;  -- Ravi
+COMMIT;
+```
+
+Until `COMMIT`, the changes are not final, and other users don't see them. If anything goes wrong before `COMMIT`, every step is undone: by the database itself after a crash, or by your app calling `ROLLBACK` after an error.
+
+```mermaid
+sequenceDiagram
+  participant App as Bank App
+  participant DB as Database
+  App->>DB: BEGIN
+  App->>DB: Asha: balance - 500
+  DB-->>App: OK (not final yet)
+  Note over DB: Server crashes here
+  Note over DB: On restart: no COMMIT,<br/>so the change is undone
+  Note over DB: Asha still has her ₹500
+```
+
+## ACID, in simple words
+
+A database that supports proper transactions promises four things, known as **ACID**:
+
+| Letter | Name | Simple meaning | In the bank example |
+| --- | --- | --- | --- |
+| **A** | Atomicity | All or nothing | Either both accounts change, or neither does |
+| **C** | Consistency | The data always follows your rules | A balance can never go below zero, if you made that a rule |
+| **I** | Isolation | Transactions running at the same time act as if they ran **one at a time**. They don't see or trip over each other's half-done work | Nobody sees the moment when the money has left Asha but not reached Ravi |
+| **D** | Durability | Once it says "committed", it stays saved, even after a crash or power cut | After the app shows "Transfer done", the money can't un-move |
+
+A few notes:
+
+- **Consistency** here means your **rules** hold: `CHECK (balance >= 0)`, foreign keys, unique emails. It is **not** the same "C" as in the [CAP Theorem](../distributed-systems/cap-theorem.mdx), which is about every copy showing the newest data.
+- **Isolation** comes in levels: stronger is safer, weaker is faster. Only the strongest level fully gives "one at a time". See [Isolation Levels](./isolation-levels.mdx).
+- **Durability** works through a **write-ahead log (WAL)**. Before the database says "committed", it writes the change to a log file on disk. It is like a diary: write down what you are about to do, then do it. After a crash, the database reads the diary and finishes or undoes the work.
+
+## Commit and rollback
+
+- `COMMIT` makes all the changes final.
+- `ROLLBACK` throws all of them away. Your app calls it when something goes wrong.
+- The database also rolls back **by itself** if the server crashes or the app's connection drops.
+- A **failed statement** is different. The whole transaction is not undone for you:
+  - **PostgreSQL** marks the transaction as failed and refuses every later statement. Your app must send `ROLLBACK`.
+  - **MySQL** usually undoes only the failed statement. The rest of the transaction stays open, so your app must decide to roll back.
+
+Here is placing an order in our shop. Taking stock and creating the order must happen together:
+
+```sql
+BEGIN;
+
+-- Take one item from stock, only if there is one left
+UPDATE products SET stock = stock - 1
+WHERE id = 42 AND stock >= 1;
+-- If this changed 0 rows, the item is sold out: ROLLBACK
+
+INSERT INTO orders (user_id, total_cents, status) VALUES (7, 2999, 'pending')
+RETURNING id;  -- say it returns 1001
+
+INSERT INTO order_items (order_id, product_id, quantity, price_cents)
+VALUES (1001, 42, 1, 2999);
+
+COMMIT;
+```
+
+In app code, the pattern is always the same: begin, do the work, commit, and roll back on any error.
+
+```ts
+const client = await pool.connect();
+try {
+  await client.query('BEGIN');
+  const res = await client.query(
+    'UPDATE products SET stock = stock - 1 WHERE id = $1 AND stock >= 1',
+    [productId],
+  );
+  if (res.rowCount === 0) throw new Error('Sold out');
+  await client.query(
+    'INSERT INTO orders (user_id, total_cents, status) VALUES ($1, $2, $3)',
+    [userId, priceCents, 'pending'],
+  );
+  await client.query('COMMIT');
+} catch (err) {
+  await client.query('ROLLBACK');
+  throw err;
+} finally {
+  client.release(); // give the connection back to the pool
+}
+```
+
+## When you need transactions
+
+**Use one when several writes must stay together:**
+
+- Moving money between accounts.
+- Taking stock and creating an order.
+- Booking a seat and recording the payment.
+- Reading a value and then writing based on it, like "check the balance, then withdraw". This also needs the right [isolation level or a lock](./locking.mdx).
+
+**You don't need to add one for:**
+
+- A single insert or update. Each statement already runs as its own small transaction (this is called **autocommit**).
+- Logs, analytics and view counters, where losing or repeating one event doesn't matter much.
+
+**Keep transactions short.** While a transaction is open, it can hold locks that make other users wait. Never call a slow outside service, like a payment provider, in the middle of one.
+
+**One database only.** A transaction covers one database. When a flow touches several services, each with its own database, you need other tools: [Two-Phase Commit](../distributed-systems/distributed-transactions-2pc.mdx) or the [Saga Pattern](../distributed-systems/saga-pattern.mdx).
+
+## In the real world
+
+**NoSQL databases added transactions too.** MongoDB added multi-document ACID transactions in version 4.0 (2018). The same year, DynamoDB added transactions across several items. Apps kept needing "all or nothing", even in databases that started without it.
+
+**PostgreSQL waits for the disk by default.** With its default settings, PostgreSQL does not report a `COMMIT` as done until the change is safely written to its write-ahead log on disk. That is the "D" in ACID in practice.
+
+## In the interview
+
+Say what goes in one transaction, and what does not:
+
+> "Placing an order takes stock and creates the order in one database transaction, so we never sell an item we don't have. The call to the payment provider happens outside the transaction. If payment fails, a saga cancels the order and puts the stock back."
+
+<Callout title="Remember this" type="success">
+  - A **transaction** makes several steps **all or nothing**.
+  - **ACID:** Atomicity (all or nothing), Consistency (rules hold), Isolation (as if run one at a time), Durability (committed means saved).
+  - `COMMIT` makes it final. `ROLLBACK` undoes it. Crashes roll back on their own. After a failed statement, **your app** sends `ROLLBACK`.
+  - Durability comes from the **write-ahead log** on disk.
+  - Keep transactions **short**. No slow outside calls inside them.
+  - Across services, use a **saga** or **2PC**, not a database transaction.
+</Callout>

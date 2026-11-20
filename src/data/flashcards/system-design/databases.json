@@ -1,0 +1,839 @@
+{
+  "deck": "databases",
+  "cards": [
+    {
+      "id": "databases/sql-vs-nosql-1",
+      "lesson": "databases/sql-vs-nosql",
+      "q": "What is a SQL (relational) database?",
+      "a": "Data lives in **tables** of rows and fixed columns. The fixed shape is the **schema**. Tables point to each other with IDs, **joins** combine them, and you can ask any question."
+    },
+    {
+      "id": "databases/sql-vs-nosql-2",
+      "lesson": "databases/sql-vs-nosql",
+      "q": "What are the four main types of NoSQL databases?",
+      "a": "**Key-value** (Redis, DynamoDB), **document** (MongoDB), **wide-column** (Cassandra) and **graph** (Neo4j). Each is great at one kind of access."
+    },
+    {
+      "id": "databases/sql-vs-nosql-3",
+      "lesson": "databases/sql-vs-nosql",
+      "q": "What is a key-value store good at, and what can't it do?",
+      "a": "Extremely fast lookups by the exact key, like `cart:user:7`. Good for sessions, carts and caches. But you can't ask \"which carts contain product 42?\" without reading everything."
+    },
+    {
+      "id": "databases/sql-vs-nosql-4",
+      "lesson": "databases/sql-vs-nosql",
+      "q": "When does a document database fit well?",
+      "a": "When items have different fields and are read as a whole, like a product catalog: shoes have sizes, a TV has a screen size. Data used together is stored together."
+    },
+    {
+      "id": "databases/sql-vs-nosql-5",
+      "lesson": "databases/sql-vs-nosql",
+      "q": "How does a wide-column database store chat messages?",
+      "a": "Rows are grouped by a **partition key** (the chat ID) and sorted inside the group by a **clustering key** (time). \"Last 50 messages in chat 9\" reads one group, from one place on disk."
+    },
+    {
+      "id": "databases/sql-vs-nosql-6",
+      "lesson": "databases/sql-vs-nosql",
+      "q": "When would you pick a graph database?",
+      "a": "For questions with many hops across links, like \"friends of my friends who bought this product\". Data is nodes and edges. In SQL, these need many joins."
+    },
+    {
+      "id": "databases/sql-vs-nosql-7",
+      "lesson": "databases/sql-vs-nosql",
+      "q": "SQL vs NoSQL: how do they differ on joins and transactions?",
+      "a": "SQL has joins built in and strong transactions across many tables. NoSQL has few or no joins, so you copy data instead, and transactions are often limited to one item or one partition."
+    },
+    {
+      "id": "databases/sql-vs-nosql-8",
+      "lesson": "databases/sql-vs-nosql",
+      "q": "What is an access pattern, and why pick a database by it?",
+      "a": "How the app reads and writes the data: by which key, how often, and how much at once. The line is blurry today (PostgreSQL stores JSON with `JSONB`, MongoDB has transactions), so pick by access pattern, not by label."
+    },
+    {
+      "id": "databases/sql-vs-nosql-9",
+      "lesson": "databases/sql-vs-nosql",
+      "q": "Which database should you start with by default, and when should you switch?",
+      "a": "**PostgreSQL**: safe, flexible, and it scales far with replicas and sharding. Move to NoSQL only with a named reason: write volume one machine can't take, simple key lookups at huge scale, or very flexible data."
+    },
+    {
+      "id": "databases/sql-vs-nosql-10",
+      "lesson": "databases/sql-vs-nosql",
+      "q": "What is polyglot persistence?",
+      "a": "Using **several databases** in one system, each for the job it does best. Example: PostgreSQL for orders, Redis for carts, Elasticsearch for search, Cassandra for click events."
+    },
+    {
+      "id": "databases/sql-vs-nosql-11",
+      "lesson": "databases/sql-vs-nosql",
+      "q": "Why is \"NoSQL, because it scales\" a weak interview answer?",
+      "a": "SQL databases scale too, so interviewers will push back. Name the database with one reason tied to the access pattern instead."
+    },
+    {
+      "id": "databases/schemas-and-keys-1",
+      "lesson": "databases/schemas-and-keys",
+      "q": "What is a schema?",
+      "a": "The fixed shape of your tables: the columns, their types, and their rules (called **constraints**). The database refuses data that breaks the rules."
+    },
+    {
+      "id": "databases/schemas-and-keys-2",
+      "lesson": "databases/schemas-and-keys",
+      "q": "What must be true of a primary key?",
+      "a": "It must be **unique**, **never empty** and **never changing**, because other tables point to it. So don't use an email: people change their email."
+    },
+    {
+      "id": "databases/schemas-and-keys-3",
+      "lesson": "databases/schemas-and-keys",
+      "q": "Auto-increment ID vs UUID as a primary key: what are the tradeoffs?",
+      "a": "**Auto-increment:** small, fast, sorted by creation time, but needs one central counter and is easy to guess. **UUID:** made anywhere without coordination and can't be guessed, but bigger, and random ones scatter inserts across the index."
+    },
+    {
+      "id": "databases/schemas-and-keys-4",
+      "lesson": "databases/schemas-and-keys",
+      "q": "What does a foreign key do?",
+      "a": "It points to another table's primary key, like `orders.user_id` → `users.id`. The database protects the link: you can't create an order for a user who doesn't exist."
+    },
+    {
+      "id": "databases/schemas-and-keys-5",
+      "lesson": "databases/schemas-and-keys",
+      "q": "What can happen to a user's orders when you delete the user?",
+      "a": "By default (`NO ACTION`), or with `ON DELETE RESTRICT`, the delete is refused. `ON DELETE CASCADE` deletes the orders too. `ON DELETE SET NULL` keeps them with an empty `user_id` (only if `user_id` allows `NULL`)."
+    },
+    {
+      "id": "databases/schemas-and-keys-6",
+      "lesson": "databases/schemas-and-keys",
+      "q": "How do you store one-to-one, one-to-many and many-to-many relationships?",
+      "a": "**One-to-one:** a foreign key with `UNIQUE`. **One-to-many:** a foreign key on the \"many\" side, like `orders.user_id`. **Many-to-many:** a **join table** in the middle, like `order_items`."
+    },
+    {
+      "id": "databases/schemas-and-keys-7",
+      "lesson": "databases/schemas-and-keys",
+      "q": "What is a composite key?",
+      "a": "A primary key made of **two columns together**, like `(order_id, product_id)` in `order_items`. There it means the same product can't appear twice in one order."
+    },
+    {
+      "id": "databases/schemas-and-keys-8",
+      "lesson": "databases/schemas-and-keys",
+      "q": "How should you store money in a database?",
+      "a": "As whole cents (`INTEGER` or `BIGINT`), or as `NUMERIC`. Never as a floating-point number, because floats can't store values like 0.10 exactly."
+    },
+    {
+      "id": "databases/schemas-and-keys-9",
+      "lesson": "databases/schemas-and-keys",
+      "q": "Where do foreign keys stop working?",
+      "a": "Across shards or microservices. Foreign keys only work inside one database, so there the app must check the links itself."
+    },
+    {
+      "id": "databases/schemas-and-keys-10",
+      "lesson": "databases/schemas-and-keys",
+      "q": "Why is `BIGINT` the safe default for ID columns?",
+      "a": "In 2018, Basecamp 3 went read-only for hours when a 32-bit integer ID column hit its largest value, 2,147,483,647. New rows could not get an ID."
+    },
+    {
+      "id": "databases/normalization-1",
+      "lesson": "databases/normalization",
+      "q": "What is normalization?",
+      "a": "Storing each fact **once**, with everything else pointing to it by ID. When the fact changes, you fix one place."
+    },
+    {
+      "id": "databases/normalization-2",
+      "lesson": "databases/normalization",
+      "q": "What is denormalization?",
+      "a": "Copying data to where it is read, so reads are faster and need no joins. You pay for it when the data changes, because every copy must be updated."
+    },
+    {
+      "id": "databases/normalization-3",
+      "lesson": "databases/normalization",
+      "q": "What three bugs (anomalies) does repeated data cause?",
+      "a": "**Update:** change an email but miss a row, and now there are two. **Insert:** you can't add a product until someone orders it. **Delete:** delete an order and lose the only record of a price."
+    },
+    {
+      "id": "databases/normalization-4",
+      "lesson": "databases/normalization",
+      "q": "What do the first three normal forms say?",
+      "a": "**1st:** one value per cell, no lists. **2nd:** every column depends on the whole key. **3rd:** columns depend on the key, not on other columns. In short: \"the key, the whole key, and nothing but the key\"."
+    },
+    {
+      "id": "databases/normalization-5",
+      "lesson": "databases/normalization",
+      "q": "What is the most common denormalization, and how do you keep it correct?",
+      "a": "A stored counter, like `posts.like_count`. Insert the like and add one to the counter in the **same transaction**. Reading the count is then one tiny lookup."
+    },
+    {
+      "id": "databases/normalization-6",
+      "lesson": "databases/normalization",
+      "q": "What are the three ways to keep denormalized copies in sync?",
+      "a": "**Same transaction:** always correct, but one database only. **Events** through a queue: copies are briefly out of date (eventual consistency). **Batch jobs:** simple, but often out of date."
+    },
+    {
+      "id": "databases/normalization-7",
+      "lesson": "databases/normalization",
+      "q": "What is the source of truth?",
+      "a": "The original data. If a copy and the original disagree, the original wins, and you can always rebuild the copy from it."
+    },
+    {
+      "id": "databases/normalization-8",
+      "lesson": "databases/normalization",
+      "q": "Why doesn't the price saved on an order item need syncing?",
+      "a": "It is a **snapshot** of the price on the day of the order. It must never change when the product price changes later."
+    },
+    {
+      "id": "databases/normalization-9",
+      "lesson": "databases/normalization",
+      "q": "When should you normalize, and when should you denormalize?",
+      "a": "Normalize when data changes often, correctness matters (money, stock, bookings), or future queries are unknown. Denormalize when reads far outnumber writes, a slow join sits on a hot page, or you can't join (shards, Cassandra)."
+    },
+    {
+      "id": "databases/normalization-10",
+      "lesson": "databases/normalization",
+      "q": "What is the rule of thumb for normalization vs denormalization?",
+      "a": "**Start normalized.** Denormalize one specific read when you know it is too slow, and decide how you will keep the copy in sync."
+    },
+    {
+      "id": "databases/indexes-1",
+      "lesson": "databases/indexes",
+      "q": "What is a database index?",
+      "a": "A separate, **sorted** list of values from a column, where each value says where its row is stored. Without one, the database must read every row: a **full table scan**."
+    },
+    {
+      "id": "databases/indexes-2",
+      "lesson": "databases/indexes",
+      "q": "How does a B-tree index find a row?",
+      "a": "It is a short, wide tree of **pages** (8 KB blocks in PostgreSQL). The root says which page to go to for each range, down to a leaf holding the key and its row's location. Each level is one page read."
+    },
+    {
+      "id": "databases/indexes-3",
+      "lesson": "databases/indexes",
+      "q": "Which kinds of queries can a B-tree index help with?",
+      "a": "Exact matches, ranges (`>`, `BETWEEN`), sorting (`ORDER BY`), and starts-with text like `LIKE 'run%'`. Not `LIKE '%shoes'`."
+    },
+    {
+      "id": "databases/indexes-4",
+      "lesson": "databases/indexes",
+      "q": "What is the weak side of a B-tree?",
+      "a": "Every write changes a page **in place**, at a random spot on disk, and a full page **splits** in two. Heavy writes mean lots of small random disk writes."
+    },
+    {
+      "id": "databases/indexes-5",
+      "lesson": "databases/indexes",
+      "q": "How does an LSM tree handle a write?",
+      "a": "It appends the change to a log on disk (for crash safety) and adds it to a sorted list in memory, the **memtable**. When full, the memtable is written to disk as a sorted file, an **SSTable**, which is never changed."
+    },
+    {
+      "id": "databases/indexes-6",
+      "lesson": "databases/indexes",
+      "q": "What is compaction in an LSM tree?",
+      "a": "Background work that merges small SSTable files into bigger ones, throwing away old versions and deleted items. It uses disk and CPU."
+    },
+    {
+      "id": "databases/indexes-7",
+      "lesson": "databases/indexes",
+      "q": "How does an LSM tree read a key without checking every file?",
+      "a": "It checks the memtable, then the newest file, then older ones. Each file has a **Bloom filter** that can say \"this key is definitely not here\", so files are skipped quickly."
+    },
+    {
+      "id": "databases/indexes-8",
+      "lesson": "databases/indexes",
+      "q": "B-tree vs LSM tree: when do you use each?",
+      "a": "**B-tree:** read-heavy apps and most SQL workloads (PostgreSQL, MySQL). **LSM tree:** write-heavy apps like chat, events, logs and sensors (Cassandra, RocksDB)."
+    },
+    {
+      "id": "databases/indexes-9",
+      "lesson": "databases/indexes",
+      "q": "How does a multi-column index work, and how should you order its columns?",
+      "a": "It works from the **leftmost column**: `(user_id, created_at)` helps `WHERE user_id = 7`, but not `WHERE created_at > ...` alone. Put exact-match (`=`) columns first, and the range or sort column last."
+    },
+    {
+      "id": "databases/indexes-10",
+      "lesson": "databases/indexes",
+      "q": "What is a covering index?",
+      "a": "An index that holds every column a query needs, so the database answers from the index alone, without visiting the table. In PostgreSQL, you add extra columns with `INCLUDE`."
+    },
+    {
+      "id": "databases/indexes-11",
+      "lesson": "databases/indexes",
+      "q": "What do indexes cost?",
+      "a": "**Slower writes:** every insert, update and delete must also update every index, so five indexes means six places to write. And **more space**, on disk and in memory."
+    },
+    {
+      "id": "databases/indexes-12",
+      "lesson": "databases/indexes",
+      "q": "Why can `WHERE lower(email) = '...'` miss an index on `email`?",
+      "a": "A function on the column can't use a plain index on that column. You need an index on `lower(email)`."
+    },
+    {
+      "id": "databases/indexes-13",
+      "lesson": "databases/indexes",
+      "q": "An index on `status` (3 values) rarely helps. What can help instead?",
+      "a": "A **partial index**, like `CREATE INDEX ... ON orders (created_at) WHERE status = 'pending'`. Plain indexes are useless on columns with few values."
+    },
+    {
+      "id": "databases/indexes-14",
+      "lesson": "databases/indexes",
+      "q": "How do you add an index to a big live table in PostgreSQL?",
+      "a": "Use `CREATE INDEX CONCURRENTLY`, because building an index the normal way can block writes."
+    },
+    {
+      "id": "databases/transactions-acid-1",
+      "lesson": "databases/transactions-acid",
+      "q": "What is a transaction?",
+      "a": "A group of steps that run as **one unit**: either all of them happen, or none of them do. Example: take ₹500 from Asha and add ₹500 to Ravi."
+    },
+    {
+      "id": "databases/transactions-acid-2",
+      "lesson": "databases/transactions-acid",
+      "q": "What does ACID stand for?",
+      "a": "**Atomicity** (all or nothing), **Consistency** (rules hold), **Isolation** (as if run one at a time) and **Durability** (committed means saved)."
+    },
+    {
+      "id": "databases/transactions-acid-3",
+      "lesson": "databases/transactions-acid",
+      "q": "What does the \"C\" in ACID mean, and how is it different from CAP's \"C\"?",
+      "a": "Your **rules** always hold: `CHECK (balance >= 0)`, foreign keys, unique emails. CAP's \"C\" is something else: every copy showing the newest data."
+    },
+    {
+      "id": "databases/transactions-acid-4",
+      "lesson": "databases/transactions-acid",
+      "q": "How does a database make sure committed data survives a crash?",
+      "a": "With a **write-ahead log (WAL)**. Before it says \"committed\", it writes the change to a log file on disk. After a crash, it reads the log and finishes or undoes the work."
+    },
+    {
+      "id": "databases/transactions-acid-5",
+      "lesson": "databases/transactions-acid",
+      "q": "What do `COMMIT` and `ROLLBACK` do?",
+      "a": "`COMMIT` makes all the changes final. Until then, other users don't see them. `ROLLBACK` throws them all away. The database also rolls back by itself if the server crashes or the connection drops."
+    },
+    {
+      "id": "databases/transactions-acid-6",
+      "lesson": "databases/transactions-acid",
+      "q": "What happens after a failed statement inside a transaction?",
+      "a": "The whole transaction is not undone for you. **PostgreSQL** refuses every later statement until your app sends `ROLLBACK`. **MySQL** usually undoes only that statement, and your app must decide."
+    },
+    {
+      "id": "databases/transactions-acid-7",
+      "lesson": "databases/transactions-acid",
+      "q": "When do you need a transaction?",
+      "a": "When several writes must stay together: moving money, taking stock and creating an order, booking a seat and recording the payment, or reading a value and then writing based on it."
+    },
+    {
+      "id": "databases/transactions-acid-8",
+      "lesson": "databases/transactions-acid",
+      "q": "When don't you need to add a transaction?",
+      "a": "For a single insert or update, which already runs as its own small transaction (**autocommit**). And for logs, analytics or view counters, where losing or repeating one event doesn't matter much."
+    },
+    {
+      "id": "databases/transactions-acid-9",
+      "lesson": "databases/transactions-acid",
+      "q": "Why keep transactions short?",
+      "a": "An open transaction can hold locks that make other users wait. So never call a slow outside service, like a payment provider, in the middle of one."
+    },
+    {
+      "id": "databases/transactions-acid-10",
+      "lesson": "databases/transactions-acid",
+      "q": "What do you use when one flow touches several services, each with its own database?",
+      "a": "A **saga** or **Two-Phase Commit (2PC)**. A database transaction only covers one database."
+    },
+    {
+      "id": "databases/isolation-levels-1",
+      "lesson": "databases/isolation-levels",
+      "q": "What is isolation in a database?",
+      "a": "How much transactions running at the same time can see of each other. Full isolation is like making them take turns: perfectly safe, but slow."
+    },
+    {
+      "id": "databases/isolation-levels-2",
+      "lesson": "databases/isolation-levels",
+      "q": "What is a dirty read?",
+      "a": "Reading a change that another transaction has **not committed yet**. It may still be undone, like seeing stock = 0 from an order that then fails."
+    },
+    {
+      "id": "databases/isolation-levels-3",
+      "lesson": "databases/isolation-levels",
+      "q": "What is a non-repeatable read?",
+      "a": "Reading the **same row twice** and getting different values, because someone committed a change in between. Example: checkout reads the price as 2999, then as 3499."
+    },
+    {
+      "id": "databases/isolation-levels-4",
+      "lesson": "databases/isolation-levels",
+      "q": "What is a phantom read?",
+      "a": "Running the **same search twice** and seeing new rows appear. Example: \"orders today\" counts 10, then 11."
+    },
+    {
+      "id": "databases/isolation-levels-5",
+      "lesson": "databases/isolation-levels",
+      "q": "What is a lost update?",
+      "a": "Two transactions read a value, both change it, and the second write **wipes out** the first. Example: two shoppers buy the last item, and stock goes 1 → 0 twice."
+    },
+    {
+      "id": "databases/isolation-levels-6",
+      "lesson": "databases/isolation-levels",
+      "q": "What is write skew?",
+      "a": "Two transactions read the same data, each makes a decision, and each writes a **different** row. Together they break a rule: two doctors both see \"2 on call\" and both go off call."
+    },
+    {
+      "id": "databases/isolation-levels-7",
+      "lesson": "databases/isolation-levels",
+      "q": "What are the four standard isolation levels, from weakest to strongest?",
+      "a": "Read uncommitted, **read committed**, **repeatable read** and **serializable**. Each one stops more problems. Stronger is safer but slower."
+    },
+    {
+      "id": "databases/isolation-levels-8",
+      "lesson": "databases/isolation-levels",
+      "q": "What does read committed guarantee?",
+      "a": "Each **statement** sees only data committed before it started, so there are no dirty reads. But two statements in the same transaction can see different data."
+    },
+    {
+      "id": "databases/isolation-levels-9",
+      "lesson": "databases/isolation-levels",
+      "q": "What does repeatable read guarantee?",
+      "a": "The whole **transaction** sees one **snapshot**, a photo of the data taken when it started. Re-reading a row always gives the same answer."
+    },
+    {
+      "id": "databases/isolation-levels-10",
+      "lesson": "databases/isolation-levels",
+      "q": "What does serializable guarantee, and what must your app do?",
+      "a": "The result is the same as if the transactions ran **one at a time**, so it stops lost updates and write skew too. In PostgreSQL, a conflict fails with \"could not serialize access\", and you **retry the whole transaction**."
+    },
+    {
+      "id": "databases/isolation-levels-11",
+      "lesson": "databases/isolation-levels",
+      "q": "What is MVCC, and what is its big win?",
+      "a": "Multi-Version Concurrency Control: the database keeps old versions of a changed row, and a reader reads the version that matches its snapshot. Readers don't block writers, and writers don't block readers."
+    },
+    {
+      "id": "databases/isolation-levels-12",
+      "lesson": "databases/isolation-levels",
+      "q": "What are the default isolation levels in PostgreSQL and MySQL?",
+      "a": "PostgreSQL: **read committed** (like Oracle and SQL Server). MySQL (InnoDB): **repeatable read**. So the same code can behave differently on each."
+    },
+    {
+      "id": "databases/isolation-levels-13",
+      "lesson": "databases/isolation-levels",
+      "q": "At repeatable read, how do PostgreSQL and MySQL differ on lost updates?",
+      "a": "PostgreSQL stops them: the second writer gets a \"could not serialize access\" error and must retry. MySQL doesn't: the second `UPDATE` quietly writes over the first. Write skew is possible in both."
+    },
+    {
+      "id": "databases/isolation-levels-14",
+      "lesson": "databases/isolation-levels",
+      "q": "What is the practical way to handle isolation in most apps?",
+      "a": "Keep the default level, and protect only the risky spots: do the math inside the database (`stock = stock - 1 WHERE stock >= 1`), lock the row with `SELECT ... FOR UPDATE`, use `UNIQUE` and `CHECK`, or use serializable with retries."
+    },
+    {
+      "id": "databases/isolation-levels-15",
+      "lesson": "databases/isolation-levels",
+      "q": "Why isn't read committed alone enough to book the last seat?",
+      "a": "Two users could both see the seat as free and both book it. Lock the seat row with `SELECT ... FOR UPDATE`, or run that one transaction as serializable and retry on conflict."
+    },
+    {
+      "id": "databases/locking-1",
+      "lesson": "databases/locking",
+      "q": "Pessimistic vs optimistic locking: what is the idea of each?",
+      "a": "**Pessimistic:** expect trouble, so lock first, and others wait. **Optimistic:** expect no trouble, and only check when saving whether someone else saved first. Both stop lost updates."
+    },
+    {
+      "id": "databases/locking-2",
+      "lesson": "databases/locking",
+      "q": "Row lock vs table lock: what takes each one?",
+      "a": "**Row lock** (one row): `UPDATE`, `DELETE` and `SELECT ... FOR UPDATE`. **Table lock** (the whole table): many kinds of `ALTER TABLE`, and `LOCK TABLE`."
+    },
+    {
+      "id": "databases/locking-3",
+      "lesson": "databases/locking",
+      "q": "Why are table locks dangerous?",
+      "a": "Some `ALTER TABLE` commands in PostgreSQL block **all reads and writes** on the table until they finish. On a big, busy table, that can look like an outage."
+    },
+    {
+      "id": "databases/locking-4",
+      "lesson": "databases/locking",
+      "q": "What happens when two transactions update the same row?",
+      "a": "The second one **waits** until the first commits or rolls back. Transactions that touch other rows don't wait at all."
+    },
+    {
+      "id": "databases/locking-5",
+      "lesson": "databases/locking",
+      "q": "What is a deadlock, and how does the database handle it?",
+      "a": "Two transactions each wait for a lock the other holds. The database finds the circle of waiting, picks one as the **victim**, rolls it back with an error, and the other continues."
+    },
+    {
+      "id": "databases/locking-6",
+      "lesson": "databases/locking",
+      "q": "How do you avoid deadlocks?",
+      "a": "Always **lock in the same order** (like by ID), keep transactions short, retry the victim (a deadlock error is safe to retry), and set a lock timeout like `lock_timeout`."
+    },
+    {
+      "id": "databases/locking-7",
+      "lesson": "databases/locking",
+      "q": "How does pessimistic locking with `SELECT ... FOR UPDATE` work?",
+      "a": "Inside a transaction, it locks the row before you read and change it. Anyone else asking for that row waits until you commit. Add `NOWAIT` to fail right away instead of waiting."
+    },
+    {
+      "id": "databases/locking-8",
+      "lesson": "databases/locking",
+      "q": "What does `FOR UPDATE SKIP LOCKED` do, and what is it used for?",
+      "a": "It skips rows that are locked and takes the next free one. Job queues on PostgreSQL (like pg-boss and Solid Queue) use it so that many workers each grab a different job."
+    },
+    {
+      "id": "databases/locking-9",
+      "lesson": "databases/locking",
+      "q": "How can a single conditional update replace an explicit lock?",
+      "a": "`UPDATE products SET stock = stock - 1 WHERE id = 42 AND stock >= 1` does the check and the change in one step. 1 row changed means success. 0 rows changed means sold out."
+    },
+    {
+      "id": "databases/locking-10",
+      "lesson": "databases/locking",
+      "q": "How does optimistic locking with a version column work?",
+      "a": "Read the row and its `version`, say 7. Save with `WHERE id = 42 AND version = 7`, setting `version = version + 1`. If 0 rows change, someone saved first: reload and try again, or show a conflict."
+    },
+    {
+      "id": "databases/locking-11",
+      "lesson": "databases/locking",
+      "q": "When should you use optimistic locking, and when pessimistic?",
+      "a": "**Optimistic** by default, especially when a person is editing something and clashes are rare. **Pessimistic** for short, hot spots where many users fight over the same row, like the last seats of a hot concert."
+    },
+    {
+      "id": "databases/locking-12",
+      "lesson": "databases/locking",
+      "q": "What are the risks of pessimistic and of optimistic locking?",
+      "a": "Pessimistic: waiting, deadlocks, and locks held too long. Optimistic: lots of retries if clashes become common."
+    },
+    {
+      "id": "databases/locking-13",
+      "lesson": "databases/locking",
+      "q": "What took down the Bitcoin bank Flexcoin in 2014?",
+      "a": "An attacker sent thousands of transfer requests at the same moment. Balance checks ran before balances were updated, so the same coins moved many times. A row lock or an atomic update would have stopped it."
+    },
+    {
+      "id": "databases/replication-1",
+      "lesson": "databases/replication",
+      "q": "What is replication?",
+      "a": "One database, the **primary**, takes all writes and sends every change to other databases, the **replicas**, which keep a copy. Replicas serve reads, and one can take over if the primary dies."
+    },
+    {
+      "id": "databases/replication-2",
+      "lesson": "databases/replication",
+      "q": "Why copy a database to replicas?",
+      "a": "To survive failures (high availability), to handle more reads, to be faster for far-away users with a copy near them, and to run heavy reports without hurting users."
+    },
+    {
+      "id": "databases/replication-3",
+      "lesson": "databases/replication",
+      "q": "Why is replication not a backup?",
+      "a": "A bad `DELETE` is copied to every replica within seconds. You still need backups."
+    },
+    {
+      "id": "databases/replication-4",
+      "lesson": "databases/replication",
+      "q": "How do replicas stay in sync with the primary?",
+      "a": "The primary streams its **change log** to each replica, and each replica replays it to make the same changes. In PostgreSQL, this is the WAL. In MySQL, the binlog. Replicas are read-only."
+    },
+    {
+      "id": "databases/replication-5",
+      "lesson": "databases/replication",
+      "q": "Synchronous vs asynchronous replication: what is the tradeoff?",
+      "a": "**Sync:** the primary waits for replicas, so no committed data is lost, but writes are slower and a slow replica stalls them. **Async:** fast writes, but replicas lag and the last writes can be lost."
+    },
+    {
+      "id": "databases/replication-6",
+      "lesson": "databases/replication",
+      "q": "What is semi-sync replication?",
+      "a": "The primary waits for **one** replica, and the rest copy in the background. At least two machines have every committed write, and one slow replica can't stall everything."
+    },
+    {
+      "id": "databases/replication-7",
+      "lesson": "databases/replication",
+      "q": "What is replica lag, and what bug does it cause?",
+      "a": "With async copying, a replica is a little behind the primary. A user saves a change, then reads from a replica and sees the old data, so they think their change was lost."
+    },
+    {
+      "id": "databases/replication-8",
+      "lesson": "databases/replication",
+      "q": "How do you fix the \"I just saved it, where is it?\" bug with replicas?",
+      "a": "Read your own writes from the primary: for a few seconds after a user changes something, read their data there. Read important things, like a balance before payment, from the primary too, and stop using replicas that lag too far."
+    },
+    {
+      "id": "databases/replication-9",
+      "lesson": "databases/replication",
+      "q": "Single-leader vs multi-leader vs leaderless replication?",
+      "a": "**Single-leader:** one primary takes all writes. Simple, no conflicts. **Multi-leader:** several primaries, often one per region. Fast local writes, but write conflicts. **Leaderless:** any node takes writes. No single point of failure."
+    },
+    {
+      "id": "databases/replication-10",
+      "lesson": "databases/replication",
+      "q": "How do quorums work in leaderless replication?",
+      "a": "With N copies, a write must reach W of them and a read asks R. If **W + R is greater than N**, every read includes at least one copy with the newest write. Example: N = 3, W = 2, R = 2."
+    },
+    {
+      "id": "databases/replication-11",
+      "lesson": "databases/replication",
+      "q": "What are the four steps of failover when the primary dies?",
+      "a": "**Notice** it stopped answering health checks, **choose** the most up-to-date replica, **promote** it to primary, and **redirect** the app or proxy to it. With async copying, writes not yet sent are lost."
+    },
+    {
+      "id": "databases/replication-12",
+      "lesson": "databases/replication",
+      "q": "What is split brain?",
+      "a": "The old primary was only cut off, not dead, so now two machines think they are the primary and both take writes. Systems use majority votes to avoid it."
+    },
+    {
+      "id": "databases/partitioning-sharding-1",
+      "lesson": "databases/partitioning-sharding",
+      "q": "Partitioning vs sharding?",
+      "a": "**Partitioning** splits a big table into pieces inside **one** database server. **Sharding** splits the data across **many** servers, called shards, each with its own CPU, memory and disk."
+    },
+    {
+      "id": "databases/partitioning-sharding-2",
+      "lesson": "databases/partitioning-sharding",
+      "q": "What do you gain from partitioning a table by month?",
+      "a": "A query for last week reads only one small partition (**partition pruning**), and an old month is removed with a quick `DROP TABLE`, not a slow `DELETE`. But it adds no CPU or disk."
+    },
+    {
+      "id": "databases/partitioning-sharding-3",
+      "lesson": "databases/partitioning-sharding",
+      "q": "What should you try before sharding?",
+      "a": "Indexes and better queries, a cache for hot reads, read replicas, a bigger machine, and partitioning or archiving old data. Sharding is hard work."
+    },
+    {
+      "id": "databases/partitioning-sharding-4",
+      "lesson": "databases/partitioning-sharding",
+      "q": "When do you really need sharding?",
+      "a": "When one machine truly can't keep up: too many writes for one primary (replicas don't help, as every write still goes there), too much data for one disk, or the often-used data no longer fits in memory."
+    },
+    {
+      "id": "databases/partitioning-sharding-5",
+      "lesson": "databases/partitioning-sharding",
+      "q": "What makes a good shard key?",
+      "a": "It spreads data and traffic evenly (high **cardinality**), matches the main queries so most need only one shard, keeps related data together, and never changes for a row."
+    },
+    {
+      "id": "databases/partitioning-sharding-6",
+      "lesson": "databases/partitioning-sharding",
+      "q": "Why is `created_at` a bad shard key for orders, and what is better?",
+      "a": "All new orders hit the newest shard, so you get one hot shard. `user_id` is better: it spreads evenly, and \"my orders\" stays on one shard."
+    },
+    {
+      "id": "databases/partitioning-sharding-7",
+      "lesson": "databases/partitioning-sharding",
+      "q": "Range vs hash sharding?",
+      "a": "**Range:** each shard owns a range of keys. Range queries are easy, but new IDs and dates all land on the last shard. **Hash:** keys spread evenly, but neighbors are scattered across every shard."
+    },
+    {
+      "id": "databases/partitioning-sharding-8",
+      "lesson": "databases/partitioning-sharding",
+      "q": "What is directory-based sharding?",
+      "a": "A lookup table that says which shard each key lives on. It is the most flexible, because you can move any key, but the directory must be fast and never go down."
+    },
+    {
+      "id": "databases/partitioning-sharding-9",
+      "lesson": "databases/partitioning-sharding",
+      "q": "What is a hot shard, and how do you fix it?",
+      "a": "One shard gets much more traffic, from a bad key or one huge customer. Fixes: a better key, split a hot key (`celebrity_42#1` to `#8`), give the customer their own shard, or cache the hot data."
+    },
+    {
+      "id": "databases/partitioning-sharding-10",
+      "lesson": "databases/partitioning-sharding",
+      "q": "What is scatter-gather, and why is it slow?",
+      "a": "A query like \"top 10 products today\" is sent to every shard and the answers are merged. It is only as fast as the **slowest** shard. For frequent ones, keep a separate copy, like an analytics database."
+    },
+    {
+      "id": "databases/partitioning-sharding-11",
+      "lesson": "databases/partitioning-sharding",
+      "q": "Why create many small logical shards up front?",
+      "a": "Create many small logical shards (say, 1,000) and place several on each machine. To grow, move whole logical shards to new machines. No key ever changes shard."
+    },
+    {
+      "id": "databases/partitioning-sharding-12",
+      "lesson": "databases/partitioning-sharding",
+      "q": "How did Notion shard its PostgreSQL database in 2021?",
+      "a": "By **workspace ID**, into 480 logical shards spread over 32 physical databases. All the pages of one workspace live on the same shard."
+    },
+    {
+      "id": "databases/consistent-hashing-1",
+      "lesson": "databases/consistent-hashing",
+      "q": "What problem does consistent hashing solve?",
+      "a": "Spreading keys over servers so that adding or removing a server moves only a **small share** of the keys. The simple way, \"hash mod N\", moves almost all of them."
+    },
+    {
+      "id": "databases/consistent-hashing-2",
+      "lesson": "databases/consistent-hashing",
+      "q": "Why does `hash(key) % N` hurt when you add a server?",
+      "a": "Going from 3 to 4 servers moves about 3 out of every 4 keys. In a cache, most keys miss at once and the requests hit the database. In a database, most of the data must be copied."
+    },
+    {
+      "id": "databases/consistent-hashing-3",
+      "lesson": "databases/consistent-hashing",
+      "q": "On a hash ring, which server owns a key?",
+      "a": "Servers and keys are hashed onto a circle with the same function. From the key's spot, walk **clockwise**: the first server you meet owns the key."
+    },
+    {
+      "id": "databases/consistent-hashing-4",
+      "lesson": "databases/consistent-hashing",
+      "q": "What happens on a hash ring when you add a server?",
+      "a": "It takes only the keys between it and the server before it, all from **one** neighbor. With N servers, the new one takes about 1/N of the keys. Everything else stays put."
+    },
+    {
+      "id": "databases/consistent-hashing-5",
+      "lesson": "databases/consistent-hashing",
+      "q": "What happens on a hash ring when a server is removed?",
+      "a": "Only the dead server's keys move, to the next server clockwise. Every other key stays where it was."
+    },
+    {
+      "id": "databases/consistent-hashing-6",
+      "lesson": "databases/consistent-hashing",
+      "q": "What goes wrong with only one spot per server on the ring?",
+      "a": "**Uneven arcs:** random spots can give one server much more data. **One neighbor takes it all:** when a server dies, all its keys land on one server, which can be overloaded and fail too."
+    },
+    {
+      "id": "databases/consistent-hashing-7",
+      "lesson": "databases/consistent-hashing",
+      "q": "What are virtual nodes (vnodes)?",
+      "a": "Each real server gets **many spots** on the ring, by hashing names like `A-1`, `A-2`, `A-3`. Real systems use tens or hundreds of spots per server."
+    },
+    {
+      "id": "databases/consistent-hashing-8",
+      "lesson": "databases/consistent-hashing",
+      "q": "What do virtual nodes give you?",
+      "a": "An even spread, because each server owns many small arcs. Shared load when a server dies, because its keys split across several servers. And a bigger machine can get more vnodes."
+    },
+    {
+      "id": "databases/consistent-hashing-9",
+      "lesson": "databases/consistent-hashing",
+      "q": "How does Redis Cluster spread keys instead of using a ring?",
+      "a": "It splits keys into **16,384 hash slots** and gives each node a set of slots. Moving a slot moves only its keys."
+    },
+    {
+      "id": "databases/consistent-hashing-10",
+      "lesson": "databases/consistent-hashing",
+      "q": "Where is consistent hashing used?",
+      "a": "Cassandra's token ring, Amazon's Dynamo, Memcached cache clients (like **ketama**), and load balancers like Nginx and Envoy that send the same user to the same server."
+    },
+    {
+      "id": "databases/connection-pooling-1",
+      "lesson": "databases/connection-pooling",
+      "q": "What is a connection pool?",
+      "a": "A few database connections kept **open all the time**. Each request borrows one, runs its queries and gives it back, so nobody pays to open a new connection for every request."
+    },
+    {
+      "id": "databases/connection-pooling-2",
+      "lesson": "databases/connection-pooling",
+      "q": "Why is opening a new database connection slow?",
+      "a": "A TCP handshake, a TLS handshake, and a login with a password check. PostgreSQL also starts a whole new process for each connection. Often the setup takes longer than the query itself."
+    },
+    {
+      "id": "databases/connection-pooling-3",
+      "lesson": "databases/connection-pooling",
+      "q": "Why do databases limit connections, and what is PostgreSQL's default?",
+      "a": "Each open connection uses memory on the database server, even when idle. PostgreSQL allows **100** connections by default (`max_connections`)."
+    },
+    {
+      "id": "databases/connection-pooling-4",
+      "lesson": "databases/connection-pooling",
+      "q": "What is a connection leak?",
+      "a": "Code borrows a connection and never gives it back, for example on an error path. The pool slowly runs dry, and the app looks frozen even though the database is idle."
+    },
+    {
+      "id": "databases/connection-pooling-5",
+      "lesson": "databases/connection-pooling",
+      "q": "What goes wrong if a connection pool is too big?",
+      "a": "The database has only a few CPU cores. Hundreds of queries running at once fight over cores, memory and locks, so each one gets slower and total work done can go down."
+    },
+    {
+      "id": "databases/connection-pooling-6",
+      "lesson": "databases/connection-pooling",
+      "q": "How can many app servers run a database out of connections?",
+      "a": "Every app server has its own pool: 50 servers × 20 = 1,000 connections. Past the limit, new ones fail with \"sorry, too many clients already\". Autoscaling makes it worse."
+    },
+    {
+      "id": "databases/connection-pooling-7",
+      "lesson": "databases/connection-pooling",
+      "q": "How big should a connection pool be?",
+      "a": "HikariCP suggests about **(CPU cores × 2) + number of disks** on the database server as a start. Small pools usually beat big ones. If requests often wait while database CPU is low, it is too small."
+    },
+    {
+      "id": "databases/connection-pooling-8",
+      "lesson": "databases/connection-pooling",
+      "q": "What is PgBouncer?",
+      "a": "A small proxy in front of PostgreSQL, shared by all app servers. Apps open many cheap connections to it, and it shares a few real connections to the database among them."
+    },
+    {
+      "id": "databases/connection-pooling-9",
+      "lesson": "databases/connection-pooling",
+      "q": "What are PgBouncer's three modes?",
+      "a": "**Session:** a real connection goes back when the app disconnects (safest, saves least). **Transaction:** after each transaction (most popular, but `SET` and `LISTEN` don't work as expected). **Statement:** after each statement."
+    },
+    {
+      "id": "databases/connection-pooling-10",
+      "lesson": "databases/connection-pooling",
+      "q": "Why did AWS build RDS Proxy?",
+      "a": "Serverless functions like AWS Lambda can start thousands of copies in a spike, each opening its own connections. RDS Proxy pools and shares them, so a spike doesn't exhaust the database."
+    },
+    {
+      "id": "databases/how-a-query-runs-1",
+      "lesson": "databases/how-a-query-runs",
+      "q": "What does the query planner do?",
+      "a": "SQL says **what** data you want, not how. The planner picks the route: which index to use, which table to read first, and how to combine them, by guessing the cost of each way."
+    },
+    {
+      "id": "databases/how-a-query-runs-2",
+      "lesson": "databases/how-a-query-runs",
+      "q": "What are the four steps a database takes to run a query?",
+      "a": "**Parse** (check the grammar, build a tree), **rewrite** (expand views, apply rules), **plan** (pick the cheapest way) and **execute** (read pages, build the rows)."
+    },
+    {
+      "id": "databases/how-a-query-runs-3",
+      "lesson": "databases/how-a-query-runs",
+      "q": "`EXPLAIN` vs `EXPLAIN ANALYZE`?",
+      "a": "`EXPLAIN` shows the plan the database picked. `EXPLAIN ANALYZE` also **runs** the query and shows the real times and the actual rows."
+    },
+    {
+      "id": "databases/how-a-query-runs-4",
+      "lesson": "databases/how-a-query-runs",
+      "q": "In a query plan, what does a big gap between guessed and actual rows mean?",
+      "a": "The planner's **statistics** are out of date, so it may pick a bad route. Refresh them with `ANALYZE`."
+    },
+    {
+      "id": "databases/how-a-query-runs-5",
+      "lesson": "databases/how-a-query-runs",
+      "q": "When is a full scan (Seq Scan) better than an index scan?",
+      "a": "When the table is small, or the query needs a big part of it, like 40%. Reading straight through is faster than jumping back and forth through an index."
+    },
+    {
+      "id": "databases/how-a-query-runs-6",
+      "lesson": "databases/how-a-query-runs",
+      "q": "What is the N+1 problem?",
+      "a": "The app runs 1 query to get 50 orders, then 1 more query per order for its items: 51 trips instead of 1 or 2. Fix it with a join, or one query using `WHERE order_id IN (...)`."
+    },
+    {
+      "id": "databases/sql-fundamentals-1",
+      "lesson": "databases/sql-fundamentals",
+      "q": "Why does `WHERE shipped_at = NULL` never match?",
+      "a": "`NULL` means \"unknown\" or \"no value\", and nothing is equal to `NULL`, not even another `NULL`. Use `IS NULL` or `IS NOT NULL`."
+    },
+    {
+      "id": "databases/sql-fundamentals-2",
+      "lesson": "databases/sql-fundamentals",
+      "q": "`INNER JOIN` vs `LEFT JOIN`?",
+      "a": "`INNER JOIN` keeps only rows that match on both sides. `LEFT JOIN` keeps all rows from the left table, with `NULL` in the right-side columns when there is no match."
+    },
+    {
+      "id": "databases/sql-fundamentals-3",
+      "lesson": "databases/sql-fundamentals",
+      "q": "`WHERE` vs `HAVING`?",
+      "a": "`WHERE` filters single rows **before** grouping. `HAVING` filters whole groups **after** `GROUP BY`."
+    },
+    {
+      "id": "databases/sql-fundamentals-4",
+      "lesson": "databases/sql-fundamentals",
+      "q": "What goes wrong with an `UPDATE` or `DELETE` that has no `WHERE`?",
+      "a": "It changes or removes **every row** in the table."
+    },
+    {
+      "id": "databases/sql-fundamentals-5",
+      "lesson": "databases/sql-fundamentals",
+      "q": "Why is `BETWEEN '2026-01-01' AND '2026-01-31'` risky for timestamps?",
+      "a": "`'2026-01-31'` means midnight at the **start** of Jan 31, so orders later that day are missed. Use `created_at >= '2026-01-01' AND created_at < '2026-02-01'`."
+    },
+    {
+      "id": "databases/sql-fundamentals-6",
+      "lesson": "databases/sql-fundamentals",
+      "q": "What is an upsert?",
+      "a": "\"Insert, or update if it already exists\". In PostgreSQL: `INSERT ... ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name`, where `EXCLUDED` is the row you tried to insert."
+    }
+  ]
+}

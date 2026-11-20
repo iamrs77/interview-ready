@@ -1,0 +1,151 @@
+---
+title: "Latency, Throughput and QPS"
+description: "How fast one request is, and how many requests the system can handle."
+icon: Gauge
+---
+
+## The idea
+
+There are two different questions about "speed":
+
+- **Latency:** how long does **one** request take?
+- **Throughput:** how **many** requests can the system finish every second?
+
+Think of a highway. **Latency** is how long one car takes to drive from city A to city B. **Throughput** is how many cars reach city B every hour. Adding lanes lets more cars through (more throughput), but each car still takes about the same time (same latency).
+
+## Latency: the time for one request
+
+**Latency** is the time from sending a request to getting the answer back. It is measured in **milliseconds** (ms). 1 second = 1,000 ms.
+
+The latency of one request is the sum of many small waits:
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant LB as Load Balancer
+  participant A as App Server
+  participant D as Database
+  U->>LB: Request (network: 40 ms)
+  LB->>A: Forward (1 ms)
+  A->>D: Query (5 ms)
+  D-->>A: Rows
+  A-->>U: Answer (network: 40 ms)
+  Note over U,D: Total: about 90 ms
+```
+
+Where the time goes:
+
+- **Network:** the distance to the server. Data in cables is fast, but a round trip from India to the USA still takes about 200 ms.
+- **Waiting in line (queueing):** if the server is busy, the request waits its turn.
+- **Doing the work:** running code, and reading from the database or the disk.
+
+How to lower latency:
+
+- Put data **closer to users**: a [CDN](../caching/cdn.mdx), or servers in more regions.
+- **Cache** popular data in memory (see [What is Caching](../caching/what-is-caching.mdx)).
+- Make **fewer round trips**: one call that gets everything instead of ten small calls.
+- Make queries faster with **indexes** (see [Indexes](../databases/indexes.mdx)).
+- Do slow work **later**, in the background, with a queue (see [Sync vs Async](../messaging/sync-vs-async.mdx)).
+
+For a feel of how long common actions take (memory, disk, network), see the numbers table in [Capacity Estimation](./capacity-estimation.mdx).
+
+## Throughput and QPS: requests per second
+
+**Throughput** is how much work the system finishes per second. For web systems, we usually count requests:
+
+| Short name | Means | Often used for |
+| --- | --- | --- |
+| **QPS** | Queries per second | Search, databases, APIs |
+| **RPS** | Requests per second | Web servers, APIs |
+| **TPS** | Transactions per second | Databases, payments |
+
+They all mean roughly the same thing: **how many requests per second.**
+
+For video or file downloads, throughput is measured in **data per second** instead, like MB per second. This is often called **bandwidth**.
+
+**Average vs peak.** Traffic is not flat. People use apps more in the evening, during a sale, or during a big cricket match. The **peak** is often 2 to 3 times the average, and much more during special events. **Design for the peak, not the average.** To turn "users per day" into QPS, see [Capacity Estimation](./capacity-estimation.mdx).
+
+## Why the average can hide slow requests
+
+Say a server handles 1,000 requests:
+
+- 980 requests take 50 ms.
+- 20 requests take 3 seconds (3,000 ms).
+
+The **average** is (980 × 50 + 20 × 3,000) ÷ 1,000 = **109 ms**. That looks fine. But 2 users out of every 100 wait 3 seconds, which is not fine at all.
+
+So we use **percentiles** instead:
+
+- **p50** (the median): half of all requests are faster than this.
+- **p99:** 99% of requests are faster than this. Only the slowest 1% are slower.
+
+| Measure | Value | What it tells you |
+| --- | --- | --- |
+| Average | 109 ms | "Looks fine." It hides the problem |
+| p50 | 50 ms | A normal request is fast |
+| p99 | 3,000 ms | The slowest 1 in 100 users waits 3 seconds |
+
+The slow requests are called the **tail**, and their latency is **tail latency**. They matter for two reasons:
+
+1. The slow users are often your **best** users: the ones with the biggest carts, the most friends, the most data.
+2. **One page often needs many calls.** If any one of them is slow, the whole page is slow.
+
+The second point gets worse with **fan-out**: one request that calls many servers and waits for all of them.
+
+```mermaid
+flowchart TB
+  U["User request"]:::client --> A["App Server"]:::service
+  A --> S1["Server 1"]:::service
+  A --> S2["Server 2"]:::service
+  A --> S3["..."]:::service
+  A --> S4["Server 100"]:::service
+```
+
+Each server is slow only 1 time in 100. But the app waits for **all 100**. The chance that all 100 are fast is 0.99 multiplied by itself 100 times, which is about 37%. So about **63% of user requests are slow**. Rare slowness on each server becomes common slowness for users.
+
+More on percentiles: [Latency Percentiles](../production/latency-percentiles.mdx).
+
+## How latency and throughput affect each other
+
+**Slower requests mean fewer requests per second.** A simple rule, called **Little's Law**, links them:
+
+**requests in progress = throughput × latency**
+
+Example: a server can work on 100 requests at the same time. Each one takes 0.1 seconds. So it can finish 100 ÷ 0.1 = **1,000 requests per second**. If the database gets slow and each request now takes 0.2 seconds, the same server can only finish **500 per second**. Latency doubled, throughput halved.
+
+**Busy servers get slow.** It also works the other way. Think of a supermarket. With a few shoppers, you walk straight to a free checkout. When every checkout is busy, a line forms, and each new shopper waits longer and longer.
+
+| How busy the server is | What happens to latency |
+| --- | --- |
+| Under about 50% | Fast. Requests rarely wait |
+| About 70 to 80% | Some waiting. Latency starts to rise |
+| Over 90% | Long lines. Latency shoots up, and timeouts start |
+
+That is why teams add servers **before** they reach 100%, not after.
+
+Some choices trade one for the other:
+
+- **Batching** (doing many items at once) raises throughput, but adds latency. It is like a bus that waits until it is full: it moves more people per trip, but the first passenger waits.
+- **Caching** improves both.
+- **Queues** give the user a fast answer ("got it"), and do the slow work later.
+
+## In the real world
+
+**Google's "The Tail at Scale".** In a 2013 paper, Google engineers Jeff Dean and Luiz André Barroso showed the fan-out math above: if each server is slow for 1 in 100 requests, a user request that waits for 100 servers is slow 63% of the time. One of their fixes is the **hedged request**: if the first server is slow to answer, send the same request to a second server and use whichever answers first.
+
+**Amazon measures the 99.9th percentile.** Amazon's 2007 Dynamo paper explains that Amazon sets its internal speed targets at the **99.9th percentile**, not the average or the median. The goal is a good experience for almost every customer, not only the typical one.
+
+## In the interview
+
+Put latency and throughput in your **non-functional requirements**, with numbers and percentiles:
+
+> "Opening a short link should take under 100 ms at p99. We expect about 12,000 reads per second on average, so I'll design for peaks of around 30,000."
+
+<Callout title="Remember this" type="success">
+  - **Latency** = the time for one request. **Throughput** = how many requests finish per second.
+  - **QPS / RPS** = requests per second. Design for the **peak**, not the average.
+  - The average hides slow requests. Use **p50 and p99**.
+  - With **fan-out**, rare slowness on each server becomes common slowness for users.
+  - **Busy servers get slow.** Add capacity before you hit 100%.
+  - **Batching**: more throughput, more latency. **Caching**: better at both.
+</Callout>

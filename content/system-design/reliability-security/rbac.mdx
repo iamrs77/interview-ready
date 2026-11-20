@@ -1,0 +1,159 @@
+---
+title: "Role-Based Access Control (RBAC)"
+description: "Give permissions to roles like admin or editor, not to each user."
+icon: Users
+---
+
+## The idea
+
+In an office building, doors open with badges. Nobody sets up every door for each of the 500 employees one by one. Instead there are a few badge **types**. A "Staff" badge opens the main doors. A "Finance" badge also opens the finance room. An "IT" badge also opens the server room. When Ravi joins the finance team, he gets a Finance badge. When he moves to IT, his badge type changes. No door has to be changed.
+
+**Role-Based Access Control (RBAC)** works the same way. You don't give permissions to each user. You give permissions to **roles**, and then give users roles.
+
+## Users, roles and permissions
+
+- A **permission** is one action on one kind of thing, like `article:write`, `article:publish` or `user:delete`.
+- A **role** is a named set of permissions that matches a job, like `author`, `editor` or `admin`.
+- A **user** gets one or more roles.
+
+```mermaid
+flowchart LR
+  subgraph Users
+    Asha["Asha"]
+    Ravi["Ravi"]
+  end
+  subgraph Roles
+    Au["author"]
+    Ed["editor"]
+  end
+  subgraph Permissions
+    W["article:write"]
+    E["article:edit_any"]
+    Pub["article:publish"]
+  end
+  Asha --> Au
+  Ravi --> Ed
+  Au --> W
+  Ed --> W
+  Ed --> E
+  Ed --> Pub
+```
+
+Can Ravi publish? Ravi has the `editor` role, and `editor` has `article:publish`. So yes. Can Asha? Her only role is `author`, which doesn't have it. So no.
+
+Why this helps:
+
+- **Easy to manage.** You may have 10,000 users, but only 5 roles to think about.
+- **Easy to check.** "Who can delete users?" Look at one role.
+- **Easy to change.** A new employee gets the right access with one role. When someone leaves, remove their roles.
+
+## An RBAC example
+
+A news website:
+
+| Permission | Reader | Author | Editor | Admin |
+| --- | --- | --- | --- | --- |
+| Read articles | Yes | Yes | Yes | Yes |
+| Write drafts | | Yes | Yes | Yes |
+| Edit anyone's article | | | Yes | Yes |
+| Publish | | | Yes | Yes |
+| Manage users | | | | Yes |
+
+Each role here has everything the role before it has, plus a bit more. This is called a **role hierarchy**: admin includes editor, and editor includes author.
+
+In a database, RBAC is usually four small tables:
+
+```sql
+CREATE TABLE roles            (id INT PRIMARY KEY, name TEXT UNIQUE);  -- 'editor'
+CREATE TABLE permissions      (id INT PRIMARY KEY, name TEXT UNIQUE);  -- 'article:publish'
+CREATE TABLE role_permissions (role_id INT, permission_id INT, PRIMARY KEY (role_id, permission_id));
+CREATE TABLE user_roles       (user_id INT, role_id INT, PRIMARY KEY (user_id, role_id));
+
+-- Can user 7 publish?
+SELECT 1
+FROM user_roles ur
+JOIN role_permissions rp ON rp.role_id = ur.role_id
+JOIN permissions p ON p.id = rp.permission_id
+WHERE ur.user_id = 7 AND p.name = 'article:publish';
+```
+
+In your code, check the **permission**, not the role name:
+
+```js
+// Good: the code asks about the action
+if (!can(user, "article:publish")) return res.status(403).end();
+
+// Less good: add a "chief editor" role later, and you must find and fix every check like this
+if (user.role !== "editor" && user.role !== "admin") return res.status(403).end();
+```
+
+**Making it fast.** Looking up roles in the database on every request adds work. Common options are to cache each user's permissions in Redis, or to put the roles inside the login token (a JWT, see [Cookies, Sessions and JWT](../foundations/cookies-sessions-jwt.mdx)). A token is fast, but it can go **stale**: if you remove someone's admin role, their token still says "admin" until it expires. Keep such tokens short-lived.
+
+**Roles per team.** In apps like Slack or GitHub, a person can be an admin in one team and a plain member in another. So the role is given **inside a team or project**, and the table becomes `user_roles (user_id, team_id, role_id)`. See [Multi-Tenancy](../advanced-components/multi-tenancy.mdx).
+
+Good habits:
+
+- **Least privilege.** Give each person the smallest role that lets them do their job.
+- **Watch for role explosion.** If every special case gets its own new role ("editor-sports-only", "editor-but-no-delete"), you end up with more roles than people. That is a sign you need attributes (below).
+- **Review regularly** who has admin, and remove access when people change jobs.
+
+## RBAC vs ABAC, in short
+
+RBAC can't easily say: **"authors can edit only their own articles"**, or "a doctor can read a patient's file only while treating that patient". The answer depends on the **specific item**, not just on the role.
+
+**ABAC (Attribute-Based Access Control)** decides using **attributes**, meaning facts about the user, the item, the action and the situation:
+
+```js
+// ABAC rule: you may edit an article you wrote, while it is still a draft
+function canEdit(user, article) {
+  return article.authorId === user.id   // a fact about the user and the item
+    && article.status === "draft";       // a fact about the item
+}
+```
+
+| | RBAC | ABAC |
+| --- | --- | --- |
+| **Decides by** | The user's roles | Facts about the user, the item, the time, the place |
+| **Example rule** | Editors can publish | Authors can edit their own drafts |
+| **Good** | Simple. Easy to see who can do what. | Very flexible and detailed |
+| **Bad** | Too many roles for special cases | Harder to understand and test: "why was this denied?" |
+
+Most real apps mix them: **RBAC for the big picture**, plus a few ownership checks in code.
+
+A third style is good to know: **ReBAC (relationship-based access control)**. Access comes from relationships: "Asha can edit this doc because it was shared with her team." Google Docs sharing works like this.
+
+## In the real world
+
+**Kubernetes.** Kubernetes uses RBAC to control who can do what in a cluster. A `Role` lists the allowed actions on resources, and a `RoleBinding` gives that role to a user or a service:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: shop
+  name: pod-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+```
+
+**GitHub repository roles.** Repositories in a GitHub organization give people one of five roles: Read, Triage, Write, Maintain and Admin. Each one can do more than the one before.
+
+**AWS IAM.** In AWS, permissions are written as JSON **policies** and attached to users, groups or roles. A policy can also have **conditions**, like "only if the resource has the same team tag as the user". That is how AWS supports ABAC.
+
+**Google Zanzibar.** In 2019 Google published a paper on **Zanzibar**, its system for relationship-based permissions, used by products like Drive, YouTube and Calendar. Open-source projects such as SpiceDB and OpenFGA are based on its ideas.
+
+## In the interview
+
+When the system has different kinds of users, name the roles and say how you check them:
+
+> "We use RBAC with three roles per workspace: viewer, editor and admin. The API checks permissions like `doc:edit`, not role names. On top of that, a simple ownership check lets users delete only their own comments."
+
+<Callout title="Remember this" type="success">
+  - **Permissions go to roles, roles go to users.**
+  - Check **permissions** in code, not role names.
+  - Roles are often given **per team or project**, not for the whole app.
+  - Give the **least privilege** needed, and watch for **role explosion**.
+  - **ABAC** uses facts (owner, time, department) for detailed rules. Most apps mix RBAC with ownership checks.
+</Callout>

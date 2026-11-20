@@ -1,0 +1,140 @@
+---
+title: "Backpressure"
+description: "Telling the sender to slow down when you can't keep up."
+icon: WavesHorizontal
+---
+
+## The idea
+
+A restaurant kitchen can cook 20 meals an hour. On a Friday night, 40 groups walk in. A good host doesn't seat everyone and send 40 orders to the kitchen at once. The food would take hours and every table would be angry. Instead, the host says "there's a 30-minute wait", or "sorry, we're full tonight". The kitchen's limit **pushes back** all the way to the front door.
+
+**Backpressure** is when the part of a system that can't keep up tells the part sending it work to **slow down or stop**. The name comes from pipes: when a pipe gets narrow, the water pushes back against the flow.
+
+Without backpressure, the fast sender keeps sending. The work piles up somewhere until something breaks.
+
+## Queues that grow forever
+
+A **producer** creates work. A **consumer** does the work. A queue sits between them to soak up short bursts (see [Message Queues and Pub/Sub](../messaging/message-queues-pub-sub.mdx)).
+
+```mermaid
+flowchart LR
+  P["Producer<br/>1,000 messages/sec"]:::service --> Q["Queue<br/>grows by 200/sec"]:::queue --> C["Consumer<br/>800 messages/sec"]:::service
+```
+
+If the producer is faster than the consumer, the queue grows every second.
+
+**Worked example:**
+
+- In: 1,000 messages per second. Out: 800 per second.
+- So the queue grows by **200 every second**.
+- After one hour: 200 × 3,600 = **720,000** messages waiting.
+- A new message must wait for all of them: 720,000 ÷ 800 = 900 seconds = **15 minutes**.
+
+Two things go wrong:
+
+1. **The delay keeps growing.** By the time a message is handled, it may be useless. A login code that arrives 15 minutes late has already expired. Work done for a user who gave up is wasted work.
+2. **Memory runs out.** If the queue lives in memory, the process finally crashes, and every message in it is lost at once.
+
+An unlimited queue doesn't fix overload. It only **hides** it for a while, and then everything fails at once. So **every queue needs a size limit**, and a plan for what happens when it is full.
+
+## Ways to push back
+
+When the queue is full, or the service is too busy, there are three choices.
+
+### 1. Reject
+
+Say "no" to new work, right away. A web server returns `503 Service Unavailable` (or `429`) with a `Retry-After` header. The client tries again later, waiting a bit longer each time (see [Retries, Backoff and Timeouts](../messaging/retries-backoff-timeouts.mdx)).
+
+Rejecting work on purpose to stay healthy is called **load shedding**. It is better to serve 800 users quickly than to accept 1,000 and make all of them time out. Smart load shedding drops the least important work first: checkout and payments get through, background syncs are turned away.
+
+### 2. Slow down the sender
+
+Make the producer wait until there is room:
+
+- **Blocking queue.** When the queue is full, the producer's "add" call simply waits until a slot frees up.
+- **Pull instead of push.** The consumer asks for work only when it is ready. A [Kafka](../messaging/kafka.mdx) consumer pulls messages at its own speed, so it can never be flooded. It just falls behind.
+- **Credits.** The consumer says "send me 10 more", and the sender sends at most 10. TCP and HTTP/2 control their flow this way.
+
+### 3. Drop
+
+Throw some messages away, on purpose. This is only OK when losing some data is fine:
+
+- **Drop the oldest.** For live stock prices or a player's position in a game, only the newest value matters.
+- **Drop the newest.** Keep what you already have, ignore what comes in.
+- **Sample.** Keep 1 in 10. Fine for metrics and debug logs.
+
+### Side by side
+
+| Way | What happens | Good for | Cost |
+| --- | --- | --- | --- |
+| **Reject** | New work gets an error. The client retries later. | Web APIs, user requests | Some users see "try again" |
+| **Slow down** | The sender waits | Pipelines inside your own system, file copies | The sender gets slower too, and may push back on its own sender |
+| **Drop** | Some data is thrown away | Metrics, logs, live video, prices | Lost data |
+| **Add consumers** | Start more workers when the queue grows | A real rise in traffic that lasts | Takes minutes, costs money, and the database behind the workers may become the next bottleneck |
+
+The last row is not backpressure, but it is the usual partner. Backpressure keeps you alive in the moment, and adding consumers fixes a lasting rise in traffic.
+
+Here is a full chain with backpressure. The queue has a limit, and "full" travels back to the user:
+
+```mermaid
+flowchart LR
+  U["Users"]:::client --> A["API"]:::service --> Q["Queue<br/>max 10,000 jobs"]:::queue --> W["Workers"]:::service
+  Q -.->|"full: reject new jobs"| A
+  A -.->|"503 + Retry-After"| U
+```
+
+## Examples
+
+**TCP flow control.** Every TCP connection has backpressure built in (see [TCP vs UDP](../foundations/tcp-vs-udp.mdx)). The receiver keeps telling the sender how much free buffer space it has, called the **receive window**. If the receiver is slow and its buffer fills up, the window drops to zero, and the sender stops until there is room again.
+
+**Node.js streams.** When you write to a stream faster than it can flush the data, `write()` returns `false`. That is the signal to stop and wait for the `drain` event:
+
+```js
+function copy(source, destination) {
+  source.on("data", (chunk) => {
+    const ok = destination.write(chunk);
+    if (!ok) {
+      source.pause();                                   // stop reading
+      destination.once("drain", () => source.resume()); // go on when there is room
+    }
+  });
+  source.on("end", () => destination.end());
+}
+```
+
+In real code, `source.pipe(destination)` does this for you.
+
+**Kafka consumers.** Kafka consumers pull. If a consumer is slow, the messages wait safely on Kafka's disks, not in the consumer's memory. The gap between the newest message and the last one the consumer read is called **consumer lag**. It is the number to watch and alert on.
+
+**A log shipper.** An agent on each server sends logs to a central log system. It keeps a buffer with a size limit. If the log system is down long enough to fill the buffer, the agent drops logs instead of using up all the memory on the server. Losing some debug logs is much better than crashing the app.
+
+## Rate limiting vs backpressure
+
+| | [Rate limiting](./rate-limiting.mdx) | Backpressure |
+| --- | --- | --- |
+| **Based on** | A fixed rule set in advance: "100 per minute per user" | How busy the system is right now |
+| **Main goal** | Fairness and stopping abuse | Surviving overload |
+| **Example** | User 42 gets `429` after 100 requests | Everyone gets `503` because the queue is full |
+
+## In the real world
+
+**Amazon's load shedding.** In the Amazon Builders' Library, AWS engineers describe load shedding: when a server is overloaded, it quickly rejects the extra requests, so the requests it does accept still finish on time. A server that accepts everything gets slow for everyone. Clients time out anyway, and the server ends up doing work that no one is waiting for.
+
+**Kafka's pull design.** Kafka's design documents explain that consumers pull data from Kafka, instead of Kafka pushing it to them. That way a consumer that falls behind can catch up at its own speed, instead of being flooded.
+
+**TCP.** The receive window has been part of TCP from the start. Every web page you load uses it.
+
+## In the interview
+
+Whenever you add a queue to a design, say how big it can get and what happens when it is full:
+
+> "The queue has a size limit. If the workers fall behind and it fills up, the API returns 503 with Retry-After, instead of accepting work we can't finish. We alert on consumer lag and add workers when it keeps growing."
+
+<Callout title="Remember this" type="success">
+  - **Backpressure** = the slow part tells the fast part to slow down.
+  - An **unlimited queue** only hides overload. The delay grows, then memory runs out.
+  - **Every queue needs a limit**, and a plan for when it is full.
+  - Three ways: **reject** (503 or 429), **slow down** the sender (blocking, pull, credits), or **drop** (only when losing data is OK).
+  - Watch **queue length** and **consumer lag**.
+  - Rate limiting is a fixed rule per user. Backpressure reacts to load right now.
+</Callout>

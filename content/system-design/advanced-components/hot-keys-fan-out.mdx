@@ -1,0 +1,152 @@
+---
+title: "Hot Keys, Hot Partitions and Fan-out"
+description: "When one item gets most of the traffic, like a celebrity's post, and how feeds deal with it."
+icon: Flame
+---
+
+## The idea
+
+Picture a supermarket with **10 checkout counters**. A famous film star is working at counter 3 for one day. Everyone queues at counter 3. The other 9 counters stand empty. Opening more counters doesn't help, because nobody wants to use them.
+
+That is a **hot key**. You spread your data across many machines to share the load. But if one item gets most of the traffic, **one machine does all the work** and the rest sit idle.
+
+**Fan-out** is the other side of popularity. When someone with many followers posts, that one post must reach **millions of feeds**. Like a newspaper that has to be delivered to every subscriber's door.
+
+## Hot keys and hot partitions
+
+Big databases and caches split data across machines by key (see [Partitioning and Sharding](../databases/partitioning-sharding.mdx)). Hashing spreads the **keys** evenly. But it does not spread the **traffic** evenly.
+
+- A **hot key** is one key that gets far more requests than others: a viral post, a celebrity's profile, a flash-sale product, the ticket page for a World Cup final.
+- A **hot partition** (or **hot shard**) is the machine that holds that key. It gets overloaded while the others are quiet.
+
+```mermaid
+flowchart TB
+  Users(("Millions of users")):::client --> App["App Servers"]:::service
+  App -->|"post:viral, most of the traffic"| S1[("Shard 1<br/>overloaded")]:::db
+  App -->|"other keys"| S2[("Shard 2<br/>mostly idle")]:::db
+  App -->|"other keys"| S3[("Shard 3<br/>mostly idle")]:::db
+```
+
+A **bad shard key** causes the same problem for writes. If you shard by **date**, every write today goes to the one shard that holds today. Pick keys that spread new writes out, like a user ID.
+
+## Spotting hot keys
+
+You can't fix a hot key until you know which key it is. Ways to find it:
+
+- **Compare the machines.** If one shard's CPU, network or request count is far above the others, it probably holds a hot key. Look at each shard on its own: an average over all shards hides the one that is on fire.
+- **Count requests per key.** The app, or a proxy in front of the cache, counts how often each key is asked for and keeps a short "top 10" list. At high traffic, count only a sample of requests, or use a **Count-Min Sketch** to save memory (see [Bloom Filter, HyperLogLog, Count-Min Sketch](./probabilistic-data-structures.mdx)).
+- **Use the database's own tools.** Redis can list its busiest keys with `redis-cli --hotkeys` (this needs an LFU eviction policy, like `allkeys-lfu`). DynamoDB's **CloudWatch Contributor Insights** shows the most used and most throttled keys. Google Bigtable's **Key Visualizer** draws a heat map of which keys get the traffic.
+- **Expect the obvious ones.** Some hot keys are easy to predict: the flash-sale product, the World Cup final page, an account with millions of followers. Prepare for them before the traffic arrives.
+
+## Fixes for hot keys
+
+**When the hot key is read a lot:**
+
+- **Cache it**, and also keep a copy **inside each app server's memory** for a few seconds. Then most requests never even reach Redis. More on this in [Cache Problems](../caching/cache-problems.mdx).
+- **Make copies of the key.** Store the same value as `post:123:copy1` ... `post:123:copy10`. Each name is hashed on its own, so the copies usually land on several different machines (not always, so check). Each reader picks one copy at random. When the value changes, update or delete **every** copy.
+- **Use a CDN** for anything public, like images and public pages (see [CDN](../caching/cdn.mdx)).
+- **Combine identical requests.** If 1,000 requests ask for the same missing key at once, send **one** to the database and give the answer to all 1,000.
+
+**When the hot key is written a lot** (like the like-counter of a viral post):
+
+- **Split the counter.** Keep 10 small counters instead of one. Each write adds 1 to a random one. To read, add all 10 together.
+- **Buffer and batch.** Count likes in memory for a second, then write "+500" once, instead of 500 separate writes.
+
+```js
+// Write: add 1 to one of 10 sub-counters, picked at random
+const n = Math.floor(Math.random() * 10);
+await redis.incr(`likes:post123:${n}`);
+
+// Read: get all 10 sub-counters and add them up
+const keys = Array.from({ length: 10 }, (_, i) => `likes:post123:${i}`);
+const values = await Promise.all(keys.map((k) => redis.get(k)));
+const total = values.reduce((sum, v) => sum + Number(v ?? 0), 0);
+```
+
+The 10 sub-keys usually land on different machines, so the writes are shared. Reads get a little more costly, which is fine when writes are the problem.
+
+## Fan-out: one post, many feeds
+
+When a user posts, all their followers should see it in their **home feed**. There are two ways to do this.
+
+### Fan-out on write (push)
+
+**When the post is created**, copy its ID into the feed list of **every follower**, right away. Reading a feed is then one quick lookup of a ready-made list.
+
+Like a newspaper delivered to every subscriber's door each morning.
+
+```mermaid
+flowchart TB
+  A["Asha posts a photo"]:::client --> PS["Post Service"]:::service
+  PS --> Q["Queue"]:::queue
+  Q --> FW["Fan-out Workers"]:::service
+  FW -->|"add post id"| F1[("Feed of follower 1")]:::cache
+  FW -->|"add post id"| F2[("Feed of follower 2")]:::cache
+  FW -->|"add post id"| F3[("Feed of follower 3")]:::cache
+```
+
+### Fan-out on read (pull)
+
+**Store the post once.** When a user opens their feed, look up who they follow, fetch everyone's latest posts, then merge and sort them.
+
+Like walking to the newsstand and picking up each paper yourself.
+
+```mermaid
+flowchart TB
+  R["Ravi opens his feed"]:::client --> FS["Feed Service"]:::service
+  FS -->|"1. who does Ravi follow?"| G[("Follows DB")]:::db
+  FS -->|"2. latest posts of those people"| P[("Posts DB")]:::db
+  FS -->|"3. merge and sort by time"| R
+```
+
+### Side by side
+
+| | Fan-out on write (push) | Fan-out on read (pull) |
+| --- | --- | --- |
+| **Posting** | Slow and heavy: one write per follower | Fast: one write |
+| **Reading a feed** | Very fast: the list is ready | Slow: many lookups, then merge |
+| **Wasted work** | Feeds of inactive users get filled too | None |
+| **Best for** | Users with a normal number of followers | Accounts with huge numbers of followers |
+
+Most apps have far more reads than writes, so **push is usually the default**. But it has one big weakness.
+
+## The celebrity problem
+
+Imagine an account with **100 million followers**. With fan-out on write, one post means **100 million feed writes**. That takes a long time, keeps the workers busy for everyone else, and followers at the end of the line see the post late.
+
+The fix is a **hybrid**:
+
+- **Normal users** → fan-out on write. Their posts are pushed into followers' feeds.
+- **Celebrities** (accounts above a follower limit you choose) → **not** pushed. Their posts are stored once.
+- When you open your feed, the Feed Service takes your **ready-made feed** and **merges in** recent posts from the few celebrities you follow.
+
+```mermaid
+flowchart TB
+  U["Ravi opens his feed"]:::client --> FS["Feed Service"]:::service
+  FS -->|"1. ready-made feed<br/>(posts from normal users)"| FC[("Feed cache")]:::cache
+  FS -->|"2. latest posts of the<br/>celebrities Ravi follows"| CC[("Celebrity posts cache")]:::cache
+  FS -->|"3. merged feed, newest first"| U
+```
+
+Celebrity posts are now read by millions of people. That makes them **hot keys**, so they get the read fixes from above: caching, copies and in-memory caches. See [Design a News Feed](../questions/news-feed.mdx) for the full design.
+
+## In the real world
+
+**Twitter used the hybrid model.** In talks about how Twitter's timelines worked (around 2012 and 2013), Twitter engineers explained that each user's home timeline was kept as a list in **Redis**. A new tweet was pushed into the timelines of the author's followers. For accounts with a very large number of followers, the tweets were not pushed. They were merged into the timeline when it was read.
+
+**DynamoDB recommends splitting hot keys.** AWS's DynamoDB guide suggests adding a random or calculated **suffix** to a partition key, like `2024-06-01.7`, so writes for one busy key are spread over several partitions. This is the same idea as the split counter.
+
+## In the interview
+
+In any feed, social or "popular item" question, say the word **"hot key"** before the interviewer does:
+
+> "Most users get fan-out on write, so feeds load fast. Celebrities with millions of followers are not fanned out. Their posts are merged in when a feed is read, and cached heavily, because they are hot keys."
+
+<Callout title="Remember this" type="success">
+  - **Hot key** = one key with far more traffic. **Hot partition** = the one machine holding it.
+  - Spot them by comparing shards, counting requests per key, or the database's own tools (like `redis-cli --hotkeys`).
+  - Read fixes: **cache, in-memory copy, key copies, CDN, combine identical requests**.
+  - Write fixes: **split the counter** into sub-keys, **buffer and batch** writes.
+  - **Fan-out on write** (push): fast reads, heavy posting. **Fan-out on read** (pull): cheap posting, slow reads.
+  - **Celebrity problem:** pushing to millions of feeds is too slow. Use a **hybrid**: push for normal users, pull for celebrities.
+</Callout>

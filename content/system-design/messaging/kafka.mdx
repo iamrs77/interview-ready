@@ -1,0 +1,161 @@
+---
+title: "Kafka"
+description: "A durable event log for passing messages at huge scale, where readers keep their own bookmark."
+icon: ScrollText
+---
+
+## The idea
+
+Think of a **ship's logbook**. The crew only ever **adds new lines at the bottom**. Nobody erases or changes old lines. Every line has a line number.
+
+Many people can read the same logbook. Each reader keeps their **own bookmark**: the captain may be on line 120, the engineer on line 95. Reading doesn't remove anything, so a new reader can start from line 1 and catch up.
+
+**Apache Kafka** works the same way. It is a **log**: a list of messages where new ones are only added at the end. Producers add messages. Consumers read them and remember how far they got. Messages **stay** after they are read, for as long as you choose to keep them. This is the big difference from a normal queue, where a message is deleted once it is handled.
+
+## The parts
+
+| Word | Meaning | Logbook picture |
+| --- | --- | --- |
+| **Broker** | One Kafka server. A Kafka **cluster** is a group of brokers. | The library that keeps the books |
+| **Topic** | A named stream of messages, like `orders` | One logbook |
+| **Partition** | A topic is split into several partitions. Each one is its own log. | The logbook split into volumes |
+| **Offset** | The position number of a message inside one partition | The line number |
+| **Producer** | A service that writes messages | A crew member writing lines |
+| **Consumer** | A service that reads messages | A reader |
+| **Consumer group** | A team of consumers that share the reading of a topic | A team that splits the volumes between them |
+
+Each message has an optional **key** (like an order ID), a **value** (the data, often JSON) and a time.
+
+## A topic with partitions and a consumer group
+
+```mermaid
+flowchart LR
+  P["Order Service<br/>(producer)"]:::service
+  subgraph T["Topic: orders"]
+    P0[["Partition 0<br/>offsets 0 to 4"]]:::queue
+    P1[["Partition 1<br/>offsets 0 to 3"]]:::queue
+    P2[["Partition 2<br/>offsets 0 to 5"]]:::queue
+  end
+  subgraph G["Consumer group: billing"]
+    C1["Consumer 1"]:::service
+    C2["Consumer 2"]:::service
+  end
+  P -->|"key: order-7"| P0
+  P -->|"key: order-3"| P1
+  P -->|"key: order-9"| P2
+  P0 --> C1
+  P1 --> C1
+  P2 --> C2
+```
+
+- The producer picks a partition **from the key**. All messages with the same key go to the **same partition**.
+- Inside a group, each partition is read by **only one** consumer. Here Consumer 1 reads partitions 0 and 1, and Consumer 2 reads partition 2.
+- Partitions of one topic live on **different brokers**, so the work is spread over many machines.
+
+## Offsets: how a consumer remembers where it is
+
+Here is partition 0 of the `orders` topic:
+
+| Offset | Message |
+| --- | --- |
+| 0 | Order 101 placed |
+| 1 | Order 102 placed |
+| 2 | Order 101 paid |
+| 3 | Order 103 placed |
+| 4 | Order 102 cancelled |
+
+1. The billing consumer reads offsets 0, 1 and 2, and handles them.
+2. It then **commits offset 3**. This tells Kafka: "billing is done up to here. Next time, start at 3." Kafka saves this number for each group and each partition.
+3. The consumer crashes. Another consumer in the group takes over partition 0. It asks Kafka where billing was, gets **3**, and carries on from "Order 103 placed". Nothing is skipped.
+
+Some things to notice:
+
+- **Each group has its own offsets.** An analytics group can be at offset 1 on the same partition while billing is at 3. They never get in each other's way.
+- **You can go back.** Move a group's offset back to 0 and it reads everything again. This is called **replay**. It is useful after fixing a bug, or to fill a brand new database from old events.
+- **Crash at the wrong moment = duplicate.** If the consumer handles offset 3 but crashes **before** committing, the next consumer reads offset 3 again. So consumers must cope with duplicates. See [Delivery Guarantees](./delivery-guarantees.mdx) and [Idempotency](./idempotency.mdx).
+- **Reading doesn't delete.** Kafka removes old messages only after a set time or size (the default is 7 days). This is called **retention**. You can also keep messages forever.
+
+## Consumer groups
+
+Consumer groups give you **both** queue and pub/sub behavior (see [Message Queues and Pub/Sub](./message-queues-pub-sub.mdx)):
+
+- **Between groups, it is pub/sub.** Every group gets **every** message.
+- **Inside a group, it is a queue.** The partitions are **split** between the group's consumers.
+
+```mermaid
+flowchart TB
+  subgraph GB["Group: billing"]
+    B1["Billing consumer 1"]:::service
+    B2["Billing consumer 2"]:::service
+  end
+  subgraph GA["Group: analytics"]
+    A1["Analytics consumer"]:::service
+  end
+  T[["Topic: orders<br/>partitions 0, 1, 2"]]:::queue
+  T -->|"partitions 0, 1"| B1
+  T -->|"partition 2"| B2
+  T -->|"all 3 partitions"| A1
+```
+
+- **Partitions limit how many consumers can work.** With 3 partitions, a 4th consumer in the same group sits idle. So pick enough partitions up front for the speed you need.
+- When a consumer joins, leaves or crashes, Kafka **rebalances**: it hands that consumer's partitions to the others. Reading can pause for a moment while this happens.
+
+## Message ordering
+
+- Kafka keeps order **only inside one partition**. Across partitions there is no order.
+- So give related messages the **same key**. By default Kafka picks the partition with `hash(key) % numberOfPartitions`, so the same key always lands in the same partition.
+- Example: use the **order ID** as the key. "Order 42 placed", "Order 42 paid" and "Order 42 shipped" all go to one partition and are read in that order.
+
+Watch out:
+
+- **No key** means messages are spread over all partitions, with no order between them.
+- **Adding partitions later** changes where keys land, so order can break around that moment.
+- **A hot key** (one very busy key, like a celebrity's user ID) overloads one partition. See [Hot Keys and Fan-out](../advanced-components/hot-keys-fan-out.mdx).
+
+## Why Kafka is so fast
+
+1. **It only appends to the end of files.** Writing to the end of a file, one after another, is much faster than jumping around the disk.
+2. **It uses the page cache.** The operating system keeps recently used file data in memory. Consumers that are up to date read new messages straight from memory.
+3. **Zero-copy.** Kafka hands data from the page cache straight to the network, without copying it through the Kafka program first.
+4. **Batching and compression.** Producers send many messages in one request, squeezed together.
+5. **Partitions spread the work** across many brokers, so many machines read and write at the same time.
+6. **The broker stays simple.** It doesn't track each message for each consumer. Consumers just remember one offset per partition.
+
+**Not losing data:** each partition is copied to several brokers (often 3). One copy is the **leader** and takes the reads and writes. The others are **followers** that copy it. If the leader's broker dies, a follower takes over. With the producer setting `acks=all`, a write counts as saved only when all the up-to-date copies have it. Pair it with the topic setting `min.insync.replicas=2` (with 3 copies). Without it, if both followers fall behind, "all up-to-date copies" can mean just the leader, and losing the leader then loses the write. With it, Kafka refuses an `acks=all` write when fewer than 2 up-to-date copies are there to save it.
+
+Older Kafka versions needed a separate system called ZooKeeper to manage the cluster. Kafka's built-in replacement, **KRaft**, has been ready for production since Kafka 3.3 (2022), and Kafka 4.0 (2025) removed ZooKeeper completely.
+
+## Common uses
+
+| Use | Example |
+| --- | --- |
+| **Event bus between services** | `OrderPlaced` goes to payment, email and analytics ([Event-Driven Architecture](./event-driven-architecture.mdx)) |
+| **Activity tracking** | Clicks, page views and searches from millions of users |
+| **Collecting logs and metrics** | Thousands of servers send logs to one place |
+| **Stream processing** | Count ad clicks per minute as they happen ([Batch vs Stream](../advanced-components/batch-vs-stream.mdx)) |
+| **Change data capture** | Every database change becomes an event ([CDC](../distributed-systems/change-data-capture.mdx)) |
+
+**When Kafka is too much:** a simple job queue with a few messages per second, or jobs that need per-message delays or priorities. A plain queue is simpler: SQS can delay messages, and RabbitMQ also supports priorities. See [Kafka vs RabbitMQ vs SQS](./kafka-vs-rabbitmq-vs-sqs.mdx).
+
+## In the real world
+
+**LinkedIn built it.** Kafka was created at LinkedIn to move activity events between systems, and made open source in 2011. In 2019, LinkedIn's engineering blog said its Kafka setup handled more than 7 trillion messages a day.
+
+**Netflix's data pipeline.** Netflix's Keystone pipeline, which carries event data across the company, is built on Kafka.
+
+**The New York Times keeps everything.** The New York Times stores every article it has published since 1851 in Kafka, with no time limit, and new systems fill themselves by reading the log from the start.
+
+## In the interview
+
+Say the topic, the key and the consumer groups:
+
+> "Order events go to a Kafka topic keyed by order ID, so all events for one order stay in order in one partition. Billing and analytics are separate consumer groups, so each gets every event and keeps its own offset. If we find a bug, we can reset the offset and replay."
+
+<Callout title="Remember this" type="success">
+  - Kafka is a **log**: messages are added at the end and **stay** after being read.
+  - A **topic** is split into **partitions**. The **offset** is a message's position in a partition.
+  - Consumers **commit** their offset. A crash before the commit means the message is read **again**.
+  - Every **consumer group** gets every message. Inside a group, partitions are **split** between consumers.
+  - Order is kept **only inside a partition**, so use a **key** (like the order ID).
+  - Fast because of **append-only writes, page cache, zero-copy, batching** and **partitions**.
+</Callout>

@@ -1,0 +1,821 @@
+{
+  "deck": "questions",
+  "cards": [
+    {
+      "id": "questions/url-shortener-1",
+      "lesson": "questions/url-shortener",
+      "q": "In a URL shortener, what does the quick math say about storage and reads?",
+      "a": "1 billion links × about 500 bytes = about **500 GB**, which fits on one database. 1 billion opens a day is about **12,000 opens per second**, too much for one database alone, so we need a **cache**."
+    },
+    {
+      "id": "questions/url-shortener-2",
+      "lesson": "questions/url-shortener",
+      "q": "In a URL shortener, why are hashing the long URL and random codes weaker ways to make short codes?",
+      "a": "Hashing (like the first 7 characters of MD5) can give two URLs the same code, a **collision**, so you must check every time. A random code + check works, but every create needs an extra database read."
+    },
+    {
+      "id": "questions/url-shortener-3",
+      "lesson": "questions/url-shortener",
+      "q": "In a URL shortener, what is the best way to make short codes unique?",
+      "a": "Keep one shared counter in Redis. Each new link gets the next number with `INCR`, and the number becomes a short code with **base62**. Numbers never repeat, so counter codes never collide with each other."
+    },
+    {
+      "id": "questions/url-shortener-4",
+      "lesson": "questions/url-shortener",
+      "q": "In a URL shortener, how many short codes do 7 base62 characters give?",
+      "a": "Base62 uses 62 characters: `0-9`, `a-z` and `A-Z`. 62⁷ = about **3.5 trillion** codes, far more than 1 billion links."
+    },
+    {
+      "id": "questions/url-shortener-5",
+      "lesson": "questions/url-shortener",
+      "q": "In a URL shortener, how can a custom alias clash with the counter?",
+      "a": "A user can pick an alias like `aB3x9Kq` that the counter will reach later. Then the counter makes a code that is already taken."
+    },
+    {
+      "id": "questions/url-shortener-6",
+      "lesson": "questions/url-shortener",
+      "q": "In a URL shortener, what are the two fixes for a custom alias taking a future counter code?",
+      "a": "(1) The insert fails on a taken code (the primary key does this), and we skip to the next number. (2) Keep aliases in their own space: aliases have 8 or more characters, counter codes at most 7."
+    },
+    {
+      "id": "questions/url-shortener-7",
+      "lesson": "questions/url-shortener",
+      "q": "In a URL shortener, what if Redis restarts and loses the counter?",
+      "a": "It could start from an old number and hand out codes that exist. Turn on Redis **persistence**, and on start-up set the counter above the biggest number used, plus a safety gap. The insert still fails on a taken code."
+    },
+    {
+      "id": "questions/url-shortener-8",
+      "lesson": "questions/url-shortener",
+      "q": "In a URL shortener, how do you cut the number of calls to the Redis counter?",
+      "a": "Each server takes a block of 1,000 numbers at once, and uses them one by one."
+    },
+    {
+      "id": "questions/url-shortener-9",
+      "lesson": "questions/url-shortener",
+      "q": "In a URL shortener, when should the redirect be a 302 instead of a 301?",
+      "a": "**302** (\"moved for now\") sends every click to our server, so pick it if you need expiry or analytics. **301** (\"moved forever\") is faster, but the browser remembers it and skips our server."
+    },
+    {
+      "id": "questions/url-shortener-10",
+      "lesson": "questions/url-shortener",
+      "q": "In a URL shortener, how do you make redirects fast?",
+      "a": "`shortCode` is the primary key, so it already has an index. Add a **Redis cache** in front of the database, so popular links never reach it. Use a TTL, and delete the key when a link is deleted."
+    },
+    {
+      "id": "questions/url-shortener-11",
+      "lesson": "questions/url-shortener",
+      "q": "In a URL shortener, how do you scale to 100 million users a day?",
+      "a": "Run many copies of a **stateless** service behind a load balancer. Split reads and writes into two services, since opens are about 100 times more than creates. Add **read replicas** so the database stays up."
+    },
+    {
+      "id": "questions/url-shortener-12",
+      "lesson": "questions/url-shortener",
+      "q": "In a URL shortener, what happens when two users ask for the same custom alias at the same time?",
+      "a": "`shortCode` is the primary key, so it must be unique. The first insert works, the second fails, and we return `409 Conflict`. The user picks another alias."
+    },
+    {
+      "id": "questions/url-shortener-13",
+      "lesson": "questions/url-shortener",
+      "q": "In a URL shortener, how do you handle expired links?",
+      "a": "On open, check `expiresAt`. If it has passed, return `410 Gone` (`404` also works). A background job deletes old rows once a day. Keep the cache TTL shorter than the time left before the link expires."
+    },
+    {
+      "id": "questions/rate-limiter-1",
+      "lesson": "questions/rate-limiter",
+      "q": "In a rate limiter, what does the quick math tell you?",
+      "a": "100 million users × 100 bytes = about **10 GB**, which fits in memory. But 1 million checks per second needs about **10 Redis servers**. Memory is easy; requests per second is the hard part."
+    },
+    {
+      "id": "questions/rate-limiter-2",
+      "lesson": "questions/rate-limiter",
+      "q": "In a rate limiter, where should the limiter sit, and why?",
+      "a": "In the **API gateway**: every request passes through it, and it already checks logins. One place protects every service. In the client, anyone can skip it; inside each service, every team builds it again."
+    },
+    {
+      "id": "questions/rate-limiter-3",
+      "lesson": "questions/rate-limiter",
+      "q": "In a rate limiter, how does a token bucket work?",
+      "a": "Each client has a bucket of up to 100 tokens that drip back in at a fixed speed. Each request takes one token. No token left means blocked."
+    },
+    {
+      "id": "questions/rate-limiter-4",
+      "lesson": "questions/rate-limiter",
+      "q": "In a rate limiter, why is the token bucket a good default?",
+      "a": "It **allows short bursts** (up to the bucket size) but keeps the average rate. It needs only **two numbers** per client: tokens left, and the last refill time."
+    },
+    {
+      "id": "questions/rate-limiter-5",
+      "lesson": "questions/rate-limiter",
+      "q": "In a rate limiter, what is wrong with the sliding window log and the fixed window counter?",
+      "a": "The sliding window log stores a timestamp for every request, so memory grows with the limit. The fixed window lets bursts sneak through at the edge: 100 requests at 12:00:59 and 100 more at 12:01:00."
+    },
+    {
+      "id": "questions/rate-limiter-6",
+      "lesson": "questions/rate-limiter",
+      "q": "In a rate limiter, how does the sliding window counter estimate the count?",
+      "a": "It blends this minute's and last minute's counts. At 12:01:15 (25% in), with 80 last minute and 30 so far: 30 + 80 × 75% = **90**. Two numbers per client, and almost no edge bursts."
+    },
+    {
+      "id": "questions/rate-limiter-7",
+      "lesson": "questions/rate-limiter",
+      "q": "In a rate limiter, why keep counters in Redis, not in each server's memory or a normal database?",
+      "a": "In each server's memory, a user spread over 10 gateways gets 10 times the limit. A normal database is too slow for a write on every request. Redis is in memory, shared by every gateway, and keys expire on their own."
+    },
+    {
+      "id": "questions/rate-limiter-8",
+      "lesson": "questions/rate-limiter",
+      "q": "In a rate limiter, what race condition can break the token bucket, and how do you fix it?",
+      "a": "Two gateways read the bucket at the same moment, both see 1 token, and both allow a request. Fix: run the whole \"read, math, write\" as one **Lua script** in Redis, which runs one script at a time."
+    },
+    {
+      "id": "questions/rate-limiter-9",
+      "lesson": "questions/rate-limiter",
+      "q": "In a rate limiter, why send `INCR` and `EXPIRE` together inside `MULTI` and `EXEC`?",
+      "a": "If the gateway sent `INCR` alone and crashed before `EXPIRE`, the key would never expire. With `MULTI` and `EXEC`, Redis runs both commands together, or neither."
+    },
+    {
+      "id": "questions/rate-limiter-10",
+      "lesson": "questions/rate-limiter",
+      "q": "In a rate limiter on Redis Cluster, why write the key as `rate:{user-42}:search`?",
+      "a": "Redis Cluster hashes the whole key, so one user's keys can land on different servers and a Lua script fails with `CROSSSLOT`. With a **hash tag**, only the part in curly braces is hashed, so they all sit on one server."
+    },
+    {
+      "id": "questions/rate-limiter-11",
+      "lesson": "questions/rate-limiter",
+      "q": "In a rate limiter, what should happen if Redis is down?",
+      "a": "Usually **fail open**: allow the request, so the API keeps working without protection for a while. A login endpoint may **fail closed**: an attacker trying millions of passwords is worse than a short outage."
+    },
+    {
+      "id": "questions/rate-limiter-12",
+      "lesson": "questions/rate-limiter",
+      "q": "In a rate limiter, what does a blocked client get back?",
+      "a": "`429 Too Many Requests`, with `Retry-After` saying how many seconds to wait. Send the `X-RateLimit-*` headers on successful answers too, so clients can slow down before they hit the limit."
+    },
+    {
+      "id": "questions/rate-limiter-13",
+      "lesson": "questions/rate-limiter",
+      "q": "In a rate limiter, how should a client retry after a 429?",
+      "a": "With **exponential backoff with jitter**: wait 1 s, then 2 s, then 4 s, plus a small random extra. The random part stops thousands of clients retrying at the exact same moment."
+    },
+    {
+      "id": "questions/rate-limiter-14",
+      "lesson": "questions/rate-limiter",
+      "q": "In a rate limiter, how do you limit users who are not logged in?",
+      "a": "Use the IP address, but set IP limits higher than user limits, because many people can share one IP (an office, a school, a mobile network). Once the user logs in, switch to their user ID."
+    },
+    {
+      "id": "questions/notification-service-1",
+      "lesson": "questions/notification-service",
+      "q": "In a notification service, why does the quick math say we need a queue?",
+      "a": "100 million a day is only about 1,200 per second. But one campaign can ask for 10 million messages at once, and providers limit how fast we can send. A queue holds the work and sends it at a safe speed."
+    },
+    {
+      "id": "questions/notification-service-2",
+      "lesson": "questions/notification-service",
+      "q": "In a notification service, why does `POST /notifications` return `202 Accepted`?",
+      "a": "It means \"we got it, and will deliver it soon\". The caller doesn't wait for Apple or Twilio. The real sending happens later, from a queue."
+    },
+    {
+      "id": "questions/notification-service-3",
+      "lesson": "questions/notification-service",
+      "q": "In a notification service, why keep one delivery row per notification and channel?",
+      "a": "Each channel needs its own status. \"Order shipped\" by push and email is one notification with two deliveries. When the push is `sent`, the email still shows `queued`, so the email worker doesn't skip it."
+    },
+    {
+      "id": "questions/notification-service-4",
+      "lesson": "questions/notification-service",
+      "q": "In a notification service, how do login codes stay fast during a big marketing send?",
+      "a": "Give each channel a **high** and a **low** priority queue, with their own workers. Login codes go to high, marketing to low. With one queue, or one per channel, a login code waits behind the marketing blast."
+    },
+    {
+      "id": "questions/notification-service-5",
+      "lesson": "questions/notification-service",
+      "q": "In a notification service, what if we crash after saving the delivery rows but before putting them on the queue?",
+      "a": "This is a **dual write**. A **scheduler** job runs every minute, finds deliveries that are due but still not on the queue, and puts them there. The database is the source of truth: the outbox idea."
+    },
+    {
+      "id": "questions/notification-service-6",
+      "lesson": "questions/notification-service",
+      "q": "In a notification service, how do you retry failed sends?",
+      "a": "Wait longer after each failure (1 s, 2 s, 4 s, plus a little randomness). After 5 tries, move the message to a **dead-letter queue**, where an engineer can look at it later."
+    },
+    {
+      "id": "questions/notification-service-7",
+      "lesson": "questions/notification-service",
+      "q": "In a notification service, why is retrying right away a bad idea?",
+      "a": "Instant retries make an overloaded provider worse. And after a **timeout**, the provider may have sent the SMS already, so a blind retry sends it twice."
+    },
+    {
+      "id": "questions/notification-service-8",
+      "lesson": "questions/notification-service",
+      "q": "In a notification service, why must a worker claim the delivery row instead of just checking its status?",
+      "a": "If the queue gives one message to two workers, both read `queued` and both send. A claim is **one** conditional update to `sending`, so only one worker can win it."
+    },
+    {
+      "id": "questions/notification-service-9",
+      "lesson": "questions/notification-service",
+      "q": "In a notification service, what is the lease on a claimed delivery for?",
+      "a": "The claim has a time limit. If a worker crashes while sending, the lease runs out and another worker can claim the row. Keep the lease (1 minute) shorter than the queue's wait before redelivery (say 5 minutes)."
+    },
+    {
+      "id": "questions/notification-service-10",
+      "lesson": "questions/notification-service",
+      "q": "In a notification service, what are the two dedupe checks?",
+      "a": "An `Idempotency-Key` at the API, saved with a unique index, stops a caller creating the same notification twice. A **claim** on the delivery row in the worker stops us sending twice."
+    },
+    {
+      "id": "questions/notification-service-11",
+      "lesson": "questions/notification-service",
+      "q": "In a notification service, why is exactly-once delivery impossible?",
+      "a": "If a worker crashes after the provider sent the SMS but before we saved `sent`, the retry sends it again. We can't see inside the provider, so we make duplicates **rare**, not impossible."
+    },
+    {
+      "id": "questions/notification-service-12",
+      "lesson": "questions/notification-service",
+      "q": "In a notification service, how do you avoid sending users too much?",
+      "a": "Check user **settings** first (cached in Redis), use **frequency caps** like 3 marketing pushes a day, and respect **quiet hours**. Also group them (\"5 people liked your photo\") and add unsubscribe links."
+    },
+    {
+      "id": "questions/notification-service-13",
+      "lesson": "questions/notification-service",
+      "q": "In a notification service, how do you send a message to 10 million users?",
+      "a": "A **fan-out job** reads the audience in batches of 1,000. Each batch goes through the normal settings and caps checks, then onto the **low-priority** queue. Workers send at the speed the providers allow."
+    },
+    {
+      "id": "questions/notification-service-14",
+      "lesson": "questions/notification-service",
+      "q": "In a notification service, the SMS provider is down for an hour. What happens?",
+      "a": "Messages wait in the queue, so nothing is lost. A **circuit breaker** stops workers calling the broken provider. Better: switch to a second SMS provider, or fall back to email for login codes."
+    },
+    {
+      "id": "questions/whatsapp-1",
+      "lesson": "questions/whatsapp",
+      "q": "In Design WhatsApp, what does the quick math say about messages and storage?",
+      "a": "1 billion users × 20 messages a day = about **230,000 messages per second**. At about 100 bytes each, that is **2 TB per day**, far too much for one database, so we need one that spreads data over many machines."
+    },
+    {
+      "id": "questions/whatsapp-2",
+      "lesson": "questions/whatsapp",
+      "q": "In Design WhatsApp, why are there about 600 chat servers, and what does that mean?",
+      "a": "300 million phones online ÷ about 500,000 connections per server = about 600 servers. So Alice and Bob are almost never on the same server, and we need a way to pass messages between servers."
+    },
+    {
+      "id": "questions/whatsapp-3",
+      "lesson": "questions/whatsapp",
+      "q": "In Design WhatsApp, why does each phone open a WebSocket?",
+      "a": "A normal website only answers requests. A **WebSocket** stays open, so both the phone and the server can send data at any time, and the server can push messages to the phone."
+    },
+    {
+      "id": "questions/whatsapp-4",
+      "lesson": "questions/whatsapp",
+      "q": "In Design WhatsApp, what does one tick mean, and when is it sent?",
+      "a": "One tick means the message is safe. The server sends the `ack` only **after** the message is saved in the database: save first, then ack."
+    },
+    {
+      "id": "questions/whatsapp-5",
+      "lesson": "questions/whatsapp",
+      "q": "In Design WhatsApp, what is the inbox row for?",
+      "a": "Every message gets an inbox row for each person who has not received it, even if they are online. It is deleted only when their phone sends a `delivered` receipt. A push notification wakes offline phones."
+    },
+    {
+      "id": "questions/whatsapp-6",
+      "lesson": "questions/whatsapp",
+      "q": "In Design WhatsApp, how does a message reach a user on another chat server?",
+      "a": "**Redis Pub/Sub, one channel per user.** When Bob connects to server 41, it subscribes to `user:bob`. Alice's server just publishes to `user:bob`, and Redis delivers it to server 41. No lookups."
+    },
+    {
+      "id": "questions/whatsapp-7",
+      "lesson": "questions/whatsapp",
+      "q": "In Design WhatsApp, why not send each message to every server, or keep a user-to-server directory?",
+      "a": "Sending to all 600 servers gives every server 600 times the work. A directory like `bob → chat-41` works, but must always be correct: if server 41 crashes, the map is wrong until its entries expire."
+    },
+    {
+      "id": "questions/whatsapp-8",
+      "lesson": "questions/whatsapp",
+      "q": "In Design WhatsApp, why use sharded Pub/Sub in the Redis Cluster?",
+      "a": "Plain Pub/Sub in a cluster sends every message to every server, so adding servers doesn't help. **Sharded Pub/Sub** (`SSUBSCRIBE`, `SPUBLISH`) puts each channel on one shard, so adding shards adds capacity."
+    },
+    {
+      "id": "questions/whatsapp-9",
+      "lesson": "questions/whatsapp",
+      "q": "In Design WhatsApp, Redis Pub/Sub can drop messages. Why is that fine?",
+      "a": "We save the message and the inbox row in the database first. If the fast path fails, Bob still gets the message from his inbox. The database is the source of truth; Pub/Sub is only the fast path."
+    },
+    {
+      "id": "questions/whatsapp-10",
+      "lesson": "questions/whatsapp",
+      "q": "In Design WhatsApp, when a phone connects, why subscribe first and then read the inbox?",
+      "a": "In the other order, a message published between the two steps would reach nobody until the next reconnect. Our order can deliver a message twice, which is fine: the phone drops duplicates by message ID."
+    },
+    {
+      "id": "questions/whatsapp-11",
+      "lesson": "questions/whatsapp",
+      "q": "In Design WhatsApp, how do you stop a resent message from being saved twice?",
+      "a": "If the phone gets no `ack`, it keeps the message and sends it again later with the **same** `clientMsgId`. The server sees the ID and saves the message only once."
+    },
+    {
+      "id": "questions/whatsapp-12",
+      "lesson": "questions/whatsapp",
+      "q": "In Design WhatsApp, how do you keep read receipts cheap?",
+      "a": "Send one receipt for many messages: \"read everything up to `m-5020`\", not 20 receipts. Groups keep a \"read up to\" marker per member instead of a status for every message and every member."
+    },
+    {
+      "id": "questions/whatsapp-13",
+      "lesson": "questions/whatsapp",
+      "q": "In Design WhatsApp, how do you keep messages in order?",
+      "a": "The **server** decides the order, because phone clocks can be wrong. Each message gets an ID that grows over time, like a Snowflake ID, and every phone sorts the chat by this ID."
+    },
+    {
+      "id": "questions/whatsapp-14",
+      "lesson": "questions/whatsapp",
+      "q": "In Design WhatsApp, how do you store billions of messages?",
+      "a": "In a wide-column database like **Cassandra**, with `chatId` as the partition key. All messages of a chat sit together, sorted by message ID, so \"newest 50 messages of chat 9\" is one fast read."
+    },
+    {
+      "id": "questions/news-feed-1",
+      "lesson": "questions/news-feed",
+      "q": "In a news feed, what does the quick math tell you about where to do the work?",
+      "a": "About **23,000 feed reads per second**, but only about 1,200 posts per second. Feeds are read far more than posts are written, so do the hard work when a post is **written**, not every time a feed is read."
+    },
+    {
+      "id": "questions/news-feed-2",
+      "lesson": "questions/news-feed",
+      "q": "In a news feed, why is fan-out on read not great?",
+      "a": "Writing a post is cheap, but every feed open queries hundreds of authors, then merges and sorts. At 23,000 feed opens per second, the database is overloaded and feeds are slow."
+    },
+    {
+      "id": "questions/news-feed-3",
+      "lesson": "questions/news-feed",
+      "q": "In a news feed, how does fan-out on write work?",
+      "a": "When Alice posts, a background worker adds the post ID to the feed of **each** of her followers in Redis. Every feed is a ready-made list, so opening it is one fast read."
+    },
+    {
+      "id": "questions/news-feed-4",
+      "lesson": "questions/news-feed",
+      "q": "In a news feed, why does fan-out on write break for celebrities?",
+      "a": "One post from someone with 100 million followers means **100 million** Redis writes. It takes minutes to reach everyone, and normal people's posts wait in line too."
+    },
+    {
+      "id": "questions/news-feed-5",
+      "lesson": "questions/news-feed",
+      "q": "In a news feed, how does the hybrid approach solve the celebrity problem?",
+      "a": "Don't fan out posts from users with many followers (say, over 100,000). When Bob opens his feed, merge his ready-made feed with the latest posts of the few celebrities he follows."
+    },
+    {
+      "id": "questions/news-feed-6",
+      "lesson": "questions/news-feed",
+      "q": "In a news feed, why store each feed as a Redis sorted set and not a plain list?",
+      "a": "A list is read by position, and new posts shift positions while you scroll, so you see posts twice. A sorted set scored by time can be read by score: \"20 posts older than this one\"."
+    },
+    {
+      "id": "questions/news-feed-7",
+      "lesson": "questions/news-feed",
+      "q": "In a news feed, how do you keep the feed cache small?",
+      "a": "Store **post IDs only** (8 bytes each), keep only the newest **500** per user, and only keep feeds for **active** users, like people who opened the app in the last 30 days."
+    },
+    {
+      "id": "questions/news-feed-8",
+      "lesson": "questions/news-feed",
+      "q": "In a news feed, why page with a cursor instead of page numbers?",
+      "a": "New posts keep arriving at the top, so with page numbers everything moves down and you see posts again. A cursor asks for posts **older than** a given post, which new posts don't change."
+    },
+    {
+      "id": "questions/news-feed-9",
+      "lesson": "questions/news-feed",
+      "q": "In a news feed, what are the three stages of ranking?",
+      "a": "**Collect candidates** (the newest 500 post IDs plus celebrity posts), **score** each one, then **filter** out posts already seen or hidden, sort by score, and return the top 20."
+    },
+    {
+      "id": "questions/news-feed-10",
+      "lesson": "questions/news-feed",
+      "q": "In a news feed, what is hydration?",
+      "a": "Turning post IDs into full posts: fetch the details of the chosen 20 from the posts cache in **one** batch call (Redis `MGET`), plus author names and like counts. Deleted posts are skipped."
+    },
+    {
+      "id": "questions/news-feed-11",
+      "lesson": "questions/news-feed",
+      "q": "In a news feed, how do you handle a deleted post that sits in millions of feeds?",
+      "a": "Don't remove it from the feeds. They only hold IDs, so during hydration the deleted post can't be found and is skipped. Old IDs fall off the end of the feed lists on their own."
+    },
+    {
+      "id": "questions/news-feed-12",
+      "lesson": "questions/news-feed",
+      "q": "In a news feed, Bob follows someone new. When do their posts show up?",
+      "a": "A \"new follow\" event goes on Kafka, and a **backfill job** adds the new person's last 20 post IDs to Bob's feed. For an unfollow, filter their posts out at read time."
+    },
+    {
+      "id": "questions/news-feed-13",
+      "lesson": "questions/news-feed",
+      "q": "In a news feed, a celebrity's latest posts become a hot key. How do you fix it?",
+      "a": "A hot key is one cache key that gets a huge share of all traffic. Keep copies of it on several cache servers, or in each Feed Service's own memory for a few seconds."
+    },
+    {
+      "id": "questions/web-crawler-1",
+      "lesson": "questions/web-crawler",
+      "q": "In a web crawler, what does the quick math tell you?",
+      "a": "10 billion pages in 5 days = about **23,000 pages per second**, so many crawler servers must share the to-do list. 10 billion × 100 KB = **1 PB**, which belongs in object storage like S3, not a database."
+    },
+    {
+      "id": "questions/web-crawler-2",
+      "lesson": "questions/web-crawler",
+      "q": "In a web crawler, what are the steps of the crawl loop?",
+      "a": "Take a URL from the frontier → check robots.txt → DNS lookup → download → check the page hash → save → parse → clean and filter the links → add new links to the frontier."
+    },
+    {
+      "id": "questions/web-crawler-3",
+      "lesson": "questions/web-crawler",
+      "q": "In a web crawler, how do you use robots.txt?",
+      "a": "It is a file at a site's root that tells crawlers which pages they must not visit. Download it once per site, keep it in a cache for about a day, and check every URL against it."
+    },
+    {
+      "id": "questions/web-crawler-4",
+      "lesson": "questions/web-crawler",
+      "q": "In a web crawler, why is one big first-in, first-out frontier queue not great?",
+      "a": "Links come in bunches: a Wikipedia page has hundreds of links to other Wikipedia pages. They sit together in the queue, so many workers grab them at once and **flood** the site. There is also no priority."
+    },
+    {
+      "id": "questions/web-crawler-5",
+      "lesson": "questions/web-crawler",
+      "q": "In a web crawler, how does the Mercator frontier handle priority and politeness?",
+      "a": "**Front queues** sort URLs by priority. A router fills a fixed number of **back queues**, one site each. A **heap** holds each queue's next allowed time (about 1 request per second per site) and hands out the one ready soonest."
+    },
+    {
+      "id": "questions/web-crawler-6",
+      "lesson": "questions/web-crawler",
+      "q": "In a web crawler, how do you check if a URL was already seen?",
+      "a": "First **normalize** it: lowercase the site name, drop the `#` part and tracking extras like `utm_source`. Then check a **Bloom filter**, which needs about **12 GB** for 10 billion URLs at a 1% mistake rate."
+    },
+    {
+      "id": "questions/web-crawler-7",
+      "lesson": "questions/web-crawler",
+      "q": "In a web crawler, why use a Bloom filter instead of a database of seen URLs?",
+      "a": "A database is exact, but 10 billion URLs is about 1 TB, with over a million lookups per second. A Bloom filter fits in memory. It wrongly skips about 1% of new URLs, which is fine for a crawler."
+    },
+    {
+      "id": "questions/web-crawler-8",
+      "lesson": "questions/web-crawler",
+      "q": "In a web crawler, how do you avoid storing the same page twice under different URLs?",
+      "a": "Right after the download, **before** saving, the worker adds a **hash** of the page text to a set in one \"add if new\" step (like Redis `SADD`). If the hash was already there, it doesn't save or parse the page."
+    },
+    {
+      "id": "questions/web-crawler-9",
+      "lesson": "questions/web-crawler",
+      "q": "In a web crawler, why split download and parse into two stages?",
+      "a": "Downloading is slow network work and parsing is CPU work, so each stage can get more workers on its own. Parsers read the HTML from S3, so after a parser bug you parse again without downloading anything."
+    },
+    {
+      "id": "questions/web-crawler-10",
+      "lesson": "questions/web-crawler",
+      "q": "In a web crawler, how is no work lost when a crawler machine crashes?",
+      "a": "Every new URL is saved in the URL DB as `to do`, and becomes `done` only after its page is handled. Another machine takes over the crashed machine's parts of the frontier and reloads their `to do` URLs."
+    },
+    {
+      "id": "questions/web-crawler-11",
+      "lesson": "questions/web-crawler",
+      "q": "In a web crawler, how does the parse queue survive a crashed parser?",
+      "a": "It uses a **visibility timeout**, like Amazon SQS. A taken message is hidden but kept, and deleted only when the parser is done. If the parser crashes, the message appears again after the timeout."
+    },
+    {
+      "id": "questions/web-crawler-12",
+      "lesson": "questions/web-crawler",
+      "q": "In a web crawler, how do you avoid crawler traps like endless calendar links?",
+      "a": "Use a **maximum depth** (say 15 links from a seed), a **maximum URL length**, a **page limit per site**, and skip URLs where the same folder repeats many times."
+    },
+    {
+      "id": "questions/web-crawler-13",
+      "lesson": "questions/web-crawler",
+      "q": "In a web crawler, how do you split the frontier across machines?",
+      "a": "Hash the site name to pick a frontier partition, so all `bbc.com` URLs land on one crawler machine. That machine alone controls the speed for its sites, which makes politeness easy."
+    },
+    {
+      "id": "questions/web-crawler-14",
+      "lesson": "questions/web-crawler",
+      "q": "In a web crawler, why does each worker keep its own DNS cache?",
+      "a": "Every download needs an IP address. Asking DNS 23,000 times a second is slow and can overload the DNS servers."
+    },
+    {
+      "id": "questions/search-autocomplete-1",
+      "lesson": "questions/search-autocomplete",
+      "q": "In search autocomplete, how many requests per second do you expect?",
+      "a": "We only send a request when the user pauses typing, so about 5 per search. 100 million searches × 5 = about **6,000 per second**, maybe 20,000 at peak. Almost all are reads, so caching helps a lot."
+    },
+    {
+      "id": "questions/search-autocomplete-2",
+      "lesson": "questions/search-autocomplete",
+      "q": "In search autocomplete, how big is the suggestion data, and what does that mean for the design?",
+      "a": "The top 100 million queries × about 30 bytes = about **3 GB**, a few tens of GB with the top 5 lists. That fits in one server's memory, so make copies for speed and safety, and don't shard at first."
+    },
+    {
+      "id": "questions/search-autocomplete-3",
+      "lesson": "questions/search-autocomplete",
+      "q": "In search autocomplete, why is a SQL `LIKE 'ca%'` query not great?",
+      "a": "For a short prefix like \"a\", millions of rows match, and the database must sort all of them, on every key press. Far too slow."
+    },
+    {
+      "id": "questions/search-autocomplete-4",
+      "lesson": "questions/search-autocomplete",
+      "q": "In search autocomplete, why is a plain trie still too slow?",
+      "a": "Walking down to the \"ca\" node is fast, but then you must visit **every** search below it to find the top 5. Under \"a\" there are millions."
+    },
+    {
+      "id": "questions/search-autocomplete-5",
+      "lesson": "questions/search-autocomplete",
+      "q": "In search autocomplete, what is the best way to look up suggestions fast?",
+      "a": "A **trie** (prefix tree) with the **top 5 list saved at every node**. A lookup is \"walk down a few letters, read the list\". It costs more memory and build work, but we build once a day and read 20,000 times a second."
+    },
+    {
+      "id": "questions/search-autocomplete-6",
+      "lesson": "questions/search-autocomplete",
+      "q": "In search autocomplete, how do you rank suggestions so old trends fade?",
+      "a": "Use popularity with **time decay**: recent searches count more. For example, today's searches count fully, yesterday's count 90%, the day before 81%."
+    },
+    {
+      "id": "questions/search-autocomplete-7",
+      "lesson": "questions/search-autocomplete",
+      "q": "In search autocomplete, what do you filter out of suggestions?",
+      "a": "Offensive or harmful text, with a **block list** checked when building and again when serving. Rare queries, which could leak private information. And count people, not raw searches, so a bot can't push a query up."
+    },
+    {
+      "id": "questions/search-autocomplete-8",
+      "lesson": "questions/search-autocomplete",
+      "q": "In search autocomplete, why not update the trie on every search?",
+      "a": "Thousands of changes per second would hit the trie while 20,000 reads per second use it. It needs locks, and the top 5 lists all the way up must be fixed on each change, so reads slow down."
+    },
+    {
+      "id": "questions/search-autocomplete-9",
+      "lesson": "questions/search-autocomplete",
+      "q": "In search autocomplete, how do new trends show up within minutes?",
+      "a": "Keep the daily rebuild of the main trie, and add a small **trending layer**: a stream job counts searches in the last hour and finds queries that suddenly jumped. The service mixes them into its answers."
+    },
+    {
+      "id": "questions/search-autocomplete-10",
+      "lesson": "questions/search-autocomplete",
+      "q": "In search autocomplete, how do you swap in a new trie with no downtime?",
+      "a": "Load the new trie into memory **next to** the old one, then switch one pointer. Running requests finish on the old trie. Roll it out server by server, so a bad trie can be stopped early."
+    },
+    {
+      "id": "questions/search-autocomplete-11",
+      "lesson": "questions/search-autocomplete",
+      "q": "In search autocomplete, what four layers keep most requests off the servers?",
+      "a": "**Debounce** in the browser (wait about 100 ms after typing stops), the **browser cache** (1 minute), the **CDN** (5 minutes), and the **trie in RAM** for requests that do reach us."
+    },
+    {
+      "id": "questions/search-autocomplete-12",
+      "lesson": "questions/search-autocomplete",
+      "q": "In search autocomplete, a harmful suggestion is trending. How do you remove it fast?",
+      "a": "Add it to the **block list**, which every server checks when serving and reloads every minute. Clear the CDN cache for those prefixes. Browsers may show it for up to 1 minute, which is why their cache time is short."
+    },
+    {
+      "id": "questions/search-autocomplete-13",
+      "lesson": "questions/search-autocomplete",
+      "q": "In search autocomplete, how do you split the trie once it no longer fits on one server?",
+      "a": "Split by prefix, but by **data size**, not by alphabet, since \"s\" has far more searches than \"x\". A small routing table tells the load balancer which group owns which prefix."
+    },
+    {
+      "id": "questions/job-scheduler-1",
+      "lesson": "questions/job-scheduler",
+      "q": "In a job scheduler, what does the quick math say about the midnight spike?",
+      "a": "The average is only about 115 runs per second. But if 1 million jobs are due at midnight, finishing in about a minute needs about **17,000 jobs running at once**. So we need many workers and a queue in front of them."
+    },
+    {
+      "id": "questions/job-scheduler-2",
+      "lesson": "questions/job-scheduler",
+      "q": "In a job scheduler, why split Job from Execution?",
+      "a": "A repeating job runs many times. Keeping the definition (**Job**) apart from each run (**Execution**) makes the key query simple: \"which executions are due now?\" Index executions by `runAt`."
+    },
+    {
+      "id": "questions/job-scheduler-3",
+      "lesson": "questions/job-scheduler",
+      "q": "In a job scheduler, why does `POST /jobs` take an `Idempotency-Key`?",
+      "a": "If the client times out and sends the same request again, we see the same key and return the same `jobId`, instead of creating a second job. The key is saved with a unique index in the `jobs` table."
+    },
+    {
+      "id": "questions/job-scheduler-4",
+      "lesson": "questions/job-scheduler",
+      "q": "In a job scheduler, why is polling the database every second only okay?",
+      "a": "An index on `runAt` lets the database jump to \"due now\" without reading every row, so it works at small scale. But the database gets a query every second from every Scheduler copy, forever."
+    },
+    {
+      "id": "questions/job-scheduler-5",
+      "lesson": "questions/job-scheduler",
+      "q": "In a job scheduler, what is the best way to find due jobs?",
+      "a": "Two layers. The database holds all jobs and is the source of truth. Every 5 minutes, a Scheduler loads the runs due in the next 5 minutes into a **timer queue**, which holds each message until its exact time."
+    },
+    {
+      "id": "questions/job-scheduler-6",
+      "lesson": "questions/job-scheduler",
+      "q": "In a job scheduler, a new job is due in 2 minutes. How is it not missed or queued twice?",
+      "a": "The Job Service saves the run as `queued`, not `scheduled`, and puts it straight into the timer queue. The 5-minute load only picks `scheduled` runs, so it won't queue it a second time."
+    },
+    {
+      "id": "questions/job-scheduler-7",
+      "lesson": "questions/job-scheduler",
+      "q": "In a job scheduler, what if the Job Service crashes after saving a `queued` run but before the timer queue has it?",
+      "a": "The Scheduler also picks up runs still `queued` 10 minutes after their due time, and queues them again. If one was only slow, not lost, it may run twice, which idempotent tasks make safe."
+    },
+    {
+      "id": "questions/job-scheduler-8",
+      "lesson": "questions/job-scheduler",
+      "q": "In a job scheduler, why put a queue between the Scheduler and the workers?",
+      "a": "Workers **pull** jobs when they are ready. At midnight the queue just gets longer, nothing is lost, and workers autoscale. Sending jobs straight to workers means tracking who is free, and a dead worker loses its job."
+    },
+    {
+      "id": "questions/job-scheduler-9",
+      "lesson": "questions/job-scheduler",
+      "q": "In a job scheduler, what happens if a worker crashes in the middle of a job?",
+      "a": "The queue's **visibility timeout** hides a taken message for, say, 5 minutes. If the worker never deletes it, it shows up again for another worker. Long jobs send a **heartbeat** to stay hidden longer."
+    },
+    {
+      "id": "questions/job-scheduler-10",
+      "lesson": "questions/job-scheduler",
+      "q": "In a job scheduler, how are failed runs retried?",
+      "a": "**Exponential backoff**: wait 1, 2, 4, then 8 minutes. A retry is the **same execution row** with `attempt + 1` and a later `runAt`. After the last try, mark it `failed`, put it in a dead-letter queue and alert the owner."
+    },
+    {
+      "id": "questions/job-scheduler-11",
+      "lesson": "questions/job-scheduler",
+      "q": "In a job scheduler, why must a retry keep the same `executionId`?",
+      "a": "The `executionId` is the task's idempotency key. If a retry got a new ID, the email task would think it is a brand new email, and could send it twice."
+    },
+    {
+      "id": "questions/job-scheduler-12",
+      "lesson": "questions/job-scheduler",
+      "q": "In a job scheduler, why not run one Scheduler, or many with one leader?",
+      "a": "One Scheduler is a **single point of failure**. A leader works, but one machine still does all the work, and there is a gap of a few seconds when the leader dies."
+    },
+    {
+      "id": "questions/job-scheduler-13",
+      "lesson": "questions/job-scheduler",
+      "q": "In a job scheduler, how do many Scheduler copies share the work without picking the same row?",
+      "a": "Each one claims a batch with `SELECT ... FOR UPDATE SKIP LOCKED`. `FOR UPDATE` locks the rows it picks, and `SKIP LOCKED` skips rows another Scheduler has already locked."
+    },
+    {
+      "id": "questions/job-scheduler-14",
+      "lesson": "questions/job-scheduler",
+      "q": "In a job scheduler, why can't a job run exactly once, and what do you build instead?",
+      "a": "The network can always fail between \"the work is done\" and \"I told the queue\". So build **at-least-once delivery + idempotent tasks**: the job takes effect once."
+    },
+    {
+      "id": "questions/e-commerce-1",
+      "lesson": "questions/e-commerce",
+      "q": "In an e-commerce platform, why is it called \"two systems in one\"?",
+      "a": "Browsing is read-heavy and a few seconds of old data is fine, so it picks availability. Checkout must be strictly correct: stock and orders need **strong consistency**."
+    },
+    {
+      "id": "questions/e-commerce-2",
+      "lesson": "questions/e-commerce",
+      "q": "In an e-commerce platform, why are \"read then write\" and a `SELECT ... FOR UPDATE` lock weak ways to stop overselling?",
+      "a": "Read then write is a **race condition**: Alice and Bob both read `available = 1`, so both orders go through. The row lock is correct, but held across several app round trips, so on a hot product checkout gets slow."
+    },
+    {
+      "id": "questions/e-commerce-3",
+      "lesson": "questions/e-commerce",
+      "q": "In an e-commerce platform, what is the best way to stop overselling?",
+      "a": "One **atomic update** with a check: `UPDATE inventory ... WHERE available >= 1`. 1 row changed means you got it; 0 rows means sold out. The lock is held much shorter, because there are no app round trips."
+    },
+    {
+      "id": "questions/e-commerce-4",
+      "lesson": "questions/e-commerce",
+      "q": "In an e-commerce platform, what must the app do when the stock update changes 0 rows?",
+      "a": "`ROLLBACK` and stop. If it carried on to the `INSERT` and `COMMIT`, it would save a reservation for stock it never got, and the other items in the cart would stay held."
+    },
+    {
+      "id": "questions/e-commerce-5",
+      "lesson": "questions/e-commerce",
+      "q": "In an e-commerce platform, how do you stop two multi-item checkouts from deadlocking?",
+      "a": "Always update the inventory rows in the **same order**, sorted by `product_id`. Then both checkouts start with the same row, and one simply waits for the other."
+    },
+    {
+      "id": "questions/e-commerce-6",
+      "lesson": "questions/e-commerce",
+      "q": "In an e-commerce platform, why reserve stock at checkout and not when an item goes into the cart?",
+      "a": "Most carts are never bought, and holding stock for them would hide items from real buyers. At checkout, the item is held for 15 minutes while the user pays."
+    },
+    {
+      "id": "questions/e-commerce-7",
+      "lesson": "questions/e-commerce",
+      "q": "In an e-commerce platform, a reservation is 15 minutes old with no payment answer. What does the expiry job do?",
+      "a": "It **first** asks the provider to cancel the payment, and only then cancels the order and releases the stock. If the payment already went through, the order becomes `paid`. If still in progress, it checks later."
+    },
+    {
+      "id": "questions/e-commerce-8",
+      "lesson": "questions/e-commerce",
+      "q": "In an e-commerce platform, a payment succeeds after the order was cancelled. What do you do?",
+      "a": "Reserve the item again if any is left, and mark the order `paid`. If it is sold out, refund the customer right away and tell them. We never keep money for an item we can't send."
+    },
+    {
+      "id": "questions/e-commerce-9",
+      "lesson": "questions/e-commerce",
+      "q": "In an e-commerce platform, how do you never charge twice and never lose a paid order?",
+      "a": "Save the order first as `pending_payment`. Send the **order ID as the idempotency key** to the payment provider, so a retry can never charge twice. A **webhook** from the provider confirms the result."
+    },
+    {
+      "id": "questions/e-commerce-10",
+      "lesson": "questions/e-commerce",
+      "q": "In an e-commerce platform, the direct answer, the webhook and the expiry job can all change one order. How do you stay safe?",
+      "a": "The status only changes with a **conditional update**, like `... SET status = 'paid' WHERE ... AND status = 'pending_payment'`. Only the first one wins; the others change 0 rows."
+    },
+    {
+      "id": "questions/e-commerce-11",
+      "lesson": "questions/e-commerce",
+      "q": "In an e-commerce platform, how do you keep card numbers off your servers?",
+      "a": "The payment page uses the provider's own form, so the card goes straight to the provider and we get back a **token** like `pm_123`. This keeps us out of most of **PCI DSS**."
+    },
+    {
+      "id": "questions/e-commerce-12",
+      "lesson": "questions/e-commerce",
+      "q": "In an e-commerce platform, how do you handle a flash sale where 100,000 people want 1,000 items?",
+      "a": "Put a **Redis counter** like `stock:ps5` in front, with a Lua script that takes one only if it is above 0. Only winners go on to the database. When a hold is released, give it back with `INCR`."
+    },
+    {
+      "id": "questions/e-commerce-13",
+      "lesson": "questions/e-commerce",
+      "q": "In an e-commerce platform, why can the \"Only 3 left!\" on a product page be a little wrong?",
+      "a": "It comes from the cache. That is fine, because the **real** check happens at checkout with the atomic update."
+    },
+    {
+      "id": "questions/ticket-booking-1",
+      "lesson": "questions/ticket-booking",
+      "q": "In a ticket booking system, why is booking split into two steps?",
+      "a": "First **hold** the seats, then **pay**. Paying takes the user a few minutes, and nobody else should grab the seats during that time."
+    },
+    {
+      "id": "questions/ticket-booking-2",
+      "lesson": "questions/ticket-booking",
+      "q": "In a ticket booking system, what does the quick math say about the rush?",
+      "a": "10 million users refreshing every few seconds means **millions of requests per second** on one event, whose seats all live in one place in the database. So we need a cache for viewing and a **waiting room**."
+    },
+    {
+      "id": "questions/ticket-booking-3",
+      "lesson": "questions/ticket-booking",
+      "q": "In a ticket booking system, why not lock the seat row in the database until payment is done?",
+      "a": "Payment takes minutes. Each open transaction ties up a database connection, and if the user closes the tab the lock stays until a timeout. Never hold a database lock while a human types a card number."
+    },
+    {
+      "id": "questions/ticket-booking-4",
+      "lesson": "questions/ticket-booking",
+      "q": "In a ticket booking system, what is the weakness of holding a seat with an expiring Redis lock?",
+      "a": "`SET lock:A12 user-42 NX EX 600` works and expires by itself, but the truth now lives in two places. If Redis goes down, all holds are lost, and two users may reach payment for the same seat."
+    },
+    {
+      "id": "questions/ticket-booking-5",
+      "lesson": "questions/ticket-booking",
+      "q": "In a ticket booking system, what is the best way to hold a seat?",
+      "a": "Give each ticket a `status` and a `reserved_until` time. Holding is **one atomic update** that only works if the seat is `available` or its hold has expired. 1 row changed: it is yours. 0 rows: taken."
+    },
+    {
+      "id": "questions/ticket-booking-6",
+      "lesson": "questions/ticket-booking",
+      "q": "In a ticket booking system, why does correctness never depend on a cleanup job?",
+      "a": "An **expired** hold counts as free in the atomic update. A background job may reset old holds to `available` now and then, but only to keep the table tidy."
+    },
+    {
+      "id": "questions/ticket-booking-7",
+      "lesson": "questions/ticket-booking",
+      "q": "In a ticket booking system, why do hold and confirm both take an `Idempotency-Key`?",
+      "a": "The key is saved with the booking, in the same transaction as the hold, so a retry returns the first booking. Without it, a retried hold would say Alice's own seat is taken, and a retried confirm could charge twice."
+    },
+    {
+      "id": "questions/ticket-booking-8",
+      "lesson": "questions/ticket-booking",
+      "q": "In a ticket booking system, how do you hold several seats at once safely?",
+      "a": "Run all the updates in **one transaction**, sorted by `ticket_id`. If any seat fails, roll back, so the user gets all seats or none. The same order means two buyers can't deadlock."
+    },
+    {
+      "id": "questions/ticket-booking-9",
+      "lesson": "questions/ticket-booking",
+      "q": "In a ticket booking system, payment finishes just after the hold ran out and someone else took the seat. What happens?",
+      "a": "The final update checks `reserved_by = 'alice' AND reserved_until > NOW()`, so it changes 0 rows, and we **refund** Alice right away. To make this rare, show a 9-minute timer while the real hold is 10 minutes."
+    },
+    {
+      "id": "questions/ticket-booking-10",
+      "lesson": "questions/ticket-booking",
+      "q": "In a ticket booking system, how do you show seat maps fast?",
+      "a": "Cache event details in Redis, and even on a CDN. Cache seat status for only **1 to 2 seconds**, or push changes with SSE. The map may be a little behind; the truth is the atomic update."
+    },
+    {
+      "id": "questions/ticket-booking-11",
+      "lesson": "questions/ticket-booking",
+      "q": "In a ticket booking system, why don't more servers or per-user rate limits handle the rush?",
+      "a": "Autoscaling takes minutes, the rush takes seconds, and all seats sit in one place in the database. Rate limits give users random errors, they refresh even harder, and luck decides who gets in."
+    },
+    {
+      "id": "questions/ticket-booking-12",
+      "lesson": "questions/ticket-booking",
+      "q": "In a ticket booking system, how does a virtual waiting room handle a huge rush?",
+      "a": "Everyone joins an online **queue** before the booking pages. People are let in at a steady speed the system can handle, like 2,000 per minute. Everyone else sees their place in line and how long they will wait."
+    },
+    {
+      "id": "questions/ticket-booking-13",
+      "lesson": "questions/ticket-booking",
+      "q": "In a ticket booking system, how does the waiting room stay fair against bots?",
+      "a": "Everyone who arrives before the sale gets a **random** place in line at 10:00. Arriving at 9:30 or 9:59 gives the same chance, so bots gain nothing by being fast."
+    },
+    {
+      "id": "questions/ticket-booking-14",
+      "lesson": "questions/ticket-booking",
+      "q": "In a ticket booking system, how does the Booking Service know a user was let in by the waiting room?",
+      "a": "Each admitted user gets a **signed token**, valid for 15 minutes. It is made with a secret key, so nobody can fake one. The Booking Service rejects any request without a valid token."
+    }
+  ]
+}

@@ -1,0 +1,185 @@
+---
+title: "Cache Problems"
+description: "Cache stampede, cache penetration, hot keys and cold start: what goes wrong with caches, and how to fix it."
+icon: Flame
+---
+
+## The idea
+
+A cache protects the database by answering most reads. The problems on this page all have the same shape: **for some reason, the cache stops absorbing the reads, and a flood of requests hits the database at once.**
+
+Think of a busy **bakery** with a display case (the cache) and a baker in the back (the database):
+
+- **Stampede:** the tray of the bestselling bread runs out, and 50 customers all shout at the baker at the same moment.
+- **Penetration:** people keep asking for a cake the bakery doesn't make. Each time, the clerk walks to the back to check, and comes back empty-handed.
+- **Hot key:** everyone wants the same croissant, and only one clerk is allowed to sell it.
+- **Cold start:** opening morning. The display case is empty, so every order goes to the baker.
+
+## Cache stampede
+
+A **very popular key expires** (or gets deleted). In the next moment, hundreds of requests miss the cache **at the same time**, and all of them go to the database to load the same data. This is also called a **thundering herd**.
+
+```mermaid
+sequenceDiagram
+  participant U as 1,000 users
+  participant App as App Servers
+  participant Cache as Cache
+  participant DB as Database
+  Note over Cache: home:feed expires
+  U->>App: 1,000 requests
+  App->>Cache: 1,000 lookups
+  Cache-->>App: 1,000 misses
+  App->>DB: 1,000 same queries!
+  Note over DB: Overloaded
+```
+
+The database was fine with zero queries for that key. Now it gets 1,000 at once, slows down, and other requests start timing out too.
+
+**Fixes:**
+
+1. **Lock, so only one request reloads.** The first request that misses takes a lock and loads the data. The others wait a few milliseconds and read the cache again. (Some libraries call this **single flight** or **request coalescing**.)
+2. **Refresh early.** For the hottest keys, a background job reloads the value **before** it expires, so it never actually expires.
+3. **Serve the old value while refreshing.** Keep the stale value a little longer, return it, and refresh it in the background. A few seconds of old data is better than a database outage.
+4. **Add jitter to TTLs.** When many keys are loaded at once with the same TTL, they also expire at once. A few random seconds per key spreads the misses out. (When a huge number of keys expire together, or a whole cache server dies, some people call it a **cache avalanche**.)
+
+Fix 1 in code, using a Redis lock:
+
+```js
+import { randomUUID } from 'node:crypto';
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Delete the lock only if it still holds our token (one step, in Lua)
+const RELEASE = `
+  if redis.call("GET", KEYS[1]) == ARGV[1] then
+    return redis.call("DEL", KEYS[1])
+  end
+  return 0
+`;
+
+async function getWithLock(key, loadFromDb, triesLeft = 20) {
+  const cached = await redis.get(key);
+  if (cached !== null) return JSON.parse(cached);
+
+  // NX = set only if the key does not exist. Only one request wins.
+  const token = randomUUID();
+  const gotLock = await redis.set(`lock:${key}`, token, 'NX', 'EX', 10);
+  if (gotLock) {
+    try {
+      const value = (await loadFromDb()) ?? null;
+      await redis.set(key, JSON.stringify(value), 'EX', 600);
+      return value;
+    } finally {
+      await redis.eval(RELEASE, 1, `lock:${key}`, token);
+    }
+  }
+
+  // Someone else is loading it. Wait a moment, then check the cache again.
+  if (triesLeft === 0) throw new Error(`Timed out waiting for ${key}`);
+  await sleep(50);
+  return getWithLock(key, loadFromDb, triesLeft - 1);
+}
+```
+
+Three details make it safe:
+
+- The lock's value is a **random token**. On release, we delete the lock only if it still holds our token. If our lock expired and another request took it, we don't delete theirs.
+- `finally` releases the lock even if the database call fails. Otherwise everyone would wait 10 seconds for it to expire.
+- The waiters retry only 20 times (about 1 second), then give up with an error. They never wait forever.
+
+Now 1,000 misses turn into **1 database query** and 999 short waits. (Locks are covered in depth in [Distributed Locking](../distributed-systems/distributed-locking.mdx).)
+
+## Cache penetration
+
+Requests ask for data that **does not exist**, like `user:-1` or random product IDs. The cache never has it (there is nothing to cache), so **every request goes to the database**, finds nothing, and returns nothing. The cache does not help at all.
+
+It can happen through a bug, or on purpose: an attacker sends millions of requests with made-up IDs to get past your cache.
+
+```mermaid
+flowchart TB
+  Bot["Attacker<br/>random IDs"]:::client --> App["App Server"]:::service
+  App -->|"1. user:98765123?"| Cache[("Cache")]:::cache
+  App -->|"2. miss, so ask the DB"| DB[("Database")]:::db
+  DB -->|"3. not found, nothing to cache"| App
+```
+
+**Fixes:**
+
+1. **Cache the "not found" answer.** Save `null` as the value, with a **short TTL**, so repeat requests stop at the cache. `null` is valid JSON, so the normal read code (`JSON.parse`) still works:
+
+   ```js
+   async function getUser(id) {
+     const cached = await redis.get(`user:${id}`);
+     if (cached !== null) return JSON.parse(cached); // a user, or null = "not found"
+
+     const user = (await db.findUser(id)) ?? null;
+     // Found: keep it 10 minutes. Not found: remember that for only 1 minute.
+     await redis.set(`user:${id}`, JSON.stringify(user), 'EX', user ? 600 : 60);
+     return user;
+   }
+   ```
+
+2. **Use a Bloom filter.** A **Bloom filter** is a tiny data structure that answers "is this ID **maybe** in the database, or **definitely not**?" using very little memory. Check it first, and drop requests for IDs that definitely don't exist. See [Bloom Filter, HyperLogLog, Count-Min Sketch](../advanced-components/probabilistic-data-structures.mdx).
+3. **Check the input.** Reject IDs that can't be real (negative, wrong format) before touching the cache or database.
+4. **Rate limit** clients that cause many misses. See [Rate Limiting](../reliability-security/rate-limiting.mdx).
+
+## Hot keys
+
+One key gets **far more traffic than all others**. A celebrity's profile, a viral post, the product on a flash sale. In a [distributed cache](./distributed-caching.mdx), each key lives on **one shard**. So one cache server gets most of the traffic while the others sit idle, and that one server runs out of CPU or network.
+
+**Fixes:**
+
+1. **Local cache for the hottest keys.** Each app server keeps the hot key in its own memory for a few seconds. Most reads never leave the app server.
+2. **Several copies of the key.** Save the value under several keys, like `product:42#1` to `product:42#5`. Different names usually hash to different shards, but that is not guaranteed, so check where they land. On each read, pick one copy at random:
+
+   ```js
+   const n = 1 + Math.floor(Math.random() * 5);
+   const data = await redis.get(`product:42#${n}`);
+   ```
+
+   The cost is on writes: when the value changes, you must update or delete **all 5 copies**.
+
+3. **Read replicas** of the hot shard, so several machines share the reads.
+
+More on hot keys, and the related "celebrity problem" for feeds and databases, is in [Hot Keys, Hot Partitions and Fan-out](../advanced-components/hot-keys-fan-out.mdx).
+
+## Cold start
+
+The cache is **empty**: after a restart, after adding a new cache cluster, or after someone flushed it. The hit ratio drops to zero, so all traffic goes to the database, which was never sized for that.
+
+**Fixes:**
+
+1. **Warm the cache first.** Before sending traffic, load the most popular keys (for example, the top items from yesterday's logs).
+2. **Send traffic slowly.** Move 5% of users to the new cache, then 20%, then all, so it fills up gradually.
+3. **Don't lose the cache in the first place.** Use replicas, restart cache nodes one at a time, and don't flush the whole cache during a deploy.
+
+## All four side by side
+
+| Problem | What happens | Main fixes |
+| --- | --- | --- |
+| **Stampede** | A hot key expires. Many misses at once | Lock so one request reloads, refresh early, TTL jitter |
+| **Penetration** | Requests for data that doesn't exist. Always a miss | Cache "not found", Bloom filter, check input |
+| **Hot key** | One key overloads one cache server | Local cache, copies of the key, replicas |
+| **Cold start** | Empty cache. Everything goes to the database | Warm up first, shift traffic slowly |
+
+## In the real world
+
+**Facebook's 2010 outage was a herd of requests.** On September 23, 2010, Facebook was down for about two and a half hours. Facebook explained that a system meant to fix bad configuration values in its cache saw a value it thought was invalid. **Every** client then tried to "fix" it by querying the same database cluster, which got hundreds of thousands of queries per second and fell over. Each failure made clients see more errors, which caused more queries. Facebook had to turn the site off to stop the loop.
+
+**Facebook uses "leases" against stampedes.** The "Scaling Memcache at Facebook" paper (2013) describes it: when many clients miss on the same key, Memcached gives only one of them a lease (permission to reload it). The others wait briefly and retry, and by then the value is usually back in the cache.
+
+**Facebook warms cold clusters from warm ones.** The same paper describes how a new cache cluster with an empty cache reads misses from an **already-warm cache cluster** instead of from the databases, until its own hit ratio is high.
+
+## In the interview
+
+After you add a cache, the interviewer may push: "What if that key expires?" or "What if one item goes viral?" Name the problem and the fix:
+
+> "The home feed key is read by everyone, so when it expires we could get a stampede. I'll let only one request reload it, using a short Redis lock, and the rest wait a few milliseconds. For the celebrity profile, which is a hot key, I'll also keep a copy in each app server's memory for 5 seconds."
+
+<Callout title="Remember this" type="success">
+  - All four problems = the cache stops helping, and the **database gets flooded**.
+  - **Stampede:** a hot key expires. Fix with a **lock** (one reloader), **early refresh**, **TTL jitter**.
+  - **Penetration:** requests for data that doesn't exist. **Cache "not found"**, use a **Bloom filter**.
+  - **Hot key:** one key overloads one shard. **Local cache** or **several copies** of the key.
+  - **Cold start:** empty cache. **Warm it up** and **shift traffic slowly**.
+</Callout>

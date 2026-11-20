@@ -1,0 +1,665 @@
+{
+  "deck": "advanced-components",
+  "cards": [
+    {
+      "id": "advanced-components/storage-types-1",
+      "lesson": "advanced-components/storage-types",
+      "q": "What are the three main kinds of cloud storage?",
+      "a": "**Block** (a raw disk for one server), **file** (a shared network folder) and **object** (a flat bucket of objects with keys, used over HTTP). On AWS: EBS, EFS and S3."
+    },
+    {
+      "id": "advanced-components/storage-types-2",
+      "lesson": "advanced-components/storage-types",
+      "q": "What is block storage, and what is it used for?",
+      "a": "A disk split into numbered blocks, attached to one server; the operating system puts a file system on top. It is the fastest and can change a few bytes in the middle of a file, so it suits databases and system disks."
+    },
+    {
+      "id": "advanced-components/storage-types-3",
+      "lesson": "advanced-components/storage-types",
+      "q": "What is file storage, and when would you use it?",
+      "a": "A shared folder over the network (NFS or SMB) that many servers can use at once, with normal folders and file names. Use it for older apps that expect a folder, or files many servers must share. AWS: EFS."
+    },
+    {
+      "id": "advanced-components/storage-types-4",
+      "lesson": "advanced-components/storage-types",
+      "q": "What are the parts of an object in object storage?",
+      "a": "The **data** itself, a unique **key** like `photos/2024/cat.jpg`, and **metadata** such as its type. Objects live in a flat **bucket**: there are no real folders, and a key only looks like a path."
+    },
+    {
+      "id": "advanced-components/storage-types-5",
+      "lesson": "advanced-components/storage-types",
+      "q": "What can't you do with object storage?",
+      "a": "Change part of an object. To change one byte, you upload the whole object again."
+    },
+    {
+      "id": "advanced-components/storage-types-6",
+      "lesson": "advanced-components/storage-types",
+      "q": "When would you use object storage?",
+      "a": "For photos, videos, backups, logs and user uploads. It is used over HTTP, has almost no size limit and is the cheapest per GB, but each request is slower than a local disk."
+    },
+    {
+      "id": "advanced-components/storage-types-7",
+      "lesson": "advanced-components/storage-types",
+      "q": "Why shouldn't you store big files like videos in your database?",
+      "a": "It makes the database slow to back up, slow to copy to replicas, and costly. Put the file in object storage like S3, and keep only its key and a few facts in the database row."
+    },
+    {
+      "id": "advanced-components/storage-types-8",
+      "lesson": "advanced-components/storage-types",
+      "q": "How do you choose between block, file and object storage?",
+      "a": "A database or the server's own disk → block. Many servers sharing one folder with normal file paths → file. Everything else, like photos, videos, backups and logs → object."
+    },
+    {
+      "id": "advanced-components/storage-types-9",
+      "lesson": "advanced-components/storage-types",
+      "q": "How does S3 avoid losing data?",
+      "a": "It is designed for 99.999999999% durability (\"eleven nines\"), by keeping copies of every object on many devices in several separate data centers."
+    },
+    {
+      "id": "advanced-components/search-1",
+      "lesson": "advanced-components/search",
+      "q": "Why is `LIKE '%pizza%'` a bad way to search text?",
+      "a": "The leading `%` stops a normal index from helping, so the database reads every row. It also misses \"Pizza\" or \"pizzas\", finds nothing for typos, and can't put the best match first."
+    },
+    {
+      "id": "advanced-components/search-2",
+      "lesson": "advanced-components/search",
+      "q": "What is an inverted index?",
+      "a": "A list of every word and, for each word, which documents contain it: word → documents, like the index at the back of a book. It flips the normal document → words direction. One word's list of documents is a **posting list**."
+    },
+    {
+      "id": "advanced-components/search-3",
+      "lesson": "advanced-components/search",
+      "q": "What does a search analyzer do?",
+      "a": "It cleans up text: lowercase, split into words (tokens), maybe drop stop words, cut words to their root (\"running\" → \"run\"), and apply synonyms. It runs on documents and on the search text, so both sides match."
+    },
+    {
+      "id": "advanced-components/search-4",
+      "lesson": "advanced-components/search",
+      "q": "What makes one search result rank higher than another?",
+      "a": "**TF:** the word appears often in this document. **IDF:** rare words matter more than common ones like \"the\". **Shorter is stronger:** a match in a short field counts more. **BM25**, the Elasticsearch default, mixes all three."
+    },
+    {
+      "id": "advanced-components/search-5",
+      "lesson": "advanced-components/search",
+      "q": "What are a document, an index, a shard and a replica in Elasticsearch?",
+      "a": "A **document** is one JSON item (like a row). An **index** is a collection of documents (like a table). A **shard** is one piece of an index, on one machine. A **replica** is a copy of a shard, for safety and more reads."
+    },
+    {
+      "id": "advanced-components/search-6",
+      "lesson": "advanced-components/search",
+      "q": "How does Elasticsearch run one search across all its shards?",
+      "a": "It sends the search to every shard. Each shard returns its own best results, and one coordinating node merges them into the final top list. This is called **scatter-gather**."
+    },
+    {
+      "id": "advanced-components/search-7",
+      "lesson": "advanced-components/search",
+      "q": "How soon is a new document searchable in Elasticsearch?",
+      "a": "After a **refresh**, which happens about once a second by default. It is near real time, not instant."
+    },
+    {
+      "id": "advanced-components/search-8",
+      "lesson": "advanced-components/search",
+      "q": "Why shouldn't Elasticsearch be your main database?",
+      "a": "It holds a copy made for searching. Keep the real data in Postgres or similar as the source of truth. If search breaks, you can rebuild it from the database."
+    },
+    {
+      "id": "advanced-components/search-9",
+      "lesson": "advanced-components/search",
+      "q": "How do you keep search in sync with the database?",
+      "a": "Usually **CDC through Kafka**: read every change from the database's log and index it, so nothing is lost and search is a second or so behind. **Dual writes** drift if one fails; a **nightly rebuild** is hours old but fixes drift."
+    },
+    {
+      "id": "advanced-components/geospatial-indexing-1",
+      "lesson": "advanced-components/geospatial-indexing",
+      "q": "What does a geospatial index do?",
+      "a": "It splits the map into named cells, so \"what is near me?\" becomes \"what is in my cell and the cells next to it?\". That is a fast lookup instead of a scan of the whole world."
+    },
+    {
+      "id": "advanced-components/geospatial-indexing-2",
+      "lesson": "advanced-components/geospatial-indexing",
+      "q": "Why can't a normal B-tree index find nearby points fast?",
+      "a": "It sorts by one value at a time. An index on latitude finds a thin strip around the whole Earth, and the database must then check longitude for every point in that strip."
+    },
+    {
+      "id": "advanced-components/geospatial-indexing-3",
+      "lesson": "advanced-components/geospatial-indexing",
+      "q": "What is a geohash?",
+      "a": "A short string like `tdr1v9` made by halving the map again and again. **Longer = smaller square, and same prefix = same square**, so a prefix search like `LIKE 'tdr1v9%'` works with a normal index."
+    },
+    {
+      "id": "advanced-components/geospatial-indexing-4",
+      "lesson": "advanced-components/geospatial-indexing",
+      "q": "Why search the 8 cells around a geohash cell, not just one cell?",
+      "a": "A point 50 m away can be in the next cell, with a different geohash. So search your cell plus the 8 around it. Neighbors can look quite different (`tdr1v` vs `tdr4j`), so you compute their names."
+    },
+    {
+      "id": "advanced-components/geospatial-indexing-5",
+      "lesson": "advanced-components/geospatial-indexing",
+      "q": "How big should a geohash cell be for a radius search?",
+      "a": "At least as big as the search radius, because the 3×3 block reaches only one cell past yours. For 2 km, a 6-character cell (1.2 km × 0.6 km) is too small; a 5-character cell (about 4.9 km) is big enough."
+    },
+    {
+      "id": "advanced-components/geospatial-indexing-6",
+      "lesson": "advanced-components/geospatial-indexing",
+      "q": "What do you do after looking up the 9 geohash cells?",
+      "a": "The 9 cells cover far more than the circle, so check the real distance to each point, drop anyone farther than the radius, and sort by distance. If you find too few, widen the search with a shorter geohash."
+    },
+    {
+      "id": "advanced-components/geospatial-indexing-7",
+      "lesson": "advanced-components/geospatial-indexing",
+      "q": "What is a quadtree, and when is it better than geohash?",
+      "a": "Start with the whole map and split any square with too many points into 4 smaller ones. Busy cities get tiny squares, empty areas stay big. It suits very uneven density and places that rarely move, like restaurants."
+    },
+    {
+      "id": "advanced-components/geospatial-indexing-8",
+      "lesson": "advanced-components/geospatial-indexing",
+      "q": "Which tool would you use for moving drivers, and which for places like restaurants?",
+      "a": "Fast-moving drivers → **Redis GEO**, which stores each point in a sorted set with its geohash as the score. Places that rarely move, with filters like \"open now\" → **PostGIS** or **Elasticsearch**."
+    },
+    {
+      "id": "advanced-components/geospatial-indexing-9",
+      "lesson": "advanced-components/geospatial-indexing",
+      "q": "What are Uber's H3 and Google's S2?",
+      "a": "H3 is Uber's grid that covers the Earth with hexagons, so all 6 neighbors are the same distance from the center. S2 is Google's library that divides the Earth, as a sphere, into cells with IDs."
+    },
+    {
+      "id": "advanced-components/probabilistic-data-structures-1",
+      "lesson": "advanced-components/probabilistic-data-structures",
+      "q": "What do probabilistic data structures trade?",
+      "a": "A small error for tiny memory and high speed. Counting unique visitors exactly means storing every visitor ID (gigabytes); a HyperLogLog does it in 12 KB, off by about 1%."
+    },
+    {
+      "id": "advanced-components/probabilistic-data-structures-2",
+      "lesson": "advanced-components/probabilistic-data-structures",
+      "q": "What does a Bloom filter answer, and what mistake can it make?",
+      "a": "\"Have I seen this before?\" It answers \"definitely not\" or \"maybe\". It can say \"maybe\" when the true answer is no (a **false positive**), but it never says \"no\" by mistake."
+    },
+    {
+      "id": "advanced-components/probabilistic-data-structures-3",
+      "lesson": "advanced-components/probabilistic-data-structures",
+      "q": "How does a Bloom filter add and check an item?",
+      "a": "It is a row of bits plus a few hash functions. To add, set the bit at each hash position to 1. To check, look at those bits: any 0 means definitely never added, all 1 means maybe."
+    },
+    {
+      "id": "advanced-components/probabilistic-data-structures-4",
+      "lesson": "advanced-components/probabilistic-data-structures",
+      "q": "How big should a Bloom filter be, and why can't you delete from it?",
+      "a": "Size it in advance: about 10 bits per item gives roughly 1% false positives, which grow as it fills. You can't remove items, because clearing a bit might also remove another item that shares it."
+    },
+    {
+      "id": "advanced-components/probabilistic-data-structures-5",
+      "lesson": "advanced-components/probabilistic-data-structures",
+      "q": "What is the common pattern for using a Bloom filter?",
+      "a": "Ask the Bloom filter first, and only do the slow, expensive check, like a database lookup, when it says \"maybe\". Cassandra does this to skip disk files that surely don't have the key."
+    },
+    {
+      "id": "advanced-components/probabilistic-data-structures-6",
+      "lesson": "advanced-components/probabilistic-data-structures",
+      "q": "What is the idea behind HyperLogLog?",
+      "a": "Hash each item and track the longest run of leading zeros. Long runs are rare, so if the longest is k, there were about 2 to the power k unique items. Duplicates give the same hash, so they don't count twice."
+    },
+    {
+      "id": "advanced-components/probabilistic-data-structures-7",
+      "lesson": "advanced-components/probabilistic-data-structures",
+      "q": "How do you get monthly unique visitors from daily HyperLogLogs?",
+      "a": "Merge the daily ones with `PFMERGE`. Adding the daily counts would count a user many times."
+    },
+    {
+      "id": "advanced-components/probabilistic-data-structures-8",
+      "lesson": "advanced-components/probabilistic-data-structures",
+      "q": "How does a Count-Min Sketch count an item?",
+      "a": "It is a small table of counters, with one hash function per row. To add, add 1 in the item's column in every row. To count, take the **smallest** of its counters."
+    },
+    {
+      "id": "advanced-components/probabilistic-data-structures-9",
+      "lesson": "advanced-components/probabilistic-data-structures",
+      "q": "Why does a Count-Min Sketch take the smallest counter?",
+      "a": "Different items can land in the same counter (a collision), and collisions only push counters up. So the smallest has the least extra noise. It can count too high, but never too low."
+    },
+    {
+      "id": "advanced-components/probabilistic-data-structures-10",
+      "lesson": "advanced-components/probabilistic-data-structures",
+      "q": "Where are Bloom filters, HyperLogLog and Count-Min Sketch typically used?",
+      "a": "Bloom filters: \"have I already crawled this URL?\" in web crawlers, and blocking bad links. HyperLogLog: unique visitors or views. Count-Min Sketch: trending topics and heavy users in a huge stream."
+    },
+    {
+      "id": "advanced-components/batch-vs-stream-1",
+      "lesson": "advanced-components/batch-vs-stream",
+      "q": "What is the difference between batch and stream processing?",
+      "a": "**Batch** collects data for a while, then processes all of it in one big job on a schedule. **Stream** handles each event as it arrives, within seconds or less."
+    },
+    {
+      "id": "advanced-components/batch-vs-stream-2",
+      "lesson": "advanced-components/batch-vs-stream",
+      "q": "What are the pros and cons of batch processing?",
+      "a": "It is very efficient for huge amounts of data, and easy to fix: fix the code and run the job again on the same input. But results are late, by hours or even a day."
+    },
+    {
+      "id": "advanced-components/batch-vs-stream-3",
+      "lesson": "advanced-components/batch-vs-stream",
+      "q": "Why is stream processing harder to build?",
+      "a": "The job must remember things between events (**state**), survive crashes without losing or double-counting, and handle events that arrive late."
+    },
+    {
+      "id": "advanced-components/batch-vs-stream-4",
+      "lesson": "advanced-components/batch-vs-stream",
+      "q": "How do you choose between batch and stream?",
+      "a": "Ask \"how fresh must the answer be?\" If tomorrow morning is fine, use batch: it is simpler and cheaper. If the answer is useless in an hour, like fraud checks or surge pricing, use stream."
+    },
+    {
+      "id": "advanced-components/batch-vs-stream-5",
+      "lesson": "advanced-components/batch-vs-stream",
+      "q": "How does MapReduce split a batch job?",
+      "a": "**Map:** each machine reads its own slice and writes pairs like `(pizza, 1)`. **Shuffle:** all pairs for the same word go to the same machine. **Reduce:** that machine adds them up."
+    },
+    {
+      "id": "advanced-components/batch-vs-stream-6",
+      "lesson": "advanced-components/batch-vs-stream",
+      "q": "Which tools would you name for batch and for stream processing?",
+      "a": "**Spark** for batch: it keeps data in memory, so it is much faster than MapReduce. **Flink** for streaming: truly one event at a time, strong at state. **Kafka** sits in front. Kafka Streams is a library that runs inside your own service."
+    },
+    {
+      "id": "advanced-components/batch-vs-stream-7",
+      "lesson": "advanced-components/batch-vs-stream",
+      "q": "What are tumbling, sliding and session windows?",
+      "a": "**Tumbling:** fixed size, no overlap, so each event is in one window. **Sliding:** fixed size, but windows overlap, like \"last 5 minutes\" updated every minute. **Session:** one user's events, closing after a gap with no activity."
+    },
+    {
+      "id": "advanced-components/batch-vs-stream-8",
+      "lesson": "advanced-components/batch-vs-stream",
+      "q": "What is the difference between event time and processing time?",
+      "a": "**Event time** is when the event happened. **Processing time** is when it reaches the server, which can be much later, like a phone in airplane mode sending its clicks hours late."
+    },
+    {
+      "id": "advanced-components/batch-vs-stream-9",
+      "lesson": "advanced-components/batch-vs-stream",
+      "q": "What is a watermark in stream processing?",
+      "a": "A marker that says \"I believe all events up to 10:01 have now arrived\". The job waits a little for stragglers, then closes the window. Events that come later are dropped or used to fix the result."
+    },
+    {
+      "id": "advanced-components/batch-vs-stream-10",
+      "lesson": "advanced-components/batch-vs-stream",
+      "q": "What is the difference between the Lambda and Kappa architectures?",
+      "a": "**Lambda** runs stream for fast numbers and batch to recount exact ones later, but you write the same logic twice. **Kappa** uses only streaming, and fixes old results by replaying old events from Kafka."
+    },
+    {
+      "id": "advanced-components/hot-keys-fan-out-1",
+      "lesson": "advanced-components/hot-keys-fan-out",
+      "q": "What is a hot partition, and why doesn't hashing prevent it?",
+      "a": "It is the one machine holding a **hot key**, a key with far more requests than others, like a viral post. Hashing spreads the keys evenly, but not the traffic, so that machine is overloaded while the others stay quiet."
+    },
+    {
+      "id": "advanced-components/hot-keys-fan-out-2",
+      "lesson": "advanced-components/hot-keys-fan-out",
+      "q": "How do you spot a hot key?",
+      "a": "Compare shards one by one (an average hides the hot one), count requests per key (sampled, or with a Count-Min Sketch), use tools like `redis-cli --hotkeys`, and prepare for obvious ones like a flash sale."
+    },
+    {
+      "id": "advanced-components/hot-keys-fan-out-3",
+      "lesson": "advanced-components/hot-keys-fan-out",
+      "q": "How do you fix a hot key that is read a lot?",
+      "a": "Cache it, plus a copy in each app server's memory for a few seconds. Store copies (`post:123:copy1`...) and read one at random, updating every copy on change. Use a CDN for public data, and combine identical requests."
+    },
+    {
+      "id": "advanced-components/hot-keys-fan-out-4",
+      "lesson": "advanced-components/hot-keys-fan-out",
+      "q": "How do you fix a hot key that is written a lot, like a like-counter?",
+      "a": "**Split the counter** into 10 sub-counters: each write adds 1 to a random one, and a read adds all 10. Or **buffer and batch**: count in memory for a second, then write \"+500\" once."
+    },
+    {
+      "id": "advanced-components/hot-keys-fan-out-5",
+      "lesson": "advanced-components/hot-keys-fan-out",
+      "q": "What is the difference between fan-out on write and fan-out on read?",
+      "a": "**On write (push):** copy each new post's ID into every follower's feed, so reads are fast but posting is heavy. **On read (pull):** store the post once and build the feed when it is opened, so posting is cheap but reads are slow."
+    },
+    {
+      "id": "advanced-components/hot-keys-fan-out-6",
+      "lesson": "advanced-components/hot-keys-fan-out",
+      "q": "Why is fan-out on write usually the default for feeds?",
+      "a": "Most apps have far more reads than writes, and push makes reading a feed one quick lookup of a ready-made list."
+    },
+    {
+      "id": "advanced-components/hot-keys-fan-out-7",
+      "lesson": "advanced-components/hot-keys-fan-out",
+      "q": "What is the celebrity problem, and how is it fixed?",
+      "a": "With fan-out on write, one post from an account with 100 million followers means 100 million feed writes, so it is slow and followers see it late. Use a hybrid: push for normal users, and merge celebrity posts in when a feed is read."
+    },
+    {
+      "id": "advanced-components/hot-keys-fan-out-8",
+      "lesson": "advanced-components/hot-keys-fan-out",
+      "q": "Why do celebrity posts need heavy caching in a hybrid feed?",
+      "a": "Millions of people read them, which makes them hot keys. So they get the read fixes: caching, key copies and in-memory caches."
+    },
+    {
+      "id": "advanced-components/api-pagination-versioning-1",
+      "lesson": "advanced-components/api-pagination-versioning",
+      "q": "Why should every list endpoint be paginated?",
+      "a": "A huge list in one response is slow to build, uses a lot of server memory and wastes mobile data. Return one page (often 20 to 100 items) plus a way to get the next, and always cap the page size."
+    },
+    {
+      "id": "advanced-components/api-pagination-versioning-2",
+      "lesson": "advanced-components/api-pagination-versioning",
+      "q": "Why are deep pages slow with offset pagination?",
+      "a": "`OFFSET 100000` makes the database find 100,000 rows and throw them away before it returns your 20. The deeper you go, the slower it gets."
+    },
+    {
+      "id": "advanced-components/api-pagination-versioning-3",
+      "lesson": "advanced-components/api-pagination-versioning",
+      "q": "What goes wrong with offset pagination when items are added or deleted?",
+      "a": "Items move while you read. A new post pushes the list down, so the next page repeats an item you already saw. If a post is deleted, you skip one without knowing."
+    },
+    {
+      "id": "advanced-components/api-pagination-versioning-4",
+      "lesson": "advanced-components/api-pagination-versioning",
+      "q": "How does cursor pagination work?",
+      "a": "The client asks for items after a **cursor**: the last item's sort values packed into a string. The server queries `WHERE (created_at, id) < (...)`. With an index on those columns, page 5,000 is as fast as page 1."
+    },
+    {
+      "id": "advanced-components/api-pagination-versioning-5",
+      "lesson": "advanced-components/api-pagination-versioning",
+      "q": "Why add the ID as a tie-breaker in cursor pagination?",
+      "a": "Two items can have the same time. Sorting by `(created_at, id)` gives every row a unique place, so none are skipped."
+    },
+    {
+      "id": "advanced-components/api-pagination-versioning-6",
+      "lesson": "advanced-components/api-pagination-versioning",
+      "q": "Why make a cursor opaque, and why still check it?",
+      "a": "Encoding it, for example with base64, makes clients treat it as a black box, so you can change what is inside later. But anyone can decode and edit it, so check it like any input and answer `400` if it is broken."
+    },
+    {
+      "id": "advanced-components/api-pagination-versioning-7",
+      "lesson": "advanced-components/api-pagination-versioning",
+      "q": "When would you use offset pagination, and when cursor pagination?",
+      "a": "Offset for small admin tables that need page numbers and a total count. Cursor for feeds, infinite scroll, big lists and public APIs, because it is fast and stable. Default to cursor."
+    },
+    {
+      "id": "advanced-components/api-pagination-versioning-8",
+      "lesson": "advanced-components/api-pagination-versioning",
+      "q": "Where can you put the API version?",
+      "a": "In the URL path (`/v1/orders`), the most common and easy to route; in a header (`Api-Version: 2024-06-01`), which keeps URLs clean; or in a query parameter, which is easy to forget. Versions can be numbers or dates."
+    },
+    {
+      "id": "advanced-components/api-pagination-versioning-9",
+      "lesson": "advanced-components/api-pagination-versioning",
+      "q": "Which API changes are safe, and which break clients?",
+      "a": "Safe: adding endpoints, optional response fields or optional parameters. Breaking: removing or renaming a field, changing a field's type, making an optional parameter required, or changing meanings, default sort or page size."
+    },
+    {
+      "id": "advanced-components/api-pagination-versioning-10",
+      "lesson": "advanced-components/api-pagination-versioning",
+      "q": "How do you retire an old API version safely?",
+      "a": "Deprecate before you remove: announce it, send a `Sunset` header with the end date, watch how much traffic still uses it, and remove it only when that traffic is close to zero."
+    },
+    {
+      "id": "advanced-components/file-upload-download-1",
+      "lesson": "advanced-components/file-upload-download",
+      "q": "Why shouldn't big file uploads go through your app servers?",
+      "a": "One slow upload ties up a connection and memory for minutes, every byte moves twice, you hit size and time limits (API Gateway rejects bodies over 10 MB), and half-uploaded files on one server are lost if it dies."
+    },
+    {
+      "id": "advanced-components/file-upload-download-2",
+      "lesson": "advanced-components/file-upload-download",
+      "q": "What is a presigned URL?",
+      "a": "A normal S3 link with an **expiry time** and a **signature** made with the app server's secret key, which is never sent. Whoever holds it can do exactly one thing, like upload one file to one key, until it expires."
+    },
+    {
+      "id": "advanced-components/file-upload-download-3",
+      "lesson": "advanced-components/file-upload-download",
+      "q": "What are the steps of an upload with a presigned URL?",
+      "a": "The client asks your API. The app checks permission, picks the key, saves a `pending` metadata row and returns a signed URL. The client uploads straight to S3, S3 sends an event, and the app marks the file `ready`."
+    },
+    {
+      "id": "advanced-components/file-upload-download-4",
+      "lesson": "advanced-components/file-upload-download",
+      "q": "How do you keep presigned uploads safe?",
+      "a": "Use a short expiry, let the server pick the key (so no one overwrites another user's file), limit size and type, keep the bucket private, and check the file (real type, virus scan) before marking it ready."
+    },
+    {
+      "id": "advanced-components/file-upload-download-5",
+      "lesson": "advanced-components/file-upload-download",
+      "q": "Why split a big upload into parts?",
+      "a": "Each part (say 10 MB) uploads on its own, several at the same time. If one fails, only that part is sent again, and after a crash the app resumes from the parts that already arrived."
+    },
+    {
+      "id": "advanced-components/file-upload-download-6",
+      "lesson": "advanced-components/file-upload-download",
+      "q": "What are the three steps of an S3 multipart upload?",
+      "a": "**Start:** get an upload ID. **Upload parts:** each with its own presigned URL; S3 returns an ETag for each part. **Complete:** send the list of parts, and S3 joins them into one object."
+    },
+    {
+      "id": "advanced-components/file-upload-download-7",
+      "lesson": "advanced-components/file-upload-download",
+      "q": "How can a sync app skip uploading parts the server already has?",
+      "a": "Hash each part and skip any part whose hash is already stored. S3 multipart can't do this for you: you need your own block store, with each part saved as an object named by its hash."
+    },
+    {
+      "id": "advanced-components/file-upload-download-8",
+      "lesson": "advanced-components/file-upload-download",
+      "q": "How do you stop unfinished multipart uploads from wasting space?",
+      "a": "In S3, set a lifecycle rule that deletes unfinished multipart uploads after a few days."
+    },
+    {
+      "id": "advanced-components/file-upload-download-9",
+      "lesson": "advanced-components/file-upload-download",
+      "q": "How should public and private file downloads work?",
+      "a": "Both skip your app servers. Public files: a CDN in front of S3. Private files: the app checks the user is allowed, then returns a short-lived signed URL (an S3 presigned GET or a CDN signed URL)."
+    },
+    {
+      "id": "advanced-components/file-upload-download-10",
+      "lesson": "advanced-components/file-upload-download",
+      "q": "What are range requests used for?",
+      "a": "Asking for part of a file with a `Range` header, answered with `206 Partial Content`. Video players use them to jump to the middle, and download managers to resume a broken download."
+    },
+    {
+      "id": "advanced-components/background-jobs-1",
+      "lesson": "advanced-components/background-jobs",
+      "q": "What is a background job?",
+      "a": "Slow work the request handler only writes down on a **job queue**, so it can answer the user fast. Separate **workers** do it later. The rule: if the user doesn't need the result to see the next screen, do it later."
+    },
+    {
+      "id": "advanced-components/background-jobs-2",
+      "lesson": "advanced-components/background-jobs",
+      "q": "Why should a job carry IDs, not whole objects?",
+      "a": "It keeps the job message small, and the worker loads fresh data when it runs."
+    },
+    {
+      "id": "advanced-components/background-jobs-3",
+      "lesson": "advanced-components/background-jobs",
+      "q": "Why must background jobs be idempotent?",
+      "a": "A job can run twice. Queues hide a taken job (SQS's visibility timeout) and delete it only when done, so a crashed worker's job comes back, and retries repeat jobs too. Example: send the receipt \"unless it was already sent\"."
+    },
+    {
+      "id": "advanced-components/background-jobs-4",
+      "lesson": "advanced-components/background-jobs",
+      "q": "Why use separate queues for urgent and slow jobs?",
+      "a": "A password-reset email should not wait behind 50,000 monthly reports. Give each kind of work its own queue and workers."
+    },
+    {
+      "id": "advanced-components/background-jobs-5",
+      "lesson": "advanced-components/background-jobs",
+      "q": "What goes wrong if the same cron file runs on all 10 app servers?",
+      "a": "The job runs 10 times. Use one scheduler (like a Kubernetes CronJob or EventBridge Scheduler) that only adds a job to the queue, or a lock so only one server runs it."
+    },
+    {
+      "id": "advanced-components/background-jobs-6",
+      "lesson": "advanced-components/background-jobs",
+      "q": "How do you run millions of \"run at\" jobs, like booking reminders?",
+      "a": "Store each job as a row with a `run_at` time. Pollers claim due jobs with `UPDATE … SET status = 'running' WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED) RETURNING id`, so many pollers never take the same job."
+    },
+    {
+      "id": "advanced-components/background-jobs-7",
+      "lesson": "advanced-components/background-jobs",
+      "q": "Why isn't a bare `SELECT … FOR UPDATE SKIP LOCKED` enough to claim jobs?",
+      "a": "Outside a transaction, its locks are released as soon as it returns, and the rows are still `pending`, so a second poller can pick the same job. The outer `UPDATE` marks them `running`, so the claim stays."
+    },
+    {
+      "id": "advanced-components/background-jobs-8",
+      "lesson": "advanced-components/background-jobs",
+      "q": "How should an API handle a long job a user starts, like a data export?",
+      "a": "Don't make the request wait. Create the job and return `202 Accepted` with a job ID. The client checks `GET /jobs/77` every few seconds, or the server tells it when the job is done."
+    },
+    {
+      "id": "advanced-components/background-jobs-9",
+      "lesson": "advanced-components/background-jobs",
+      "q": "What are the rules for retrying failed jobs?",
+      "a": "Retry with backoff plus a little randomness, and stop a job that runs too long. Cap the tries (say 5), then move the job to a **dead-letter queue**, a parking place where a person can look at it."
+    },
+    {
+      "id": "advanced-components/multi-tenancy-1",
+      "lesson": "advanced-components/multi-tenancy",
+      "q": "What is a tenant, and what is a multi-tenant system?",
+      "a": "A tenant is one customer organization with all its users, like a Slack workspace or a Shopify shop. A multi-tenant system serves many tenants from one running system. Tenant A must never see tenant B's data."
+    },
+    {
+      "id": "advanced-components/multi-tenancy-2",
+      "lesson": "advanced-components/multi-tenancy",
+      "q": "What are the three ways to store tenant data?",
+      "a": "**Shared tables** with a `tenant_id` on every row (cheapest, weakest isolation), **schema per tenant** (in between), and **database per tenant** (strongest isolation, highest cost)."
+    },
+    {
+      "id": "advanced-components/multi-tenancy-3",
+      "lesson": "advanced-components/multi-tenancy",
+      "q": "How do most real systems store tenant data?",
+      "a": "They mix the models: small tenants share a database, while the biggest, or those with strict legal rules, get their own. A small tenant catalog table says where each tenant's data lives."
+    },
+    {
+      "id": "advanced-components/multi-tenancy-4",
+      "lesson": "advanced-components/multi-tenancy",
+      "q": "Where should the tenant ID come from?",
+      "a": "From the user's verified login token or session. Never trust a `tenant_id` sent in the URL or the request body, because a user can change it."
+    },
+    {
+      "id": "advanced-components/multi-tenancy-5",
+      "lesson": "advanced-components/multi-tenancy",
+      "q": "How do you make sure every query is filtered by tenant?",
+      "a": "Put the `tenant_id` filter in one shared data-access layer that adds it automatically. Add PostgreSQL **Row-Level Security**, so the database hides other tenants' rows even if the app forgets the filter."
+    },
+    {
+      "id": "advanced-components/multi-tenancy-6",
+      "lesson": "advanced-components/multi-tenancy",
+      "q": "With Row-Level Security, why set the tenant with `SET LOCAL`, not `SET`?",
+      "a": "`SET LOCAL` lasts only until the transaction ends. A plain `SET` stays on the connection, so with a connection pool the next request, maybe for another tenant, could get the old tenant still set."
+    },
+    {
+      "id": "advanced-components/multi-tenancy-7",
+      "lesson": "advanced-components/multi-tenancy",
+      "q": "Why must the app connect as a normal database user when using Row-Level Security?",
+      "a": "Superusers, and by default the table's owner, skip Row-Level Security rules."
+    },
+    {
+      "id": "advanced-components/multi-tenancy-8",
+      "lesson": "advanced-components/multi-tenancy",
+      "q": "Why put the tenant ID in cache keys and file paths?",
+      "a": "A cache key without the tenant leaks data: Acme's dashboard is cached as `dashboard:home`, and Globex sees it. Put it in cache keys (`acme:user:42`), S3 paths, search indexes and logs."
+    },
+    {
+      "id": "advanced-components/multi-tenancy-9",
+      "lesson": "advanced-components/multi-tenancy",
+      "q": "What is a noisy neighbor, and how do you handle one?",
+      "a": "A tenant that uses so much of the shared system that everyone else slows down. Use per-tenant rate limits, fair queues, metrics tagged by tenant, separate pools, and move big tenants to their own shard."
+    },
+    {
+      "id": "advanced-components/multi-tenancy-10",
+      "lesson": "advanced-components/multi-tenancy",
+      "q": "Why shard a multi-tenant database by tenant ID?",
+      "a": "All of one tenant's data sits on one shard, so most queries touch only one machine."
+    },
+    {
+      "id": "advanced-components/microservices-patterns-1",
+      "lesson": "advanced-components/microservices-patterns",
+      "q": "In a microservices checkout, which calls are sync and which are async?",
+      "a": "Order calls Inventory (reserve stock) and Payment (charge the card) synchronously, because checkout must know they worked. Then it publishes an OrderPlaced event, and Email and Shipping react to it asynchronously."
+    },
+    {
+      "id": "advanced-components/microservices-patterns-2",
+      "lesson": "advanced-components/microservices-patterns",
+      "q": "How should you protect a sync call from one service to another?",
+      "a": "Give every sync call a timeout, a few retries and a circuit breaker. Where you don't need the answer, go async instead of building a long chain of sync calls."
+    },
+    {
+      "id": "advanced-components/microservices-patterns-3",
+      "lesson": "advanced-components/microservices-patterns",
+      "q": "How should you split a system into services?",
+      "a": "By business area (orders, payments, catalog, shipping), not by technical layer (frontend, business logic, database). Then a new feature like gift wrap changes mostly one service. Give each service one owning team."
+    },
+    {
+      "id": "advanced-components/microservices-patterns-4",
+      "lesson": "advanced-components/microservices-patterns",
+      "q": "What is a bounded context?",
+      "a": "In Domain-Driven Design, an area with its own meaning of words. To Catalog, a \"product\" is a name and photos; to Shipping, it is a weight and a box size. Each service keeps its own model."
+    },
+    {
+      "id": "advanced-components/microservices-patterns-5",
+      "lesson": "advanced-components/microservices-patterns",
+      "q": "Why should each service own its data?",
+      "a": "With a shared database, one team can't rename a column without breaking another, and one service's slow query slows down everyone. Other services should call its API or listen to its events."
+    },
+    {
+      "id": "advanced-components/microservices-patterns-6",
+      "lesson": "advanced-components/microservices-patterns",
+      "q": "How can a service get data that another service owns?",
+      "a": "Call its API when needed, keep a local copy of the fields you need by listening to its events (copying data is normal), or build a read model that combines data from many services (CQRS)."
+    },
+    {
+      "id": "advanced-components/microservices-patterns-7",
+      "lesson": "advanced-components/microservices-patterns",
+      "q": "Which patterns do you use when a change spans several services' databases?",
+      "a": "You can't wrap two databases in one normal transaction. Use a **saga** (local steps, each with an undo step if a later one fails) and the **outbox pattern** to save data and publish its event safely together."
+    },
+    {
+      "id": "advanced-components/microservices-patterns-8",
+      "lesson": "advanced-components/microservices-patterns",
+      "q": "What is a distributed monolith?",
+      "a": "Services that must be deployed together or share one database, so they are separate in name only. Fix it by owning your data and talking through stable APIs and events."
+    },
+    {
+      "id": "advanced-components/microservices-patterns-9",
+      "lesson": "advanced-components/microservices-patterns",
+      "q": "Besides the distributed monolith, what are common microservices mistakes?",
+      "a": "Services that are too small, chatty calls (30 calls in a row for one page), long sync chains, splitting too early (5 people running 20 services), and no tracing across services."
+    },
+    {
+      "id": "advanced-components/strangler-pattern-1",
+      "lesson": "advanced-components/strangler-pattern",
+      "q": "What is the strangler pattern?",
+      "a": "Replacing an old system piece by piece: grow the new system around the old one, one feature at a time, until the old one has nothing left to do. Then turn it off. It is named after the strangler fig."
+    },
+    {
+      "id": "advanced-components/strangler-pattern-2",
+      "lesson": "advanced-components/strangler-pattern",
+      "q": "Why are big-bang rewrites risky?",
+      "a": "The target keeps moving, nothing ships for a long time, hidden rules in the old code get lost, and on the one huge switch day, if something breaks, everything breaks."
+    },
+    {
+      "id": "advanced-components/strangler-pattern-3",
+      "lesson": "advanced-components/strangler-pattern",
+      "q": "What does the routing layer do in the strangler pattern?",
+      "a": "It sits in front of everything, often an API gateway or reverse proxy, and is also called a **facade**. Users only talk to it, and it decides per request whether the old or the new system answers."
+    },
+    {
+      "id": "advanced-components/strangler-pattern-4",
+      "lesson": "advanced-components/strangler-pattern",
+      "q": "What are the steps of a strangler migration?",
+      "a": "Put the routing layer in front. Build one feature in the new system, move its traffic over slowly (1%, 10%, 100%) with a way to switch back, then delete it from the old system. Repeat, then turn the old system off."
+    },
+    {
+      "id": "advanced-components/strangler-pattern-5",
+      "lesson": "advanced-components/strangler-pattern",
+      "q": "In a strangler migration, which features should you move first, and which last?",
+      "a": "Start with low-risk, read-only features like product search. Move money flows like checkout last, once the team has practice and good tooling."
+    },
+    {
+      "id": "advanced-components/strangler-pattern-6",
+      "lesson": "advanced-components/strangler-pattern",
+      "q": "How do you keep data in sync while the old and new systems both run?",
+      "a": "Copy changes from the old database into the new store with **Change Data Capture (CDC)**, or let the new service call the old system's API for data it doesn't own yet."
+    },
+    {
+      "id": "advanced-components/strangler-pattern-7",
+      "lesson": "advanced-components/strangler-pattern",
+      "q": "What is shadow traffic in a migration?",
+      "a": "Sending a copy of real requests to the new service too, comparing its answers with the old ones, and showing users only the old answer until they match."
+    }
+  ]
+}

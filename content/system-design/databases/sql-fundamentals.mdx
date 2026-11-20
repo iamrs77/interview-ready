@@ -1,0 +1,131 @@
+---
+title: "SQL Fundamentals"
+description: "The SQL you need: SELECT, JOIN, GROUP BY, and changing data. Optional if you already write SQL."
+icon: Terminal
+---
+
+## The idea
+
+SQL is how you ask a database questions, in words that read almost like English. It is like asking a librarian: "Give me all the books by this author, newest first, but only the first 10."
+
+The examples use our online shop, with two main tables:
+
+- `users` (`id`, `email`, `name`, `created_at`)
+- `orders` (`id`, `user_id`, `total_cents`, `status`, `created_at`)
+
+## SELECT, WHERE, ORDER BY
+
+```sql
+SELECT id, total_cents, created_at        -- which columns
+FROM orders                               -- which table
+WHERE status = 'paid' AND total_cents > 5000  -- which rows
+ORDER BY created_at DESC                  -- newest first
+LIMIT 10;                                 -- only 10 rows
+```
+
+Useful filters in `WHERE`:
+
+| Filter | Example |
+| --- | --- |
+| Equal, not equal | `status = 'paid'`, `status <> 'cancelled'` |
+| In a list | `status IN ('paid', 'shipped')` |
+| In a range | `created_at >= '2026-01-01' AND created_at < '2026-02-01'` |
+| Starts with | `email LIKE 'asha%'` |
+| Empty | `shipped_at IS NULL` |
+
+**Careful with dates:** `created_at BETWEEN '2026-01-01' AND '2026-01-31'` looks right, but `'2026-01-31'` means midnight at the **start** of Jan 31. Orders later that day are missed. Use "on or after the first day, and before the next month starts", as in the table.
+
+`NULL` means "unknown" or "no value". Nothing is equal to `NULL`, not even another `NULL`. So `WHERE shipped_at = NULL` never matches. Always use `IS NULL` or `IS NOT NULL`.
+
+## JOINs
+
+A **join** combines rows from two tables that match on a column, usually an ID.
+
+```sql
+-- Each paid order, with the email of the user who placed it
+SELECT o.id, o.total_cents, u.email
+FROM orders o
+JOIN users u ON u.id = o.user_id
+WHERE o.status = 'paid';
+```
+
+`o` and `u` are short nicknames for the tables, called **aliases**.
+
+| Join | Keeps |
+| --- | --- |
+| `INNER JOIN` (or just `JOIN`) | Only rows that match on **both** sides |
+| `LEFT JOIN` | **All** rows from the left table. Right-side columns are `NULL` when there is no match |
+| `RIGHT JOIN` | The mirror of `LEFT JOIN`. Rarely used |
+| `FULL OUTER JOIN` | All rows from both sides |
+
+A `LEFT JOIN` can find what is **missing**, like users who never ordered:
+
+```sql
+SELECT u.id, u.email
+FROM users u
+LEFT JOIN orders o ON o.user_id = u.id
+WHERE o.id IS NULL;
+```
+
+## GROUP BY and aggregates
+
+**Aggregates** turn many rows into one number: `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`. `GROUP BY` makes one result row per group.
+
+```sql
+-- How many paid orders each user has, and how much they spent
+SELECT user_id, COUNT(*) AS order_count, SUM(total_cents) AS spent_cents
+FROM orders
+WHERE status = 'paid'                 -- filter rows BEFORE grouping
+GROUP BY user_id
+HAVING SUM(total_cents) > 100000      -- filter groups AFTER grouping
+ORDER BY spent_cents DESC;
+```
+
+`WHERE` filters single rows. `HAVING` filters whole groups.
+
+The database runs the parts in a different order than you write them: `FROM` and `JOIN`, then `WHERE`, then `GROUP BY`, then `HAVING`, then `SELECT`, then `ORDER BY`, then `LIMIT`. That is why you can't use a `SELECT` nickname inside `WHERE`.
+
+## INSERT, UPDATE, DELETE
+
+```sql
+-- Add a row, and get back its new id
+INSERT INTO users (email, name)
+VALUES ('asha@example.com', 'Asha')
+RETURNING id;
+
+-- Change rows
+UPDATE orders SET status = 'shipped' WHERE id = 1001;
+
+-- Remove rows
+DELETE FROM orders
+WHERE status = 'pending' AND created_at < now() - interval '30 days';
+```
+
+**Careful:** an `UPDATE` or `DELETE` **without** `WHERE` changes **every row** in the table.
+
+**Upsert** means "insert, or update if it already exists". In PostgreSQL:
+
+```sql
+INSERT INTO users (email, name) VALUES ('asha@example.com', 'Asha S')
+ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name;
+```
+
+`EXCLUDED` means "the row I tried to insert".
+
+## In the real world
+
+SQL was created at IBM in the 1970s and became a standard in 1986. It is still everywhere: PostgreSQL and MySQL, but also big data tools like Google BigQuery, Snowflake and Spark SQL. Even Cassandra's query language, CQL, borrows SQL's look.
+
+## In the interview
+
+System design interviews rarely ask you to write SQL. But showing the query for your **main read** proves your schema and index work together:
+
+> "The order history page runs `SELECT ... FROM orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20`, so I'll add an index on `(user_id, created_at)`."
+
+<Callout title="Remember this" type="success">
+  - `SELECT` columns `FROM` a table `WHERE` rows match, `ORDER BY`, `LIMIT`.
+  - `JOIN` combines tables on matching IDs. `LEFT JOIN` keeps rows with no match.
+  - `GROUP BY` with `COUNT`, `SUM`, `AVG`. `WHERE` filters rows, `HAVING` filters groups.
+  - Use `IS NULL`, never `= NULL`.
+  - `UPDATE` or `DELETE` without `WHERE` hits **every row**.
+</Callout>

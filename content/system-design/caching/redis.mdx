@@ -1,0 +1,74 @@
+---
+title: Redis
+description: A very fast data store that keeps everything in memory. Used for caches, counters, rate limits, leaderboards and locks.
+icon: MemoryStick
+---
+
+## What is Redis?
+
+Redis is a data store that keeps all its data **in memory (RAM)**. That is why it is so fast: most reads and writes take **less than 1 ms**.
+
+It is a **key-value store**. You save a value under a key, and read it back with the same key. Think of it like a big JavaScript `Map` that all your servers share.
+
+## What you use it for in interviews
+
+| Use | How | Example question |
+| --- | --- | --- |
+| **Cache** | Save results of slow queries, with a TTL | URL shortener, news feed |
+| **Counter** | `INCR` adds 1 safely, even with many servers | Unique IDs for a URL shortener |
+| **Rate limiter** | Count requests per user per minute | Rate limiter |
+| **Leaderboard** | A **sorted set** keeps items sorted by score | Game leaderboard, top K songs |
+| **Lock** | Only one server can hold a key at a time, until it expires | Uber: offer a driver only one ride at a time |
+| **Pub/Sub** | Send a message to everyone listening on a channel **right now**. Fire-and-forget: anyone not connected misses it | Chat app, live comments |
+
+## Commands you should know
+
+```bash
+# Cache a value for 1 hour (3600 seconds)
+SET url:abc123 "https://example.com/long/link" EX 3600
+GET url:abc123
+
+# Counter: add 1 safely, even when many servers call it at once
+INCR next_url_id
+
+# Leaderboard with a sorted set
+ZADD leaderboard 1500 "alice"
+ZADD leaderboard 1800 "bob"
+ZRANGE leaderboard 0 9 REV WITHSCORES   # top 10 players, highest first
+
+# Lock: set only if the key does not exist (NX), expire after 10 seconds.
+# The value is a random token, so a server only ever deletes its own lock.
+SET lock:driver:42 7f3a9c NX EX 10
+```
+
+## Things to know
+
+- **Memory is small and costly.** Keep popular data in Redis, not everything.
+- **Commands run one at a time.** So a command like `INCR` is **atomic**: it fully happens, and no other command can mix in. This is why the counter is safe with many servers.
+- **A Redis lock is not a perfect lock.** It can expire while the holder is still working (for example, during a long pause), or be lost when a replica takes over after a crash. Then two servers both think they hold it. Use it to **save work**, like not running a job twice. When two holders would break data, the database must also check, for example with a conditional update (`UPDATE ... WHERE status = 'free'`) or a **fencing token** (a number that always goes up, so the database rejects an old holder). See [Distributed Locking](../distributed-systems/distributed-locking.mdx).
+- **It is usually not your main database.** Redis can save data to disk, but most teams keep the "real" data in a database. If the cache is lost, you can load it again from the database.
+- **It can grow.** **Redis Cluster** splits keys across many machines. **Replicas** keep copies, so if one machine dies, another takes over.
+
+## In the real world
+
+**Twitter kept home timelines in Redis.** In a 2012 talk called "Timelines at Scale", Twitter explained that each user's home timeline was a **list of tweet IDs** stored in Redis. When someone tweeted, the tweet ID was pushed into the Redis list of each follower. Opening the app then meant reading one short list from memory, not running a big database query.
+
+**Stack Overflow uses two levels of cache.** Stack Overflow's engineers have written about their setup: each web server keeps a small cache in its own memory (level 1), and a shared Redis holds a bigger cache that all web servers use (level 2). See [Distributed Caching](./distributed-caching.mdx).
+
+**Instagram saved memory with Redis hashes.** Instagram's engineering blog post "Storing hundreds of millions of simple key-value pairs in Redis" describes mapping photo IDs to user IDs. Instead of one Redis key per photo, they grouped many photos into one **hash** (a small map stored under one key), which used much less memory.
+
+**Redis has a fork called Valkey.** In 2024, Redis changed its license so that cloud companies could no longer freely sell it as a service. In response, the Linux Foundation started **Valkey**, an open-source copy (a "fork") of Redis, backed by companies like AWS and Google. Valkey works with the same commands, and cloud services like Amazon ElastiCache offer it. In 2025, with Redis 8, Redis added the open-source **AGPLv3** license as another option.
+
+## In the interview
+
+Name the Redis feature you use, and why:
+
+> "I'll use a Redis sorted set for the leaderboard. It keeps players sorted by score, so getting the top 10 is very fast."
+
+<Callout title="Remember this" type="success">
+  - Redis = **in-memory key-value store**. Reads and writes in under 1 ms.
+  - Main uses: **cache, counter, rate limiter, leaderboard, lock, pub/sub**.
+  - Commands are **atomic**, so counters are safe. Locks can **expire or be lost** in a failover: use them to save work, and let the database check correctness.
+  - Memory is limited. Keep only **hot** data in it.
+  - Usually **not** the main database.
+</Callout>

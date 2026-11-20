@@ -1,0 +1,137 @@
+---
+title: "Connection Pooling"
+description: "Reusing database connections instead of opening a new one for every request."
+icon: Cable
+---
+
+## The idea
+
+Imagine a restaurant that **hires a new waiter** for every customer, trains them, and fires them when the customer leaves. Most of the time would go into hiring, not serving.
+
+A real restaurant keeps a **team of ten waiters**. Each one serves whoever is next, then comes back for the next table. If all ten are busy, a new customer waits a moment at the door.
+
+A **connection pool** is that team of waiters. It keeps a few database connections **open all the time**. Each request **borrows** one, runs its queries, and **gives it back**. Nobody pays to open a new connection for every request.
+
+## Why opening a connection is slow
+
+A **connection** is an open line between your app and the database. Opening a new one takes several steps before your query even starts:
+
+```mermaid
+sequenceDiagram
+  participant App as App Server
+  participant DB as PostgreSQL
+  App->>DB: TCP handshake
+  App->>DB: TLS handshake
+  App->>DB: Log in (user, password)
+  Note over DB: Starts a new process<br/>just for this connection
+  DB-->>App: Ready
+  App->>DB: SELECT ... (the real work)
+  DB-->>App: Rows
+  App->>DB: Close
+```
+
+- The **TCP** and **TLS** handshakes each cost network round trips. See [TCP vs UDP](../foundations/tcp-vs-udp.mdx) and [HTTP and HTTPS](../foundations/http-and-https.mdx).
+- **Logging in** means checking the password.
+- **PostgreSQL starts a whole new process** for every connection. MySQL uses a thread per connection, which is lighter, but still costs memory.
+
+Often the setup takes **longer than the query itself**. And each open connection uses memory on the database server, even when idle. That is why databases limit them: PostgreSQL allows **100 connections by default** (`max_connections`).
+
+## How a pool works
+
+```mermaid
+flowchart TB
+  subgraph AS["App server"]
+    H1["Request 1"]:::service
+    H2["Request 2"]:::service
+    H3["Request 3"]:::service
+    Pool["Connection pool<br/>10 open connections"]:::service
+    H3 --> Pool
+    H2 --> Pool
+    H1 --> Pool
+  end
+  Pool -->|"reuses open connections"| DB[("PostgreSQL")]:::db
+```
+
+1. When the app starts, the pool opens a few connections and keeps them open.
+2. A request **borrows** a free connection, runs its queries, and **returns** it.
+3. If all connections are busy, the request **waits in line** for one, up to a time limit.
+4. The pool closes connections that sit idle too long, and replaces broken ones.
+
+Most database libraries have a pool built in. In Node.js, with the `pg` library:
+
+```ts
+import { Pool } from 'pg';
+
+const pool = new Pool({
+  host: 'db.internal',
+  max: 10,                        // at most 10 open connections
+  idleTimeoutMillis: 30_000,      // close a connection unused for 30 seconds
+  connectionTimeoutMillis: 2_000, // wait at most 2 seconds for a free one
+});
+
+// Borrows a connection, runs the query, and gives it back
+const { rows } = await pool.query('SELECT * FROM orders WHERE user_id = $1', [7]);
+```
+
+**Always give connections back.** If code borrows a connection and forgets to return it (for example, on an error path), the pool slowly runs dry. This is called a **connection leak**. Soon every request is waiting, and the app looks frozen even though the database is idle.
+
+## Pool size: not too big, not too small
+
+- **Too small:** requests wait in line for a connection, even though the database has spare power.
+- **Too big:** the database has only a few CPU cores. Hundreds of queries running at once fight over those cores, memory and locks. Each query gets **slower**, and total work done can go **down**.
+
+**Watch the multiplication.** Every app server has its own pool:
+
+| App servers | Pool size each | Connections to the database |
+| --- | --- | --- |
+| 5 | 10 | 50 |
+| 20 | 10 | 200 |
+| 50 | 20 | 1,000 |
+
+PostgreSQL's default limit is 100. Past the limit, new connections fail with the error "sorry, too many clients already". Autoscaling makes this worse: a traffic spike adds app servers, and every new server opens its own pool.
+
+**A starting point:** the guide for HikariCP, a popular Java pool, suggests a pool size of about **(CPU cores × 2) + number of disks** on the database server. The main lesson: **small pools usually beat big ones.** Then measure: if requests often wait for a connection while the database CPU is low, the pool is too small.
+
+## Tools: PgBouncer
+
+Pools inside each app server are not enough when you have **many** app servers. The fix is a pooler that sits **in front of** the database and is shared by everyone. For PostgreSQL, the most common one is **PgBouncer**.
+
+PgBouncer is a small, light **proxy** (a program that sits between the app and the database and passes messages along). Apps open **many cheap connections** to PgBouncer. PgBouncer shares a **few real connections** to PostgreSQL among them.
+
+```mermaid
+flowchart TB
+  A1["App server 1<br/>pool of 20"]:::service --> PGB["PgBouncer"]:::lb
+  A2["App server 2<br/>pool of 20"]:::service --> PGB
+  A3["App server 3<br/>pool of 20"]:::service --> PGB
+  PGB -->|"20 real connections"| DB[("PostgreSQL")]:::db
+```
+
+PgBouncer has three modes. They differ in **when** a real connection goes back to the shared pool:
+
+| Mode | Real connection is returned... | Notes |
+| --- | --- | --- |
+| **Session** | When the app disconnects | Safest, but saves the least |
+| **Transaction** | After each transaction | The most popular. Big savings. Features tied to one session, like `SET` or `LISTEN`, don't work as expected |
+| **Statement** | After each single statement | Transactions with several statements are not allowed |
+
+Other tools: **Amazon RDS Proxy** (managed, for AWS databases), **Pgpool-II** for PostgreSQL, and **ProxySQL** for MySQL.
+
+## In the real world
+
+**GitLab** runs PgBouncer in front of its PostgreSQL databases, and its documentation explains how to set it up for large self-hosted installs.
+
+**AWS built RDS Proxy for serverless apps.** Serverless functions like AWS Lambda can start thousands of copies during a spike, and each copy may open its own database connections. AWS offers RDS Proxy to pool and share those connections, so a spike doesn't exhaust the database.
+
+## In the interview
+
+Mention it when you have many app servers talking to one SQL database, or when you use serverless functions:
+
+> "Each app server keeps a small connection pool, and PgBouncer in transaction mode sits in front of Postgres. That way 50 app servers share a small, fixed number of real connections, and a traffic spike can't drown the database in new connections."
+
+<Callout title="Remember this" type="success">
+  - Opening a connection is **slow**: TCP, TLS, login, and a new process in PostgreSQL.
+  - A **pool** keeps connections open. Requests **borrow and return** them.
+  - **Always return** connections, or the pool leaks and the app freezes.
+  - **Small pools** usually beat big ones. Remember: servers × pool size = total connections.
+  - **PgBouncer** in **transaction mode** lets many app servers share a few real connections.
+</Callout>

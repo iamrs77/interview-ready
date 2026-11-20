@@ -1,0 +1,109 @@
+---
+title: "CI/CD, Docker and Kubernetes"
+description: "The basics of building, packaging and running services: pipelines, containers and Kubernetes. Optional."
+icon: Container
+---
+
+## The idea
+
+Three tools take code from a developer's laptop to thousands of servers:
+
+- **CI/CD** is the **assembly line**: every change is built, tested and shipped by machines, the same way every time.
+- **Docker** is the **shipping container**. Before standard containers, every cargo was packed differently and loading ships was slow. A standard box fits any ship, truck or crane. Docker packs your app and everything it needs into one standard box that runs the same on any machine. No more "but it works on my laptop".
+- **Kubernetes** is the **port manager**. It decides which ship (server) each container goes on, keeps the right number running, and replaces any that fall overboard.
+
+## CI/CD pipelines
+
+- **CI (continuous integration):** every push is **built and tested automatically**, and developers merge small changes often.
+- **CD (continuous delivery):** every change that passes is **ready to deploy** with one click.
+- **CD (continuous deployment):** every change that passes is **deployed automatically**, with no click.
+
+```mermaid
+flowchart TB
+  Dev["Developer pushes code"]:::client --> CI["CI server<br/>build + unit tests"]:::service
+  CI --> Img["Build Docker image"]:::service
+  Img --> Reg[("Image registry")]:::storage
+  Reg --> Stg["Deploy to staging<br/>+ end-to-end tests"]:::service
+  Stg --> Prod["Deploy to production<br/>(canary first)"]:::service
+```
+
+If any step fails, the pipeline stops, and the change never reaches users. The last step uses a safe strategy from [Deployment Strategies](./deployment-strategies.mdx). Common tools: GitHub Actions, GitLab CI, Jenkins.
+
+## Docker containers
+
+Two words to know:
+
+- An **image** is the packed box: your code, the runtime (like Node.js), libraries and settings, saved as a file. It never changes once built.
+- A **container** is a **running copy** of an image. One image can run as 50 containers on 50 servers. (Like a class and its objects, or a recipe and the dishes cooked from it.)
+
+An image is described in a `Dockerfile`:
+
+```bash
+# Dockerfile for a small Node.js service
+# Start from a small image that already has Node.js
+FROM node:22-alpine
+WORKDIR /app
+# Install libraries, then copy the app code
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY . .
+EXPOSE 3000
+# What runs when the container starts
+CMD ["node", "server.js"]
+```
+
+Containers share the host machine's operating system, so they are much lighter than full virtual machines: they start in seconds and use little memory.
+
+## Kubernetes basics
+
+**Kubernetes** (often written **K8s**) runs containers across a group of machines, called a **cluster**. You tell it **what you want** ("3 copies of the orders service"), and it keeps making it true.
+
+| Term | What it is |
+| --- | --- |
+| **Node** | One machine in the cluster |
+| **Pod** | The smallest unit: one container (sometimes a few) running together on one node |
+| **Deployment** | Keeps a set number of identical pods running, and replaces them during a rolling update |
+| **Service** | A stable name and address for a group of pods, with load balancing across them. Pods come and go, the service stays |
+| **HPA** (Horizontal Pod Autoscaler) | Adds or removes pods based on load, like CPU use |
+
+```mermaid
+flowchart TB
+  Client["Other services"]:::client --> Svc["Service: orders<br/>stable address"]:::lb
+  subgraph N1["Node 1"]
+    P1["Pod: orders"]:::service
+    P2["Pod: orders"]:::service
+  end
+  subgraph N2["Node 2"]
+    P3["Pod: orders"]:::service
+  end
+  Svc --> P1
+  Svc --> P2
+  Svc --> P3
+```
+
+**It heals itself.** If a pod crashes, the deployment starts a new one. If a whole node dies, its pods are started on other nodes. Pods that fail their health checks get no traffic.
+
+**It scales.** One command tells Kubernetes to keep CPU around 70%, with 3 to 20 pods:
+
+```bash
+kubectl autoscale deployment orders --cpu-percent=70 --min=3 --max=20
+```
+
+## In the real world
+
+**Kubernetes came from Google.** Google ran its own services for years on an internal system called **Borg**. Engineers used those lessons to build Kubernetes, which Google released as open source in 2014. It is now run by the Cloud Native Computing Foundation (CNCF) and offered by every big cloud, for example as Amazon EKS and Google GKE.
+
+**Docker made containers easy.** Linux had the building blocks for containers for years, but **Docker** (released in 2013) gave developers a simple way to build, share and run them. That is why "Docker image" became the everyday name for a container image.
+
+## In the interview
+
+You rarely draw this, but one sentence shows you know how services run:
+
+> "Each service is a Docker image, built and tested by the CI pipeline. It runs on Kubernetes as a deployment behind a service, with an autoscaler that adds pods when CPU goes above 70%."
+
+<Callout title="Remember this" type="success">
+  - **CI:** build and test every change automatically. **CD:** always ready to deploy, or deployed automatically.
+  - **Docker image** = the packed box. **Container** = a running copy of it.
+  - Kubernetes: **pod** (running container), **deployment** (keeps N pods), **service** (stable address + load balancing).
+  - **HPA** adds and removes pods with load. Crashed pods are **replaced automatically**.
+</Callout>

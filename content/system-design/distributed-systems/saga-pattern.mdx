@@ -1,0 +1,167 @@
+---
+title: "Saga Pattern"
+description: "Long flows across services, where each step commits on its own and can be undone if a later step fails."
+icon: Workflow
+---
+
+## The idea
+
+Think of a **travel agent** booking your trip: a flight, then a hotel, then a rental car.
+
+She books them **one at a time**. Each booking is real and confirmed right away. If the car rental fails at the end, she doesn't pretend the flight never happened. She **cancels** the hotel and then **cancels** the flight. The airline still has a record of the booking and of the cancellation.
+
+That is a **saga**: a long task split into steps. Each step is a normal, local transaction inside one service, and it **commits right away**. If a later step fails, the saga runs **undo steps** for the earlier ones, in reverse order.
+
+Unlike [two-phase commit](./distributed-transactions-2pc.mdx), nobody waits and nothing stays locked across services. The price: for a short time, the system is **in between** (flight booked, hotel not yet).
+
+## A trip-booking saga
+
+```mermaid
+flowchart TB
+  S1["1. Book flight"] --> S2["2. Book hotel"] --> S3["3. Charge card"] --> S4["4. Rent car"]
+  S4 -->|"works"| Done["Trip confirmed"]
+  S4 -->|"fails"| C3["Undo: refund card"]
+  C3 --> C2["Undo: cancel hotel"]
+  C2 --> C1["Undo: cancel flight"]
+  C1 --> Cancelled["Trip cancelled"]
+```
+
+| Step | Service | Action | Undo step |
+| --- | --- | --- | --- |
+| 1 | Flight | Book a seat | Cancel the seat |
+| 2 | Hotel | Reserve a room | Cancel the reservation |
+| 3 | Payment | Charge the card | Refund the card |
+| 4 | Car | Rent a car | None needed: it's the last step |
+
+## Undo steps (compensating actions)
+
+The official name for an undo step is a **compensating action**. A few rules make them work:
+
+- **An undo is a new action, not an eraser.** You refund a payment, you don't delete it. Both records stay, which is good for audits.
+- **Undo steps must succeed in the end.** If a refund fails, retry it until it works. So undo steps must be **idempotent** (safe to run twice). See [Idempotency](../messaging/idempotency.mdx).
+- **Some things can't be undone.** You can't un-send an email or un-ship a parcel. Put those steps **last**, after everything that might fail.
+- **Others can see the in-between state.** For a moment, a hotel room shows as taken, then becomes free again. Sagas don't give the "I" (isolation) of ACID. Use clear statuses like `PENDING`, `CONFIRMED` and `CANCELLED`, so screens can show "Booking in progress".
+
+## Two ways to run a saga
+
+### Choreography: everyone reacts to events
+
+Like dancers who each know their moves by listening to the music. **Nobody is in charge.** Each service listens for events, does its step, and publishes a new event. (See [Event-Driven Architecture](../messaging/event-driven-architecture.mdx).)
+
+```mermaid
+sequenceDiagram
+  participant O as Order
+  participant K as Kafka
+  participant I as Inventory
+  participant P as Payment
+  O->>K: OrderPlaced
+  K->>I: OrderPlaced
+  Note over I: Reserves the items
+  I->>K: StockReserved
+  K->>P: StockReserved
+  Note over P: Card declined
+  P->>K: PaymentFailed
+  K->>I: PaymentFailed
+  Note over I: Undo: releases the items
+  I->>K: StockReleased
+  K->>O: StockReleased
+  Note over O: Order marked CANCELLED
+```
+
+- **Good:** simple for short flows. Services don't call each other directly.
+- **Bad:** the flow is spread across many services. Answering "where is order 42 right now?" means reading the logs of every service.
+
+### Orchestration: a conductor in charge
+
+Like an orchestra with a conductor. One service, the **orchestrator**, tells each service what to do, step by step, and remembers where the saga is.
+
+```mermaid
+sequenceDiagram
+  participant S as Orchestrator
+  participant I as Inventory
+  participant P as Payment
+  S->>I: Reserve items
+  I-->>S: Reserved
+  S->>P: Charge card
+  P-->>S: Card declined
+  S->>I: Release items
+  I-->>S: Released
+  Note over S: Saga done: order cancelled
+```
+
+The orchestrator saves its progress in a database after every step. If it crashes, it starts again from the last saved step. Because steps can run twice after a crash, every step must be idempotent.
+
+| | Choreography | Orchestration |
+| --- | --- | --- |
+| **Who is in charge** | Nobody. Services react to events | One orchestrator |
+| **Seeing the whole flow** | Hard. It's spread over many services | Easy. It's in one place |
+| **Coupling** | Loose | The orchestrator knows every step |
+| **Best for** | Short flows, 2 to 4 steps | Longer flows with many rules |
+
+In an interview, **orchestration is usually easier to explain**, and easier to debug in real life.
+
+If services publish events after saving data, use the [Outbox Pattern](./outbox-pattern.mdx) so no event is lost.
+
+## Tools like Temporal
+
+You can build an orchestrator yourself, but tools do the hard parts (saving progress, retries, timers):
+
+| Tool | What it is |
+| --- | --- |
+| **Temporal** | You write the saga as normal code. Temporal saves the result of every step, so after a crash the code continues from where it stopped |
+| **AWS Step Functions** | You describe the steps as a diagram of states. AWS runs it and retries steps |
+| **Conductor** | An open-source orchestration engine first built at Netflix. Netflix stopped maintaining it in December 2023. It lives on as **Conductor OSS**, maintained by Orkes and the community |
+
+Here is the shape of a saga as code. With a tool like Temporal, each call is saved, so a crash halfway doesn't lose the progress:
+
+```ts
+async function bookTrip(trip: Trip) {
+  const undo: Array<() => Promise<void>> = [];
+  try {
+    // Add each undo BEFORE its step runs (see below why)
+    undo.push(() => cancelFlight(trip));
+    await bookFlight(trip);
+
+    undo.push(() => cancelHotel(trip));
+    await bookHotel(trip);
+
+    undo.push(() => refundCard(trip));
+    await chargeCard(trip);
+
+    await rentCar(trip);
+  } catch (err) {
+    for (const step of undo.reverse()) {  // undo in reverse order
+      await retryUntilDone(step);         // retry with backoff until it works
+    }
+    throw err;
+  }
+}
+```
+
+Two details matter here:
+
+- **The undo is added before its step.** Say `chargeCard` works, but its reply is lost and the call times out. If the refund were only added after a successful call, it would never run, and the customer would pay for a cancelled trip. So each undo is added first, and every undo must be **safe even if its step never happened**: "refund the payment for trip 42" does nothing if there is no payment.
+- **Each undo is retried until it works.** A plain `await step()` would stop at the first failing undo and leave the rest undone. Undo steps must succeed in the end, so they are retried, and they are idempotent, so retries are safe.
+
+## In the real world
+
+**The idea is from 1987.** The word "saga" comes from a 1987 paper by Hector Garcia-Molina and Kenneth Salem. It described long transactions split into steps, each with a compensating step. Microservices made the idea popular again.
+
+**Uber built Cadence, which became Temporal.** Uber built Cadence to run long, reliable workflows. Its creators later started Temporal, which grew out of Cadence.
+
+**AWS documents the saga pattern.** AWS publishes a guide for building a saga with Step Functions, using a travel booking as the example: each booking step has a matching cancel step that runs if a later step fails.
+
+## In the interview
+
+Use a saga whenever one user action changes data in several services, like checkout or booking:
+
+> "Checkout is a saga run by an orchestrator: reserve stock, charge the card, create the shipment. If creating the shipment fails, the orchestrator refunds the card and releases the stock. Every step is idempotent, so retries after a crash are safe."
+
+<Callout title="Remember this" type="success">
+  - A **saga** = a long flow split into local steps that each **commit right away**.
+  - If a step fails, run **compensating actions** (undo steps) for earlier steps, in **reverse order**.
+  - Undo is a **new action** (refund), not an eraser. It must be **idempotent** and retried until it works.
+  - Put steps that **can't be undone** (emails, shipping) **last**.
+  - **Choreography** = services react to events. **Orchestration** = one conductor. Orchestration is easier to follow.
+  - Tools: **Temporal**, AWS Step Functions, Conductor OSS (first built at Netflix).
+</Callout>
