@@ -6,6 +6,7 @@ import { baseOptions } from '@/lib/layout.shared';
 import { getTrackFolder, source, TRACKS, type Track } from '@/lib/source';
 import { SidebarDoneMarks } from '@/components/sidebar-done-marks';
 import { JsPlayground, JsPlaygroundButton } from '@/components/js-playground';
+import { PLAYGROUND_TRACKS } from '@/lib/playground';
 
 /*
  * Fumadocs centers the whole layout, so on wide screens the sidebar gets empty space on its left.
@@ -47,8 +48,6 @@ function trackTabs(): LayoutTab[] {
   });
 }
 
-/** Tracks that get the JS playground (the ones with JavaScript code). */
-const PLAYGROUND_TRACKS: Track[] = ['low-level-design', 'dsa'];
 
 /** The docs layout (sidebar, track switch, done ticks, and the JS playground on LLD and DSA) for one track. */
 export function TrackLayout({ track, children }: { track: Track; children: ReactNode }) {
