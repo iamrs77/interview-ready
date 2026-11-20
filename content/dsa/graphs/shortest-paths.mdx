@@ -264,7 +264,9 @@ flowchart LR
   C -->|-4| B
 ```
 
-Dijkstra trusts one promise: when a node comes out of the heap, nobody can reach it cheaper later. A negative edge breaks that promise. Here B comes out first with cost 2, but A → C → B costs 5 − 4 = **1**. So never use Dijkstra with negative weights. The algorithm for those is **Bellman-Ford**.
+Dijkstra trusts one promise: when a node comes out of the heap, nobody can reach it cheaper later. A negative edge breaks that promise. Here B comes out first with cost 2, but A → C → B costs 5 − 4 = **1**. Textbook Dijkstra treats B as finished at 2 and never looks at it again, so it answers 2: wrong.
+
+Our code would actually fix B later, because it pushes B again with cost 1. But then a node can come out of the heap many times, the run can get very slow, and an early stop (like in Path With Minimum Effort below) can return a wrong answer. So never use Dijkstra with negative weights. The algorithm for those is **Bellman-Ford**.
 
 **Time:** O(E log V) · **Space:** O(V + E). Each edge can push at most one pair onto the heap, so the heap gets at most E pushes and E pops, and each one costs about log V. You may also see this written as O((V + E) log V).
 
@@ -459,7 +461,7 @@ A quick check: **is there a number on each edge, and do the numbers differ?** Ye
 - **Comparing the pairs themselves.** `[10, 1] < [9, 2]` is `true` in JavaScript, because arrays get compared as text ("10,1" vs "9,2"). Compare `pair[0]`.
 - **Labels from 1 to n.** Make `n + 1` slots, and don't count slot 0 when you look for the largest distance.
 - **Forgetting unreachable nodes.** They stay `Infinity`. Check for it, and return -1 when the problem says so.
-- **Negative weights.** Dijkstra gives wrong answers. Use Bellman-Ford.
+- **Negative weights.** The "final when it comes out" promise breaks: wrong answers, or a very slow run. Use Bellman-Ford.
 
 ## In the interview
 
