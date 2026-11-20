@@ -7,12 +7,13 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 
 ## System Design
 
-**Written: 133 of 133**
+**Written: 134 of 134**
 
 ### Guide
 - ✅ Start Here
 - ✅ The Interview Framework
 - ✅ Cheat Sheet
+- ✅ Last-Minute Revision
 
 ### 1. Foundations
 - ✅ Client-Server Architecture
@@ -175,12 +176,13 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 
 ## Low-Level Design
 
-**Written: 59 of 59**
+**Written: 60 of 60**
 
 ### Guide
 - ✅ Start Here
 - ✅ The LLD Interview Framework
 - ✅ Cheat Sheet
+- ✅ Last-Minute Revision
 
 ### 1. OOP Basics
 - ✅ Classes and Objects

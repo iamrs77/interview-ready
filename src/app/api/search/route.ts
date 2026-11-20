@@ -25,7 +25,9 @@ export const { GET } = createFromSource(source, {
     url: page.url,
     title: page.data.title,
     description: page.data.description,
-    structuredData: page.data.structuredData,
+    // The revision page repeats every lesson's key points, so only its title is searchable.
+    // Otherwise it would show up next to the lesson in almost every search.
+    structuredData: page.slugs.at(-1) === 'revision' ? { headings: [], contents: [] } : page.data.structuredData,
     // Shown under each result: the lesson's section, like the colored label at the top of the page.
     breadcrumbs: [getSection(page.slugs).label],
   }),
