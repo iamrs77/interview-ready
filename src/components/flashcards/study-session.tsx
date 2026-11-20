@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowRight, CircleCheck, RotateCcw } from 'lucide-react';
 import type { Flashcard } from '@/lib/flashcards';
 import { deckStats, recordAnswer, resetCards, useFlashcardProgress, useNow } from '@/lib/flashcard-progress';
+import { cn } from '@/lib/cn';
 import { RichText } from './rich-text';
 
 type Phase = 'intro' | 'study' | 'done';
@@ -150,11 +151,26 @@ export function StudySession({ cards }: { cards: Flashcard[] }) {
           />
         </div>
 
-        <div className="mt-6 rounded-2xl border bg-fd-card p-6 shadow-sm md:p-8">
+        {/* Click (or tap) anywhere on the card to see the answer. */}
+        <div
+          role={revealed ? undefined : 'button'}
+          tabIndex={revealed ? undefined : 0}
+          aria-label={revealed ? undefined : 'Show the answer'}
+          onClick={() => setRevealed(true)}
+          className={cn(
+            'mt-6 rounded-2xl border bg-fd-card p-6 shadow-sm transition md:p-8',
+            !revealed && 'cursor-pointer hover:border-fd-primary/40 hover:shadow-md',
+          )}
+        >
           <p className="text-xs font-medium uppercase tracking-wide text-fd-muted-foreground">Question</p>
           <p className="mt-3 text-xl font-medium leading-relaxed md:text-2xl">
             <RichText text={card.q} />
           </p>
+          {!revealed && (
+            <p className="mt-6 text-sm text-fd-muted-foreground">
+              Click the card to see the answer <Kbd>Space</Kbd>
+            </p>
+          )}
           {revealed && (
             <div className="mt-6 border-t pt-6" aria-live="polite">
               <p className="text-xs font-medium uppercase tracking-wide text-fd-muted-foreground">Answer</p>
@@ -171,34 +187,24 @@ export function StudySession({ cards }: { cards: Flashcard[] }) {
           )}
         </div>
 
-        <div className="mt-5 flex flex-wrap justify-center gap-3">
-          {revealed ? (
-            <>
-              <button
-                type="button"
-                onClick={() => answer(false)}
-                className="inline-flex min-w-36 items-center justify-center rounded-lg bg-rose-500/10 px-5 py-2.5 text-sm font-medium text-rose-700 hover:bg-rose-500/20"
-              >
-                Again <Kbd>1</Kbd>
-              </button>
-              <button
-                type="button"
-                onClick={() => answer(true)}
-                className="inline-flex min-w-36 items-center justify-center rounded-lg bg-emerald-500/10 px-5 py-2.5 text-sm font-medium text-emerald-700 hover:bg-emerald-500/20"
-              >
-                I knew it <Kbd>2</Kbd>
-              </button>
-            </>
-          ) : (
+        {revealed && (
+          <div className="mt-5 flex flex-wrap justify-center gap-3">
             <button
               type="button"
-              onClick={() => setRevealed(true)}
-              className="inline-flex min-w-48 items-center justify-center rounded-lg bg-fd-primary px-5 py-2.5 text-sm font-medium text-fd-primary-foreground hover:bg-fd-primary/85"
+              onClick={() => answer(false)}
+              className="inline-flex min-w-36 items-center justify-center rounded-lg bg-rose-500/10 px-5 py-2.5 text-sm font-medium text-rose-700 hover:bg-rose-500/20"
             >
-              Show answer <Kbd>Space</Kbd>
+              Again <Kbd>1</Kbd>
             </button>
-          )}
-        </div>
+            <button
+              type="button"
+              onClick={() => answer(true)}
+              className="inline-flex min-w-36 items-center justify-center rounded-lg bg-emerald-500/10 px-5 py-2.5 text-sm font-medium text-emerald-700 hover:bg-emerald-500/20"
+            >
+              I knew it <Kbd>2</Kbd>
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -212,8 +218,8 @@ export function StudySession({ cards }: { cards: Flashcard[] }) {
         <Stat label="Known" value={stats.known} />
       </div>
       <p className="mt-5 text-sm text-fd-muted-foreground">
-        Read the question, answer it in your head, then show the answer. Cards you know come back later (after 1, 3,
-        7, 14, then 30 days). Cards you miss come back the same day.
+        Read the question, answer it in your head, then click the card to see the answer. Cards you know come back
+        later (after 1, 3, 7, 14, then 30 days). Cards you miss come back the same day.
       </p>
       {toStudy === 0 && (
         <p className="mt-3 text-sm font-medium">Nothing to review right now. Come back later, or practice all cards.</p>
