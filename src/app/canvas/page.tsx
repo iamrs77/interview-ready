@@ -1,11 +1,7 @@
-import type { Metadata } from 'next';
-import { FreeCanvas } from '@/components/canvas/free-canvas';
+import { redirect } from 'next/navigation';
 
-export const metadata: Metadata = {
-  title: 'Free canvas',
-  description: 'A blank board to draw anything. It saves in this browser.',
-};
-
-export default function FreeCanvasPage() {
-  return <FreeCanvas />;
+// Each track has its own board now. The old /canvas link opens the System Design board,
+// which keeps the drawing saved before the split.
+export default function CanvasPage() {
+  redirect('/canvas/system-design');
 }

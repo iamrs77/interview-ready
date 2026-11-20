@@ -1,6 +1,6 @@
 /*
  * Free canvas drawings, saved in this browser only (IndexedDB). Not localStorage: a drawing can be large.
- * Store "boards", key = board id. Today there is one board, "free-canvas".
+ * Store "boards", key = board id. One board per track: "free-canvas" (System Design) and "lld-canvas".
  * Every function returns a promise that fails when the browser can't save (for example, storage is blocked).
  * Callers catch that, keep working, and show "Can't save in this browser".
  *
