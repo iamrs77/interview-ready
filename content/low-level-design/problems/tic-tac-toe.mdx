@@ -49,7 +49,7 @@ The game is tiny, so the interviewer looks at two things:
 
 | Class | What it is | Key data | Key actions |
 | --- | --- | --- | --- |
-| `Board` | The N×N grid of cells | `size`, the cells | `place(row, col, mark)`, `isFree`, `isFull` |
+| `Board` | The N×N grid of cells | `size`, the cells | `place(row, col, mark)`, `isFree`, `isFull()` |
 | `WinChecker` | Knows the win rule | one counter per row, column and diagonal | `isWinningMove(row, col, mark)` |
 | `Player` (interface) | Someone who picks a move | — | `chooseMove(board)` |
 | `HumanPlayer`, `BotPlayer` | A person, and a simple bot | `name`, `mark` | `chooseMove(board)` |
@@ -76,7 +76,7 @@ classDiagram
     +size int
     +place(row, col, mark)
     +isFree(row, col) bool
-    +isFull bool
+    +isFull() bool
   }
   class WinChecker:::concrete {
     -rows int[]
@@ -155,179 +155,388 @@ For example, on a 3×3 board X plays (0, 0), (0, 1) and (0, 2). The counter for 
 
 ## Step 5: Code
 
-**Part 1: enums, the board and the win checker.**
+The code is split into small parts. Paste them together in order and they run.
+
+### Part 1: The enums
+
+Plain objects with fixed values, so `Mark.X` can't be misspelled.
 
 ```js
-const Mark = Object.freeze({ X: 'X', O: 'O' });
-const GameStatus = Object.freeze({ IN_PROGRESS: 'IN_PROGRESS', WON: 'WON', DRAW: 'DRAW' });
+// The two marks.
+const Mark = {
+    X: "X",
+    O: "O",
+};
 
+// Where the game is at.
+const GameStatus = {
+    IN_PROGRESS: "IN_PROGRESS",
+    WON: "WON",
+    DRAW: "DRAW",
+};
+```
+
+### Part 2: The board
+
+The board only stores the cells. It doesn't know who wins. First, making the empty grid:
+
+```js
+// The N×N grid of cells. Each cell is null (empty), "X" or "O".
 class Board {
-  #cells;
-  #filled = 0;
-  constructor(size) {
-    if (!Number.isInteger(size) || size < 3) throw new Error('Size must be a whole number, 3 or more');
-    this.size = size;
-    this.#cells = Array.from({ length: size }, () => Array(size).fill(null));
-  }
-  isInside(row, col) {
-    return Number.isInteger(row) && Number.isInteger(col) && row >= 0 && row < this.size && col >= 0 && col < this.size;
-  }
-  isFree(row, col) { return this.#cells[row][col] === null; }
-  place(row, col, mark) {
-    if (!this.isInside(row, col)) throw new Error(`(${row}, ${col}) is off the board`);
-    if (!this.isFree(row, col)) throw new Error(`(${row}, ${col}) is taken`);
-    this.#cells[row][col] = mark;
-    this.#filled++;
-  }
-  get isFull() { return this.#filled === this.size * this.size; }
-  freeCells() {
-    const free = [];
-    for (let r = 0; r < this.size; r++) {
-      for (let c = 0; c < this.size; c++) if (this.isFree(r, c)) free.push([r, c]);
-    }
-    return free;
-  }
-  toString() { return this.#cells.map((row) => row.map((cell) => cell ?? '.').join(' ')).join('\n'); }
-}
+    constructor(size) {
+        if (!Number.isInteger(size) || size < 3) {
+            throw new Error("Size must be a whole number, 3 or more");
+        }
 
-// O(1) win check: one counter per row, per column and per diagonal.
-// X adds 1 and O adds -1. A line is full of one mark when its counter reaches size or -size.
-class WinChecker {
-  #rows;
-  #cols;
-  #diagonal = 0;
-  #antiDiagonal = 0;
-  constructor(size) {
-    this.size = size;
-    this.#rows = Array(size).fill(0);
-    this.#cols = Array(size).fill(0);
-  }
-  isWinningMove(row, col, mark) {
-    const add = mark === Mark.X ? 1 : -1;
-    const n = this.size;
-    this.#rows[row] += add;
-    this.#cols[col] += add;
-    if (row === col) this.#diagonal += add;
-    if (row + col === n - 1) this.#antiDiagonal += add;
-    return [this.#rows[row], this.#cols[col], this.#diagonal, this.#antiDiagonal].some((t) => Math.abs(t) === n);
-  }
+        this.size = size;
+
+        // How many cells have a mark. Makes the "is it full?" check fast.
+        this.filled = 0;
+
+        // Make "size" rows. Each row has "size" empty cells.
+        this.cells = [];
+        for (let i = 0; i < size; i++) {
+            const row = new Array(size).fill(null);
+            this.cells.push(row);
+        }
+    }
+```
+
+Next, placing marks. A bad move throws an error.
+
+```js
+    // True if (row, col) is a whole-number cell on the board.
+    isInside(row, col) {
+        if (!Number.isInteger(row) || !Number.isInteger(col)) {
+            return false;
+        }
+
+        const rowFits = row >= 0 && row < this.size;
+        const colFits = col >= 0 && col < this.size;
+        return rowFits && colFits;
+    }
+
+    isFree(row, col) {
+        return this.cells[row][col] === null;
+    }
+
+    place(row, col, mark) {
+        if (!this.isInside(row, col)) {
+            throw new Error(`(${row}, ${col}) is off the board`);
+        }
+        if (!this.isFree(row, col)) {
+            throw new Error(`(${row}, ${col}) is taken`);
+        }
+
+        this.cells[row][col] = mark;
+        this.filled += 1;
+    }
+
+    isFull() {
+        return this.filled === this.size * this.size;
+    }
+```
+
+Last, two ways to read the board: the free cells, and the board as text.
+
+```js
+    // Every empty cell, as a list of [row, col] pairs.
+    freeCells() {
+        const free = [];
+        for (let row = 0; row < this.size; row++) {
+            for (let col = 0; col < this.size; col++) {
+                if (this.isFree(row, col)) {
+                    free.push([row, col]);
+                }
+            }
+        }
+        return free;
+    }
+
+    // The board as text, one line per row. Empty cells show as ".".
+    toString() {
+        const lines = [];
+        for (const row of this.cells) {
+            const symbols = [];
+            for (const cell of row) {
+                if (cell === null) {
+                    symbols.push(".");
+                } else {
+                    symbols.push(cell);
+                }
+            }
+            lines.push(symbols.join(" "));
+        }
+        return lines.join("\n");
+    }
 }
 ```
 
-**Part 2: the players.** `Player` is the interface. The bot is just one more class.
+### Part 3: The win checker
+
+This is the O(1) trick from above. It keeps one counter per row, per column and per diagonal.
 
 ```js
-class Player { // interface: how a player picks a move
-  chooseMove(board) { throw new Error('not implemented'); } // returns [row, col]
+// X adds 1 and O adds -1. A line is full of one mark
+// when its counter reaches size (all X) or -size (all O).
+class WinChecker {
+    constructor(size) {
+        this.size = size;
+        this.rows = new Array(size).fill(0);
+        this.cols = new Array(size).fill(0);
+        this.diagonal = 0;
+        this.antiDiagonal = 0;
+    }
+```
+
+After each move, only four counters change: the move's row, its column, and the diagonals it sits on.
+
+```js
+    isWinningMove(row, col, mark) {
+        let add = -1;
+        if (mark === Mark.X) {
+            add = 1;
+        }
+
+        this.rows[row] += add;
+        this.cols[col] += add;
+
+        // The main diagonal: top-left to bottom-right.
+        if (row === col) {
+            this.diagonal += add;
+        }
+        // The other diagonal: top-right to bottom-left.
+        if (row + col === this.size - 1) {
+            this.antiDiagonal += add;
+        }
+
+        // A counter of size or -size means one mark fills that line.
+        const totals = [this.rows[row], this.cols[col], this.diagonal, this.antiDiagonal];
+        for (const total of totals) {
+            if (Math.abs(total) === this.size) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+```
+
+### Part 4: The players
+
+`Player` is the interface. A person and the bot are two classes that fill it in.
+
+```js
+// The Player "interface": every player has a chooseMove method
+// that returns the move as [row, col].
+class Player {
+    chooseMove(board) {
+        throw new Error("not implemented");
+    }
 }
 
+// A person. In a real app, moves come from clicks.
+// Here they come from a list, so the example can run on its own.
 class HumanPlayer extends Player {
-  #moves;
-  constructor(name, mark, moves = []) {
-    super();
-    this.name = name;
-    this.mark = mark;
-    this.#moves = [...moves]; // in a real app, moves come from clicks; here, from a list
-  }
-  chooseMove() { return this.#moves.shift(); }
-}
+    constructor(name, mark, moves = []) {
+        super();
+        this.name = name;
+        this.mark = mark;
+        // A copy, so we don't change the caller's list.
+        this.moves = moves.slice();
+    }
 
-class BotPlayer extends Player { // a simple bot: the center, else the first free cell
-  constructor(name, mark) {
-    super();
-    this.name = name;
-    this.mark = mark;
-  }
-  chooseMove(board) {
-    const mid = Math.floor(board.size / 2);
-    return board.isFree(mid, mid) ? [mid, mid] : board.freeCells()[0];
-  }
+    // Take the next move from the front of the list.
+    chooseMove() {
+        return this.moves.shift();
+    }
+}
+```
+
+The bot is just one more class:
+
+```js
+// A simple bot: the center if it is free, else the first free cell.
+class BotPlayer extends Player {
+    constructor(name, mark) {
+        super();
+        this.name = name;
+        this.mark = mark;
+    }
+
+    chooseMove(board) {
+        const middle = Math.floor(board.size / 2);
+        if (board.isFree(middle, middle)) {
+            return [middle, middle];
+        }
+
+        const freeCells = board.freeCells();
+        return freeCells[0];
+    }
 }
 ```
 
 In JavaScript, duck typing also works: any object with `name`, `mark` and a `chooseMove` method can play. The base class makes the role easy to see. In Java, `Player` would be an `interface`.
 
-**Part 3: the game.** It checks for a win **before** it checks for a draw, so a win on the last free cell counts as a win.
+### Part 5: The game
+
+The game owns the board and the checker, and counts the turns.
 
 ```js
+// Runs the turns and knows who won.
 class Game {
-  #checker;
-  #turn = 0;
-  status = GameStatus.IN_PROGRESS;
-  winner = null;
-  constructor(size, playerX, playerO) {
-    if (playerX.mark !== Mark.X || playerO.mark !== Mark.O) throw new Error('Players must be X and O');
-    this.board = new Board(size);
-    this.#checker = new WinChecker(size);
-    this.players = [playerX, playerO];
-  }
-  get currentPlayer() { return this.players[this.#turn % 2]; }
+    constructor(size, playerX, playerO) {
+        if (playerX.mark !== Mark.X || playerO.mark !== Mark.O) {
+            throw new Error("Players must be X and O");
+        }
 
-  move(row, col) {
-    if (this.status !== GameStatus.IN_PROGRESS) throw new Error('The game is over');
-    const player = this.currentPlayer;
-    this.board.place(row, col, player.mark); // throws on a bad move; the turn stays the same
-    if (this.#checker.isWinningMove(row, col, player.mark)) {
-      this.status = GameStatus.WON;
-      this.winner = player;
-    } else if (this.board.isFull) {
-      this.status = GameStatus.DRAW;
-    } else {
-      this.#turn++;
+        this.board = new Board(size);
+        this.checker = new WinChecker(size);
+        this.players = [playerX, playerO];
+        this.status = GameStatus.IN_PROGRESS;
+        this.winner = null;
+
+        // Counts the turns. Even means X plays, odd means O plays.
+        this.turn = 0;
     }
-    return this.status;
-  }
 
-  playTurn() {
-    const [row, col] = this.currentPlayer.chooseMove(this.board);
-    return this.move(row, col);
-  }
-  playToEnd() {
-    while (this.status === GameStatus.IN_PROGRESS) this.playTurn();
-    return this.result;
-  }
-  get result() {
-    if (this.status === GameStatus.WON) return `${this.winner.name} (${this.winner.mark}) wins`;
-    if (this.status === GameStatus.DRAW) return 'Draw';
-    return `${this.currentPlayer.name} (${this.currentPlayer.mark}) to play`;
-  }
+    getCurrentPlayer() {
+        const index = this.turn % 2;
+        return this.players[index];
+    }
+```
+
+`move` places a mark. It checks for a win **before** it checks for a draw, so a win on the last free cell counts as a win.
+
+```js
+    move(row, col) {
+        if (this.status !== GameStatus.IN_PROGRESS) {
+            throw new Error("The game is over");
+        }
+
+        const player = this.getCurrentPlayer();
+
+        // Throws on a bad move. The turn doesn't change, so the same player tries again.
+        this.board.place(row, col, player.mark);
+
+        if (this.checker.isWinningMove(row, col, player.mark)) {
+            this.status = GameStatus.WON;
+            this.winner = player;
+        } else if (this.board.isFull()) {
+            this.status = GameStatus.DRAW;
+        } else {
+            // No winner yet: now it's the other player's turn.
+            this.turn += 1;
+        }
+
+        return this.status;
+    }
+```
+
+Last, playing turns by asking the players, and the result as a short sentence.
+
+```js
+    // Ask the current player for a move, then make it.
+    playTurn() {
+        const player = this.getCurrentPlayer();
+        const chosen = player.chooseMove(this.board);
+        const row = chosen[0];
+        const col = chosen[1];
+        return this.move(row, col);
+    }
+
+    // Keep playing until someone wins or it's a draw.
+    playToEnd() {
+        while (this.status === GameStatus.IN_PROGRESS) {
+            this.playTurn();
+        }
+        return this.getResult();
+    }
+
+    getResult() {
+        if (this.status === GameStatus.WON) {
+            return `${this.winner.name} (${this.winner.mark}) wins`;
+        }
+        if (this.status === GameStatus.DRAW) {
+            return "Draw";
+        }
+
+        const player = this.getCurrentPlayer();
+        return `${player.name} (${player.mark}) to play`;
+    }
 }
 ```
 
-**Part 4: try it.** Three games: two people, a person against the bot on 4×4, and two bots.
+### Part 6: Try it
+
+Three games: two people, a person against the bot on 4×4, and two bots. `show` runs an action and returns the error message if it throws, so the program keeps going.
 
 ```js
-const show = (action) => { try { return action(); } catch (e) { return e.message; } };
+// "action" is a small function, like () => game.move(0, 0).
+function show(action) {
+    try {
+        return action();
+    } catch (error) {
+        return error.message;
+    }
+}
+```
 
-// Game 1: two people on a 3x3 board, one move at a time.
-const game = new Game(3, new HumanPlayer('Asha', Mark.X), new HumanPlayer('Ben', Mark.O));
-game.move(0, 0); // Asha
-game.move(1, 0); // Ben
+Game 1: two people on a 3×3 board, one move at a time.
+
+```js
+const asha = new HumanPlayer("Asha", Mark.X);
+const ben = new HumanPlayer("Ben", Mark.O);
+const game = new Game(3, asha, ben);
+
+// Asha plays (0, 0), then Ben plays (1, 0).
+game.move(0, 0);
+game.move(1, 0);
+
+// Bad moves throw, and it stays Asha's turn.
 console.log(show(() => game.move(0, 0))); // (0, 0) is taken
 console.log(show(() => game.move(3, 3))); // (3, 3) is off the board
-console.log(game.result); // Asha (X) to play
-game.move(0, 1); // Asha
-game.move(1, 1); // Ben
+console.log(game.getResult()); // Asha (X) to play
+
+// Asha, Ben, then Asha fills the top row.
+game.move(0, 1);
+game.move(1, 1);
 console.log(game.move(0, 2)); // WON
-console.log(game.result); // Asha (X) wins
+console.log(game.getResult()); // Asha (X) wins
+
 console.log(game.board.toString());
 // X X X
 // O O .
 // . . .
-console.log(show(() => game.move(2, 0))); // The game is over
 
-// Game 2: a person against the bot on a 4x4 board. The person wins on the anti-diagonal.
-const human = new HumanPlayer('Asha', Mark.X, [[0, 3], [1, 2], [2, 1], [3, 0]]);
-const game2 = new Game(4, human, new BotPlayer('Bot', Mark.O));
+console.log(show(() => game.move(2, 0))); // The game is over
+```
+
+Game 2: a person against the bot on a 4×4 board. Asha's moves are planned ahead, and she wins on the anti-diagonal.
+
+```js
+const ashaMoves = [[0, 3], [1, 2], [2, 1], [3, 0]];
+const human = new HumanPlayer("Asha", Mark.X, ashaMoves);
+const bot = new BotPlayer("Bot", Mark.O);
+const game2 = new Game(4, human, bot);
+
 console.log(game2.playToEnd()); // Asha (X) wins
+
 console.log(game2.board.toString());
 // O O . X
 // . . X .
 // . X O .
 // X . . .
+```
 
-// Game 3: two bots. Same Game class, no change.
-console.log(new Game(3, new BotPlayer('Bot 1', Mark.X), new BotPlayer('Bot 2', Mark.O)).playToEnd()); // Draw
+Game 3: two bots. The same `Game` class works with no change.
+
+```js
+const bot1 = new BotPlayer("Bot 1", Mark.X);
+const bot2 = new BotPlayer("Bot 2", Mark.O);
+const game3 = new Game(3, bot1, bot2);
+
+console.log(game3.playToEnd()); // Draw
 ```
 
 ## Step 6: Edge cases and extensions
@@ -353,8 +562,11 @@ One gap: `move` trusts that the caller is the current player. Online, the server
 ```js
 // A fragment, not runnable on its own: the online version of move.
 move(playerId, row, col) {
-  if (this.currentPlayer.id !== playerId) throw new Error('Not your turn');
-  // ...the same as before
+    if (this.getCurrentPlayer().id !== playerId) {
+        throw new Error("Not your turn");
+    }
+
+    // ...the same as before
 }
 ```
 

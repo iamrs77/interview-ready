@@ -22,33 +22,71 @@ It is the "I" in SOLID. Fun fact: Robert C. Martin came up with it while helping
 
 ## The bad version
 
-One big `Machine` interface for every office machine:
+One big `Machine` interface for every office machine.
+
+**Step 1: the big interface.** Every machine must have all three methods:
 
 ```js
-class Machine { // interface: one big "do everything" role
-  print(doc) { throw new Error('not implemented'); }
-  scan(doc) { throw new Error('not implemented'); }
-  fax(doc, number) { throw new Error('not implemented'); }
-}
+// The interface: one big "do everything" role.
+// JavaScript has no "interface" keyword, so a base class that throws stands in for one.
+class Machine {
+    print(doc) {
+        throw new Error("not implemented");
+    }
 
+    scan(doc) {
+        throw new Error("not implemented");
+    }
+
+    fax(doc, number) {
+        throw new Error("not implemented");
+    }
+}
+```
+
+**Step 2: two machines.** The office machine can do everything. The home printer can only print:
+
+```js
 class OfficeMachine extends Machine {
-  print(doc) { return `Printed ${doc}`; }
-  scan(doc) { return `Scanned ${doc}`; }
-  fax(doc, number) { return `Faxed ${doc} to ${number}`; }
+    print(doc) {
+        return `Printed ${doc}`;
+    }
+
+    scan(doc) {
+        return `Scanned ${doc}`;
+    }
+
+    fax(doc, number) {
+        return `Faxed ${doc} to ${number}`;
+    }
 }
 
 class HomePrinter extends Machine {
-  print(doc) { return `Printed ${doc}`; }
-  scan(doc) { throw new Error('HomePrinter cannot scan'); }
-  fax(doc, number) { throw new Error('HomePrinter cannot fax'); }
-}
+    print(doc) {
+        return `Printed ${doc}`;
+    }
 
+    // It can't scan or fax, but the interface forces it to have these methods.
+    scan(doc) {
+        throw new Error("HomePrinter cannot scan");
+    }
+
+    fax(doc, number) {
+        throw new Error("HomePrinter cannot fax");
+    }
+}
+```
+
+**Step 3: use the home printer.** Printing works. Faxing crashes:
+
+```js
 const printer = new HomePrinter();
-console.log(printer.print('report.pdf')); // Printed report.pdf
+console.log(printer.print("report.pdf")); // Printed report.pdf
+
 try {
-  printer.fax('report.pdf', '555-0100');
-} catch (e) {
-  console.log(e.message); // HomePrinter cannot fax
+    printer.fax("report.pdf", "555-0100");
+} catch (error) {
+    console.log(error.message); // HomePrinter cannot fax
 }
 ```
 
@@ -91,32 +129,67 @@ classDiagram
   Fax <|.. OfficeMachine
 ```
 
+**Step 1: three small interfaces.** Each one is a single role:
+
 ```js
-class Printer { // interface
-  print(doc) { throw new Error('not implemented'); }
-}
-class Scanner { // interface
-  scan(doc) { throw new Error('not implemented'); }
-}
-class Fax { // interface
-  fax(doc, number) { throw new Error('not implemented'); }
+// Interface: something that can print.
+class Printer {
+    print(doc) {
+        throw new Error("not implemented");
+    }
 }
 
+// Interface: something that can scan.
+class Scanner {
+    scan(doc) {
+        throw new Error("not implemented");
+    }
+}
+
+// Interface: something that can fax.
+class Fax {
+    fax(doc, number) {
+        throw new Error("not implemented");
+    }
+}
+```
+
+**Step 2: the machines.** Each one takes only the roles it can really do:
+
+```js
 class HomePrinter extends Printer {
-  print(doc) { return `Printed ${doc}`; }
+    print(doc) {
+        return `Printed ${doc}`;
+    }
 }
 
 // A JavaScript class can extend only one class. So the all-in-one machine
 // simply has all three methods (duck typing): it can act as each role.
 class OfficeMachine {
-  print(doc) { return `Printed ${doc}`; }
-  scan(doc) { return `Scanned ${doc}`; }
-  fax(doc, number) { return `Faxed ${doc} to ${number}`; }
+    print(doc) {
+        return `Printed ${doc}`;
+    }
+
+    scan(doc) {
+        return `Scanned ${doc}`;
+    }
+
+    fax(doc, number) {
+        return `Faxed ${doc} to ${number}`;
+    }
+}
+```
+
+**Step 3: use them.** Each function asks only for the role it needs:
+
+```js
+function printReport(printer) {
+    return printer.print("report.pdf");
 }
 
-// Each function asks only for the role it needs.
-function printReport(printer) { return printer.print('report.pdf'); }
-function scanPassport(scanner) { return scanner.scan('passport.jpg'); }
+function scanPassport(scanner) {
+    return scanner.scan("passport.jpg");
+}
 
 console.log(printReport(new HomePrinter()));    // Printed report.pdf
 console.log(printReport(new OfficeMachine()));  // Printed report.pdf

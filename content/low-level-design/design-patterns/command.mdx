@@ -25,11 +25,17 @@ A text editor where each button changes the text directly. Then someone asks for
 ```js
 // Not complete code: it only shows the problem.
 function onUndo() {
-  const last = history.pop();
-  if (last.type === 'type') doc.text = doc.text.slice(0, -last.words.length);
-  else if (last.type === 'delete') doc.text += last.removed;
-  else if (last.type === 'bold') { /* ... */ }
-  // Every new action adds a branch here, and another one in redo.
+    const lastAction = history.pop();
+
+    if (lastAction.type === "type") {
+        doc.text = doc.text.slice(0, -lastAction.words.length);
+    } else if (lastAction.type === "delete") {
+        doc.text += lastAction.removed;
+    } else if (lastAction.type === "bold") {
+        // ...
+    }
+
+    // Every new action adds a branch here, and another one in redo.
 }
 ```
 
@@ -79,71 +85,139 @@ classDiagram
   DeleteLast --> TextDoc : changes
 ```
 
-**Part 1:** the commands and the document.
+The code comes in five small steps. Paste them in order into one file to run it.
+
+**Step 1: the interface and the document.** Every command can do itself and undo itself. The document is the receiver: the thing that really changes.
 
 ```js
-class Command { // interface
-  execute() { throw new Error('not implemented'); }
-  undo() { throw new Error('not implemented'); }
+// The interface: every command has execute() and undo().
+class Command {
+    execute() {
+        throw new Error("not implemented");
+    }
+
+    undo() {
+        throw new Error("not implemented");
+    }
 }
 
-class TextDoc { text = ''; } // the receiver: the thing that really changes
-
-class TypeText extends Command {
-  #doc; #words;
-  constructor(doc, words) { super(); this.#doc = doc; this.#words = words; }
-  execute() { this.#doc.text += this.#words; }
-  undo() { this.#doc.text = this.#doc.text.slice(0, -this.#words.length); }
-}
-
-class DeleteLast extends Command {
-  #doc; #count; #removed = '';
-  constructor(doc, count) { super(); this.#doc = doc; this.#count = count; }
-  execute() {
-    this.#removed = this.#doc.text.slice(-this.#count); // remember what we remove
-    this.#doc.text = this.#doc.text.slice(0, -this.#count);
-  }
-  undo() { this.#doc.text += this.#removed; } // put it back
+// The receiver: the thing that really changes.
+class TextDoc {
+    constructor() {
+        this.text = "";
+    }
 }
 ```
 
-**Part 2:** the editor (the invoker), and a try-out.
+**Step 2: the "type text" command.** It adds words to the end, and its undo cuts them off again.
 
 ```js
-// Part 2: runs together with Part 1 above, as one file.
-class Editor { // the invoker: runs commands and keeps the history
-  #undoStack = [];
-  #redoStack = [];
+class TypeText extends Command {
+    constructor(doc, words) {
+        super();
+        this.doc = doc;
+        this.words = words;
+    }
 
-  run(command) {
-    command.execute();
-    this.#undoStack.push(command);
-    this.#redoStack = []; // a new action clears the redo history
-  }
-  undo() {
-    const command = this.#undoStack.pop();
-    if (!command) return;
-    command.undo();
-    this.#redoStack.push(command);
-  }
-  redo() {
-    const command = this.#redoStack.pop();
-    if (!command) return;
-    command.execute();
-    this.#undoStack.push(command);
-  }
+    execute() {
+        this.doc.text += this.words;
+    }
+
+    undo() {
+        const length = this.words.length;
+
+        // slice(0, -5) keeps everything except the last 5 characters.
+        this.doc.text = this.doc.text.slice(0, -length);
+    }
 }
+```
 
+**Step 3: the "delete last" command.** It remembers what it deleted, so undo can put it back.
+
+```js
+class DeleteLast extends Command {
+    constructor(doc, count) {
+        super();
+        this.doc = doc;
+        this.count = count;
+        this.removed = "";
+    }
+
+    execute() {
+        // Remember the last few characters before deleting them.
+        // slice(-6) gives the last 6 characters.
+        this.removed = this.doc.text.slice(-this.count);
+
+        this.doc.text = this.doc.text.slice(0, -this.count);
+    }
+
+    undo() {
+        // Put the deleted text back.
+        this.doc.text += this.removed;
+    }
+}
+```
+
+**Step 4: the editor.** This is the invoker. It runs commands and keeps two stacks, without knowing what any command does.
+
+```js
+class Editor {
+    constructor() {
+        this.undoStack = [];
+        this.redoStack = [];
+    }
+
+    run(command) {
+        command.execute();
+        this.undoStack.push(command);
+
+        // A new action clears the redo history.
+        this.redoStack = [];
+    }
+
+    undo() {
+        const command = this.undoStack.pop();
+
+        // The stack was empty: nothing to undo.
+        if (!command) {
+            return;
+        }
+
+        command.undo();
+        this.redoStack.push(command);
+    }
+
+    redo() {
+        const command = this.redoStack.pop();
+
+        // Nothing to redo.
+        if (!command) {
+            return;
+        }
+
+        command.execute();
+        this.undoStack.push(command);
+    }
+}
+```
+
+**Step 5: try it.**
+
+```js
 const doc = new TextDoc();
 const editor = new Editor();
-editor.run(new TypeText(doc, 'Hello'));
-editor.run(new TypeText(doc, ' world'));
+
+editor.run(new TypeText(doc, "Hello"));
+editor.run(new TypeText(doc, " world"));
 editor.run(new DeleteLast(doc, 6));
 console.log(doc.text); // Hello
+
 editor.undo();
 console.log(doc.text); // Hello world
+
 editor.undo();
 console.log(doc.text); // Hello
+
 editor.redo();
 console.log(doc.text); // Hello world
 ```
@@ -177,21 +251,35 @@ What changed:
 A command doesn't need a class. Any object with `execute` and `undo` functions will do (duck typing):
 
 ```js
-const doc = { text: '' };
+const doc = { text: "" };
 
 // A command is any object with execute() and undo(). No classes needed.
-const typeText = (words) => ({
-  execute: () => { doc.text += words; },
-  undo: () => { doc.text = doc.text.slice(0, -words.length); },
-});
+// typeText("Hi") gives back a command that types "Hi".
+function typeText(words) {
+    return {
+        execute() {
+            doc.text += words;
+        },
+
+        undo() {
+            doc.text = doc.text.slice(0, -words.length);
+        },
+    };
+}
 
 const history = [];
-function run(command) { command.execute(); history.push(command); }
 
-run(typeText('Hi'));
-run(typeText(' there'));
+function run(command) {
+    command.execute();
+    history.push(command);
+}
+
+run(typeText("Hi"));
+run(typeText(" there"));
 console.log(doc.text); // Hi there
-history.pop().undo();
+
+const lastCommand = history.pop();
+lastCommand.undo();
 console.log(doc.text); // Hi
 ```
 

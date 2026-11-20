@@ -92,19 +92,29 @@ There are two ways to build the relay:
 
 A simple polling relay:
 
-```ts
-// Runs every second
+```js
+// This code runs every second.
+
+// 1. Read up to 100 rows that are not sent yet, oldest first
 const rows = await db.query(
-  'SELECT * FROM outbox WHERE sent_at IS NULL ORDER BY seq LIMIT 100'
+    "SELECT * FROM outbox WHERE sent_at IS NULL ORDER BY seq LIMIT 100"
 );
+
+// 2. Publish each row to Kafka, then mark it as sent
 for (const row of rows) {
-  await kafka.send({
-    topic: row.topic,
-    key: row.aggregate_id,              // the order ID: one order's events stay in one partition
-    headers: { eventId: row.id },       // so consumers can spot duplicates
-    value: row.payload,
-  });
-  await db.query('UPDATE outbox SET sent_at = now() WHERE id = $1', [row.id]);
+    await kafka.send({
+        topic: row.topic,
+
+        // The order ID: one order's events stay in one partition
+        key: row.aggregate_id,
+
+        // So consumers can spot duplicates
+        headers: { eventId: row.id },
+
+        value: row.payload,
+    });
+
+    await db.query("UPDATE outbox SET sent_at = now() WHERE id = $1", [row.id]);
 }
 ```
 

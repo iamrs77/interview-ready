@@ -182,214 +182,407 @@ sequenceDiagram
 ## Step 5: Code
 
 Money is in whole **paise** (₹1 = 100 paise). Dates are turned into whole **day numbers** (days since 1 Jan 1970),
-so "how many nights?" is a simple subtraction. Run all the parts together as one `.mjs` file.
+so "how many nights?" is a simple subtraction. Run all the parts together as one `.mjs` file. Long classes come in a
+few pieces. Paste the pieces in order and they make the whole class.
 
-**Part 1: enums and small classes.** `DateRange` holds the overlap rule, and `Room` checks its own bookings.
+### Part 1: Enums and small classes
+
+**The enums and helpers.**
 
 ```js
-const RoomType = Object.freeze({ SINGLE: 'SINGLE', DOUBLE: 'DOUBLE', SUITE: 'SUITE' });
-const BookingStatus = Object.freeze({ CONFIRMED: 'CONFIRMED', CANCELLED: 'CANCELLED' });
+const RoomType = {
+    SINGLE: "SINGLE",
+    DOUBLE: "DOUBLE",
+    SUITE: "SUITE",
+};
 
-const DAY_MS = 86_400_000;
-const dayNumber = (ms) => Math.floor(ms / DAY_MS); // whole days since 1 Jan 1970 (UTC)
-const rupees = (paise) => `₹${(paise / 100).toFixed(2)}`; // only for printing
+const BookingStatus = {
+    CONFIRMED: "CONFIRMED",
+    CANCELLED: "CANCELLED",
+};
 
-class DateRange { // from the check-in day up to, but not including, the check-out day
-  constructor(checkIn, checkOut) { // 'YYYY-MM-DD'
-    this.checkIn = checkIn;
-    this.checkOut = checkOut;
-    this.start = dayNumber(Date.parse(checkIn));
-    this.end = dayNumber(Date.parse(checkOut));
-    if (Number.isNaN(this.start) || Number.isNaN(this.end)) throw new Error('Use dates like 2026-12-24');
-    if (this.end <= this.start) throw new Error('Check-out must be after check-in');
-  }
-  get nights() { return this.end - this.start; }
-  overlaps(other) { return this.start < other.end && other.start < this.end; }
-  toString() { return `${this.checkIn} to ${this.checkOut}`; }
+// One day in milliseconds.
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Whole days since 1 Jan 1970 (UTC).
+function dayNumber(ms) {
+    return Math.floor(ms / DAY_MS);
 }
 
+// Only for printing: 1500000 paise becomes "₹15000.00".
+function rupees(paise) {
+    const amount = paise / 100;
+    return `₹${amount.toFixed(2)}`;
+}
+```
+
+**`DateRange`: the overlap rule.** A stay counts the check-in day, but not the check-out day.
+
+```js
+class DateRange {
+    // checkIn and checkOut are strings like "2026-12-24".
+    constructor(checkIn, checkOut) {
+        this.checkIn = checkIn;
+        this.checkOut = checkOut;
+        this.start = dayNumber(Date.parse(checkIn));
+        this.end = dayNumber(Date.parse(checkOut));
+
+        // Date.parse gives NaN ("not a number") for a date it can't read.
+        if (Number.isNaN(this.start) || Number.isNaN(this.end)) {
+            throw new Error("Use dates like 2026-12-24");
+        }
+
+        if (this.end <= this.start) {
+            throw new Error("Check-out must be after check-in");
+        }
+
+        this.nights = this.end - this.start;
+    }
+
+    // Two stays clash only if each one starts before the other ends.
+    overlaps(other) {
+        return this.start < other.end && other.start < this.end;
+    }
+
+    // JavaScript calls this when a range is put in a string, like `${range}`.
+    toString() {
+        return `${this.checkIn} to ${this.checkOut}`;
+    }
+}
+```
+
+**Guest and Room.** A room keeps its own bookings, so it can answer "am I free?" by itself.
+
+```js
 class Guest {
-  constructor(id, name) {
-    this.id = id;
-    this.name = name;
-  }
+    constructor(id, name) {
+        this.id = id;
+        this.name = name;
+    }
 }
 
 class Room {
-  #bookings = [];
-  constructor(number, type, nightlyRate) {
-    this.number = number;
-    this.type = type; // a RoomType
-    this.nightlyRate = nightlyRate; // whole paise
-  }
-  isFree(range) {
-    return !this.#bookings.some((b) => b.status === BookingStatus.CONFIRMED && b.range.overlaps(range));
-  }
-  addBooking(booking) { this.#bookings.push(booking); }
-}
+    constructor(number, type, nightlyRate) {
+        this.number = number;
+        // A RoomType.
+        this.type = type;
+        // Whole paise.
+        this.nightlyRate = nightlyRate;
+        this.bookings = [];
+    }
 
-class Hotel {
-  #rooms = new Map(); // room number -> Room
-  constructor(id, name, city) {
-    this.id = id;
-    this.name = name;
-    this.city = city;
-  }
-  addRoom(room) {
-    this.#rooms.set(room.number, room);
-    return room;
-  }
-  get rooms() { return [...this.#rooms.values()]; }
-}
+    // Free if no confirmed booking overlaps the range. Cancelled bookings don't count.
+    isFree(range) {
+        for (const booking of this.bookings) {
+            if (booking.status === BookingStatus.CONFIRMED && booking.range.overlaps(range)) {
+                return false;
+            }
+        }
 
-class FakeClock { // tests control "today"
-  constructor(ms) { this.ms = ms; }
-  now() { return this.ms; }
-  advanceDays(days) { this.ms += days * DAY_MS; }
+        return true;
+    }
+
+    addBooking(booking) {
+        this.bookings.push(booking);
+    }
 }
 ```
 
-**Part 2: the core classes.** The refund rules (Strategy) and the `Booking`.
+**Hotel and a fake clock.** Tests use the fake clock to set "today" and jump forward.
 
 ```js
-class RefundPolicy { // interface
-  refundFor(booking, daysBefore) { throw new Error('not implemented'); }
+class Hotel {
+    constructor(id, name, city) {
+        this.id = id;
+        this.name = name;
+        this.city = city;
+        this.rooms = [];
+    }
+
+    addRoom(room) {
+        this.rooms.push(room);
+        return room;
+    }
+}
+
+class FakeClock {
+    constructor(ms) {
+        this.ms = ms;
+    }
+
+    now() {
+        return this.ms;
+    }
+
+    advanceDays(days) {
+        this.ms += days * DAY_MS;
+    }
+}
+```
+
+### Part 2: The core classes
+
+**The refund rules.** This is the Strategy pattern: each rule is its own class with the same `refundFor` method.
+
+```js
+// The interface: every refund rule has refundFor(booking, daysBefore).
+class RefundPolicy {
+    refundFor(booking, daysBefore) {
+        throw new Error("not implemented");
+    }
 }
 
 class FlexiblePolicy extends RefundPolicy {
-  refundFor(booking, daysBefore) {
-    if (daysBefore >= 2) return booking.amount; // full refund
-    return booking.amount - booking.room.nightlyRate; // late: keep the first night
-  }
+    refundFor(booking, daysBefore) {
+        // Two or more days before check-in: full refund.
+        if (daysBefore >= 2) {
+            return booking.amount;
+        }
+
+        // Late: keep the first night.
+        return booking.amount - booking.room.nightlyRate;
+    }
 }
 
 class NonRefundablePolicy extends RefundPolicy {
-  refundFor(booking, daysBefore) { return 0; }
-}
-
-class Booking {
-  constructor(id, guest, room, range, policy) {
-    this.id = id;
-    this.guest = guest;
-    this.room = room;
-    this.range = range;
-    this.policy = policy; // a RefundPolicy, picked when booking
-    this.amount = range.nights * room.nightlyRate; // whole paise
-    this.status = BookingStatus.CONFIRMED;
-    this.refund = 0;
-  }
+    refundFor(booking, daysBefore) {
+        return 0;
+    }
 }
 ```
 
-**Part 3: the main service.** `book` searches and saves in one synchronous call, so nothing can slip in between.
+**The `Booking`.** One guest's stay in one room. The price is worked out once, when it is made.
+
+```js
+class Booking {
+    constructor(id, guest, room, range, policy) {
+        this.id = id;
+        this.guest = guest;
+        this.room = room;
+        this.range = range;
+        // A RefundPolicy, picked when booking.
+        this.policy = policy;
+        // Whole paise.
+        this.amount = range.nights * room.nightlyRate;
+        this.status = BookingStatus.CONFIRMED;
+        // Set when the booking is cancelled.
+        this.refund = 0;
+    }
+}
+```
+
+### Part 3: The main service
+
+`book` searches and saves in one synchronous call, so nothing can slip in between.
+
+**Piece 1: the data, and adding hotels and guests.**
 
 ```js
 class BookingService {
-  #hotels = new Map();
-  #guests = new Map();
-  #bookings = new Map();
-  #nextId = 1;
-  #clock;
+    constructor(clock) {
+        this.clock = clock;
+        // Id -> Hotel, id -> Guest, and id -> Booking.
+        this.hotels = new Map();
+        this.guests = new Map();
+        this.bookings = new Map();
+        // Used to make booking ids: BK1, BK2, and so on.
+        this.nextId = 1;
+    }
 
-  constructor(clock) { this.#clock = clock; }
+    addHotel(hotel) {
+        this.hotels.set(hotel.id, hotel);
+        return hotel;
+    }
 
-  addHotel(hotel) {
-    this.#hotels.set(hotel.id, hotel);
-    return hotel;
-  }
-  addGuest(guest) {
-    this.#guests.set(guest.id, guest);
-    return guest;
-  }
+    addGuest(guest) {
+        this.guests.set(guest.id, guest);
+        return guest;
+    }
+```
 
-  searchFreeRooms(hotelId, range, type = null) {
-    if (range.start < dayNumber(this.#clock.now())) throw new Error('Check-in is in the past');
-    return this.#find(this.#hotels, hotelId).rooms
-      .filter((room) => (type === null || room.type === type) && room.isFree(range));
-  }
+**Piece 2: search.** It returns the rooms that are free for every night of the range. Leave out `type` to get every
+type.
 
-  // Search and save in one synchronous call: no await, so two guests can't both get the last room.
-  book(guestId, hotelId, type, range, policy) {
-    const guest = this.#find(this.#guests, guestId);
-    const [room] = this.searchFreeRooms(hotelId, range, type);
-    if (!room) throw new Error(`No ${type} room free from ${range}`);
-    const booking = new Booking(`BK${this.#nextId++}`, guest, room, range, policy);
-    room.addBooking(booking);
-    this.#bookings.set(booking.id, booking);
-    return booking;
-  }
+```js
+    searchFreeRooms(hotelId, range, type = null) {
+        const today = dayNumber(this.clock.now());
+        if (range.start < today) {
+            throw new Error("Check-in is in the past");
+        }
 
-  cancel(bookingId) {
-    const booking = this.#find(this.#bookings, bookingId);
-    if (booking.status !== BookingStatus.CONFIRMED) throw new Error(`${bookingId} is already ${booking.status}`);
-    const daysBefore = booking.range.start - dayNumber(this.#clock.now());
-    if (daysBefore <= 0) throw new Error(`Too late to cancel ${bookingId}: the stay has started`);
-    booking.refund = booking.policy.refundFor(booking, daysBefore);
-    booking.status = BookingStatus.CANCELLED; // the room is free again for these dates
-    return booking.refund;
-  }
+        const hotel = this.find(this.hotels, hotelId);
+        const freeRooms = [];
+        for (const room of hotel.rooms) {
+            const typeMatches = type === null || room.type === type;
+            if (typeMatches && room.isFree(range)) {
+                freeRooms.push(room);
+            }
+        }
 
-  #find(map, id) {
-    const item = map.get(id);
-    if (!item) throw new Error(`Not found: ${id}`);
-    return item;
-  }
+        return freeRooms;
+    }
+```
+
+**Piece 3: `book`.** It searches and saves in one call with no `await`, so two guests can't both get the last room.
+
+```js
+    book(guestId, hotelId, type, range, policy) {
+        const guest = this.find(this.guests, guestId);
+
+        // Search again here. Never trust an older search.
+        const freeRooms = this.searchFreeRooms(hotelId, range, type);
+        if (freeRooms.length === 0) {
+            throw new Error(`No ${type} room free from ${range}`);
+        }
+
+        // Take the first free room.
+        const room = freeRooms[0];
+        const bookingId = `BK${this.nextId}`;
+        this.nextId++;
+
+        const booking = new Booking(bookingId, guest, room, range, policy);
+        room.addBooking(booking);
+        this.bookings.set(bookingId, booking);
+        return booking;
+    }
+```
+
+**Piece 4: `cancel`, and a lookup helper.** `cancel` returns the refund in paise. This finishes the `BookingService`
+class.
+
+```js
+    cancel(bookingId) {
+        const booking = this.find(this.bookings, bookingId);
+        if (booking.status !== BookingStatus.CONFIRMED) {
+            throw new Error(`${bookingId} is already ${booking.status}`);
+        }
+
+        const today = dayNumber(this.clock.now());
+        const daysBefore = booking.range.start - today;
+        if (daysBefore <= 0) {
+            throw new Error(`Too late to cancel ${bookingId}: the stay has started`);
+        }
+
+        // The booking's own policy decides the refund.
+        booking.refund = booking.policy.refundFor(booking, daysBefore);
+        // Now the room is free again for these dates, because isFree skips cancelled bookings.
+        booking.status = BookingStatus.CANCELLED;
+        return booking.refund;
+    }
+
+    // Looks up an id in one of the Maps. Throws if it is not there.
+    find(map, id) {
+        const item = map.get(id);
+        if (!item) {
+            throw new Error(`Not found: ${id}`);
+        }
+
+        return item;
+    }
 }
 ```
 
-**Part 4: try it.** One hotel with four rooms, overlapping stays, cancellations, and a race for the last suite.
+### Part 4: Try it
+
+One hotel with four rooms, overlapping stays, cancellations, and a race for the last suite.
+
+**Set up the hotel.**
 
 ```js
-const clock = new FakeClock(Date.UTC(2026, 11, 1)); // 1 Dec 2026
+// 1 Dec 2026. Months start at 0 in JavaScript, so 11 is December.
+const clock = new FakeClock(Date.UTC(2026, 11, 1));
 const service = new BookingService(clock);
-const hotel = service.addHotel(new Hotel('H1', 'Sea View', 'Goa'));
-hotel.addRoom(new Room(101, RoomType.SINGLE, 300000)); // ₹3,000 a night, in paise
+
+const hotel = service.addHotel(new Hotel("H1", "Sea View", "Goa"));
+// ₹3,000 a night, in paise.
+hotel.addRoom(new Room(101, RoomType.SINGLE, 300000));
 hotel.addRoom(new Room(102, RoomType.DOUBLE, 500000));
 hotel.addRoom(new Room(103, RoomType.DOUBLE, 500000));
 hotel.addRoom(new Room(201, RoomType.SUITE, 1200000));
-for (const [id, name] of [['g1', 'Asha'], ['g2', 'Ben'], ['g3', 'Chen'], ['g4', 'Dev']]) {
-  service.addGuest(new Guest(id, name));
-}
 
+service.addGuest(new Guest("g1", "Asha"));
+service.addGuest(new Guest("g2", "Ben"));
+service.addGuest(new Guest("g3", "Chen"));
+service.addGuest(new Guest("g4", "Dev"));
+```
+
+**Cases 1 and 2: Asha books a double, and Ben's dates overlap hers.**
+
+```js
 // 1. Search, then book a double for Christmas (3 nights).
-const xmas = new DateRange('2026-12-24', '2026-12-27');
-console.log(service.searchFreeRooms('H1', xmas).map((r) => r.number)); // [ 101, 102, 103, 201 ]
-const b1 = service.book('g1', 'H1', RoomType.DOUBLE, xmas, new FlexiblePolicy());
-console.log(b1.id, b1.room.number, b1.range.nights, rupees(b1.amount)); // BK1 102 3 ₹15000.00
+const xmas = new DateRange("2026-12-24", "2026-12-27");
+const freeAtXmas = service.searchFreeRooms("H1", xmas);
+console.log(freeAtXmas.map((room) => room.number)); // [ 101, 102, 103, 201 ]
+
+const ashaBooking = service.book("g1", "H1", RoomType.DOUBLE, xmas, new FlexiblePolicy());
+console.log(ashaBooking.id, ashaBooking.room.number, ashaBooking.range.nights, rupees(ashaBooking.amount));
+// BK1 102 3 ₹15000.00
 
 // 2. Ben's dates overlap Asha's, so he gets the other double.
-const b2 = service.book('g2', 'H1', RoomType.DOUBLE, new DateRange('2026-12-26', '2026-12-28'), new NonRefundablePolicy());
-console.log(b2.id, b2.room.number); // BK2 103
+const benStay = new DateRange("2026-12-26", "2026-12-28");
+const benBooking = service.book("g2", "H1", RoomType.DOUBLE, benStay, new NonRefundablePolicy());
+console.log(benBooking.id, benBooking.room.number); // BK2 103
+```
 
+**Cases 3 and 4: no double left, but back to back is fine.**
+
+```js
 // 3. No double is free on the 26th now.
+const chenStay = new DateRange("2026-12-25", "2026-12-27");
 try {
-  service.book('g3', 'H1', RoomType.DOUBLE, new DateRange('2026-12-25', '2026-12-27'), new FlexiblePolicy());
-} catch (e) {
-  console.log(e.message); // No DOUBLE room free from 2026-12-25 to 2026-12-27
+    service.book("g3", "H1", RoomType.DOUBLE, chenStay, new FlexiblePolicy());
+} catch (error) {
+    console.log(error.message); // No DOUBLE room free from 2026-12-25 to 2026-12-27
 }
 
-// 4. Back to back is fine: Asha leaves on the 27th, Dev arrives on the 27th.
-const b3 = service.book('g4', 'H1', RoomType.DOUBLE, new DateRange('2026-12-27', '2026-12-29'), new FlexiblePolicy());
-console.log(b3.id, b3.room.number); // BK3 102
+// 4. Asha leaves on the 27th, and Dev arrives on the 27th.
+const devStay = new DateRange("2026-12-27", "2026-12-29");
+const devBooking = service.book("g4", "H1", RoomType.DOUBLE, devStay, new FlexiblePolicy());
+console.log(devBooking.id, devBooking.room.number); // BK3 102
+```
 
+**Cases 5 and 6: cancel, early and late.**
+
+```js
 // 5. Cancel on 20 Dec, four days before Christmas Eve.
 clock.advanceDays(19);
-console.log(rupees(service.cancel('BK1'))); // ₹15000.00
-console.log(rupees(service.cancel('BK2'))); // ₹0.00
-console.log(service.searchFreeRooms('H1', xmas, RoomType.DOUBLE).map((r) => r.number)); // [ 102, 103 ]
+const ashaRefund = service.cancel("BK1");
+console.log(rupees(ashaRefund)); // ₹15000.00
+const benRefund = service.cancel("BK2");
+console.log(rupees(benRefund)); // ₹0.00
+
+const freeDoubles = service.searchFreeRooms("H1", xmas, RoomType.DOUBLE);
+console.log(freeDoubles.map((room) => room.number)); // [ 102, 103 ]
 
 // 6. Dev cancels on 26 Dec, one day before check-in: the first night is kept.
 clock.advanceDays(6);
-console.log(rupees(service.cancel('BK3'))); // ₹5000.00
+const devRefund = service.cancel("BK3");
+console.log(rupees(devRefund)); // ₹5000.00
+```
 
-// 7. Two guests try to book the only suite at the same moment.
-const nye = new DateRange('2026-12-31', '2027-01-01');
-const tries = await Promise.allSettled([
-  Promise.resolve().then(() => service.book('g3', 'H1', RoomType.SUITE, nye, new FlexiblePolicy())),
-  Promise.resolve().then(() => service.book('g1', 'H1', RoomType.SUITE, nye, new FlexiblePolicy())),
-]);
-console.log(tries.map((r) => (r.status === 'fulfilled' ? `${r.value.guest.name} got ${r.value.room.number}` : r.reason.message)));
-// [ 'Chen got 201', 'No SUITE room free from 2026-12-31 to 2027-01-01' ]
+**Case 7: two guests try to book the only suite at the same moment.** `Promise.resolve().then(...)` runs each try a
+moment later, like a real request. `Promise.allSettled` waits for both, even if one fails.
+
+```js
+const newYearsEve = new DateRange("2026-12-31", "2027-01-01");
+const chenTry = Promise.resolve().then(() => {
+    return service.book("g3", "H1", RoomType.SUITE, newYearsEve, new FlexiblePolicy());
+});
+const ashaTry = Promise.resolve().then(() => {
+    return service.book("g1", "H1", RoomType.SUITE, newYearsEve, new FlexiblePolicy());
+});
+
+const results = await Promise.allSettled([chenTry, ashaTry]);
+for (const result of results) {
+    if (result.status === "fulfilled") {
+        const booking = result.value;
+        console.log(`${booking.guest.name} got ${booking.room.number}`);
+    } else {
+        console.log(result.reason.message);
+    }
+}
+// Chen got 201
+// No SUITE room free from 2026-12-31 to 2027-01-01
 ```
 
 ## Step 6: Edge cases and extensions
@@ -415,9 +608,16 @@ free?" and "save the booking":
 ```js
 // Not runnable: a broken book(), to show the bug.
 async book(guestId, hotelId, type, range, policy) {
-  const [room] = this.searchFreeRooms(hotelId, range, type); // both guests see room 103 free
-  await this.#gateway.charge(guestId, range.nights * room.nightlyRate); // pause: the other guest runs here
-  room.addBooking(new Booking(/* ... */)); // both save, so room 103 is sold twice
+    // Both guests see room 103 free.
+    const freeRooms = this.searchFreeRooms(hotelId, range, type);
+    const room = freeRooms[0];
+
+    // Pause: the other guest runs here.
+    const amount = range.nights * room.nightlyRate;
+    await this.gateway.charge(guestId, amount);
+
+    // Both save, so room 103 is sold twice.
+    room.addBooking(new Booking(/* ... */));
 }
 ```
 
@@ -455,14 +655,22 @@ and the [Ticket Booking system design](/learn/system-design/questions/ticket-boo
 
 ```js
 // Builds on the Step 5 code.
+// 50% back if you cancel 7 or more days before check-in.
 class HalfRefundPolicy extends RefundPolicy {
-  refundFor(booking, daysBefore) {
-    return daysBefore >= 7 ? Math.round(booking.amount / 2) : 0;
-  }
+    refundFor(booking, daysBefore) {
+        if (daysBefore >= 7) {
+            return Math.round(booking.amount / 2);
+        }
+
+        return 0;
+    }
 }
-const stay = new DateRange('2027-01-10', '2027-01-12'); // 2 nights in the single room
-const b5 = service.book('g2', 'H1', RoomType.SINGLE, stay, new HalfRefundPolicy());
-console.log(b5.id, rupees(b5.amount), rupees(service.cancel(b5.id))); // BK5 ₹6000.00 ₹3000.00
+
+// 2 nights in the single room.
+const januaryStay = new DateRange("2027-01-10", "2027-01-12");
+const januaryBooking = service.book("g2", "H1", RoomType.SINGLE, januaryStay, new HalfRefundPolicy());
+const januaryRefund = service.cancel(januaryBooking.id);
+console.log(januaryBooking.id, rupees(januaryBooking.amount), rupees(januaryRefund)); // BK5 ₹6000.00 ₹3000.00
 ```
 
 **2. Weekend and holiday prices.** Move the nightly price into a `PricingStrategy` with `priceFor(room, night)`.

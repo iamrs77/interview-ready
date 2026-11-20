@@ -19,18 +19,33 @@ A report service is slow, and only managers may read reports. Put all of that in
 
 ```js
 class ReportService {
-  #cache = new Map();
+    constructor() {
+        this.cache = new Map();
+    }
 
-  getReport(user, id) {
-    if (user.role !== 'manager') throw new Error('Access denied'); // job 2: access check
-    if (this.#cache.has(id)) return this.#cache.get(id);           // job 3: caching
-    const report = `Report ${id}: sales are up`;                    // job 1: the real work
-    this.#cache.set(id, report);
-    return report;
-  }
+    getReport(user, id) {
+        // Job 2: the access check.
+        if (user.role !== "manager") {
+            throw new Error("Access denied");
+        }
+
+        // Job 3: caching.
+        if (this.cache.has(id)) {
+            return this.cache.get(id);
+        }
+
+        // Job 1: the real work.
+        const report = `Report ${id}: sales are up`;
+        this.cache.set(id, report);
+
+        return report;
+    }
 }
 
-console.log(new ReportService().getReport({ role: 'manager' }, 7)); // Report 7: sales are up
+const service = new ReportService();
+const manager = { role: "manager" };
+
+console.log(service.getReport(manager, 7)); // Report 7: sales are up
 ```
 
 - The class breaks [Single Responsibility](../design-principles/single-responsibility.mdx): one reason to change for each job.
@@ -64,49 +79,94 @@ classDiagram
   ReportProxy --> RealReportService : controls access
 ```
 
+### Step 1: The interface and the real service
+
+The real service only does the real work. It is slow to create.
+
 ```js
-class ReportService { // interface
-  getReport(id) { throw new Error('not implemented'); }
+// The shared interface.
+class ReportService {
+    getReport(id) {
+        throw new Error("not implemented");
+    }
 }
 
 class RealReportService extends ReportService {
-  constructor() {
-    super();
-    console.log('(connecting to the big database...)'); // slow to create
-  }
-  getReport(id) { return `Report ${id}: sales are up`; }
-}
+    constructor() {
+        super();
 
-class ReportProxy extends ReportService {
-  #real = null;
-  #cache = new Map();
-  #user;
-
-  constructor(user) {
-    super();
-    this.#user = user;
-  }
-
-  getReport(id) {
-    if (this.#user.role !== 'manager') throw new Error('Access denied'); // protection
-    if (!this.#cache.has(id)) {
-      this.#real ??= new RealReportService();         // lazy: create on first real use
-      this.#cache.set(id, this.#real.getReport(id)); // caching
+        // Pretend this takes a long time.
+        console.log("(connecting to the big database...)");
     }
-    return this.#cache.get(id);
-  }
-}
 
-const reports = new ReportProxy({ name: 'Asha', role: 'manager' });
+    getReport(id) {
+        return `Report ${id}: sales are up`;
+    }
+}
+```
+
+### Step 2: The proxy
+
+The proxy has the same `getReport(id)` method. It checks the user and the cache before it ever touches the real service.
+
+```js
+class ReportProxy extends ReportService {
+    constructor(user) {
+        super();
+        this.user = user;
+        this.cache = new Map();
+
+        // The real service is created later, only when it is first needed.
+        this.real = null;
+    }
+
+    getReport(id) {
+        // Protection: only managers may read reports.
+        if (this.user.role !== "manager") {
+            throw new Error("Access denied");
+        }
+
+        // Caching: answer from the cache if we can.
+        if (this.cache.has(id)) {
+            return this.cache.get(id);
+        }
+
+        // Lazy: create the slow real service on first real use.
+        if (this.real === null) {
+            this.real = new RealReportService();
+        }
+
+        const report = this.real.getReport(id);
+        this.cache.set(id, report);
+
+        return report;
+    }
+}
+```
+
+### Step 3: Use the proxy
+
+Callers use the proxy just like the real service.
+
+```js
+const asha = { name: "Asha", role: "manager" };
+const reports = new ReportProxy(asha);
+
 console.log(reports.getReport(7));
 // (connecting to the big database...)
 // Report 7: sales are up
-console.log(reports.getReport(7)); // Report 7: sales are up  (from the cache, no database)
+
+// The second time, the answer comes from the cache. No database.
+console.log(reports.getReport(7)); // Report 7: sales are up
+
+// An intern is stopped, and the database is never touched.
+const ben = { name: "Ben", role: "intern" };
+const benReports = new ReportProxy(ben);
 
 try {
-  new ReportProxy({ name: 'Ben', role: 'intern' }).getReport(7);
-} catch (e) {
-  console.log(e.message); // Access denied  (the database was never touched)
+    benReports.getReport(7);
+} catch (error) {
+    console.log(error.message); // Access denied
 }
 ```
 
@@ -127,24 +187,34 @@ The real class now does only the real work. One proxy shows all three jobs here,
 JavaScript has a built-in `Proxy` object, named after this pattern. You give it a target object and a **handler** with **traps**: functions that run when someone reads a property, sets one, calls a function, and so on.
 
 ```js
-const account = { owner: 'Asha', balance: 500 };
+const account = { owner: "Asha", balance: 500 };
 
-const safeAccount = new Proxy(account, {
-  set(target, prop, value) { // runs on every write
-    if (prop === 'balance' && value < 0) throw new Error('Balance cannot go below 0');
-    target[prop] = value;
-    return true;
-  },
-});
+const handler = {
+    // The "set" trap runs on every write, like safeAccount.balance = 300.
+    set(target, property, value) {
+        if (property === "balance" && value < 0) {
+            throw new Error("Balance cannot go below 0");
+        }
+
+        // The write is allowed, so save it on the real account.
+        target[property] = value;
+
+        // Tell JavaScript the write worked.
+        return true;
+    },
+};
+
+const safeAccount = new Proxy(account, handler);
 
 safeAccount.balance = 300;
 console.log(account.balance); // 300
 
 try {
-  safeAccount.balance = -50;
-} catch (e) {
-  console.log(e.message); // Balance cannot go below 0
+    safeAccount.balance = -50;
+} catch (error) {
+    console.log(error.message); // Balance cannot go below 0
 }
+
 console.log(safeAccount.balance); // 300
 ```
 

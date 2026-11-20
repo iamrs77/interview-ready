@@ -193,27 +193,60 @@ RETURNING *;
 
 Here is the worker, in simple code. `db.move(id, from, to)` is a conditional update like the claim: it changes the status only if the row still has the `from` status, and returns false if not.
 
+**Step 1: Claim and send.**
+
 ```js
 // The queue message is acknowledged only when handle() finishes.
 // If the worker crashes, the queue gives the message to another worker later.
-// msg.attempt is 1 for the first try.
-async function handle(msg) {
-  const d = await db.claimDelivery(msg.deliveryId); // the UPDATE above
-  if (!d) return; // already sent, or another worker has it: skip
+// message.attempt is 1 for the first try.
+async function handle(message) {
+    // Claim the row (the UPDATE above)
+    const delivery = await db.claimDelivery(message.deliveryId);
 
-  try {
-    await provider.send(d); // APNs, FCM, email or SMS (with d.id, so webhooks can find the row)
-    await db.move(d.id, 'sending', 'sent'); // false if a webhook already said 'delivered'
-  } catch (err) {
-    if (msg.attempt >= 5) { // that was the 5th try
-      await db.move(d.id, 'sending', 'failed');
-      return deadLetterQueue.put(msg);
+    // Already sent, or another worker has it: skip
+    if (!delivery) {
+        return;
     }
-    // Free the row for the next try, unless a webhook already moved it on.
-    if (!(await db.move(d.id, 'sending', 'queued'))) return;
-    const waitMs = 1000 * 2 ** (msg.attempt - 1) + Math.random() * 1000; // 1 s, 2 s, 4 s, 8 s + jitter
-    await queue.putLater({ ...msg, attempt: msg.attempt + 1 }, waitMs);
-  }
+
+    try {
+        // APNs, FCM, email or SMS. It sends delivery.id too, so webhooks can find the row.
+        await provider.send(delivery);
+
+        // Returns false if a webhook already said "delivered"
+        await db.move(delivery.id, "sending", "sent");
+    } catch (error) {
+        await handleFailure(message, delivery);
+    }
+}
+```
+
+**Step 2: When the send fails.** Give up after 5 tries, or put the message back to try again later.
+
+```js
+async function handleFailure(message, delivery) {
+    // That was the 5th try: move it to the dead-letter queue
+    if (message.attempt >= 5) {
+        await db.move(delivery.id, "sending", "failed");
+        await deadLetterQueue.put(message);
+        return;
+    }
+
+    // Free the row for the next try, unless a webhook already moved it on
+    const freed = await db.move(delivery.id, "sending", "queued");
+    if (!freed) {
+        return;
+    }
+
+    // Wait 1 s, 2 s, 4 s, 8 s, plus up to 1 s of random jitter
+    const backoffMs = 1000 * 2 ** (message.attempt - 1);
+    const jitterMs = Math.random() * 1000;
+    const waitMs = backoffMs + jitterMs;
+
+    const nextMessage = {
+        deliveryId: message.deliveryId,
+        attempt: message.attempt + 1,
+    };
+    await queue.putLater(nextMessage, waitMs);
 }
 ```
 

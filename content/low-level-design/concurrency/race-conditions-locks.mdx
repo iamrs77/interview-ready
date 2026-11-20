@@ -17,31 +17,63 @@ That is a **race condition**: the result depends on the timing of two tasks that
 
 True: two lines of JavaScript never run at the same instant (see [Concurrency in JavaScript](./concurrency-in-javascript.mdx)). But an `await` hands the thread to other requests. If an `await` sits between the check and the write, another request can run its own check in that gap.
 
-Run this, and both bookings succeed:
+Run this, and both bookings succeed.
+
+**Step 1: a helper.** `sleep` stands in for slow work, like charging a card. All the examples on this page use it:
 
 ```js
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-class Theater {
-  #seats = new Map([['A1', null]]); // seat -> who booked it (null = free)
-
-  async bookSeat(seatId, user) {
-    // 1. check
-    if (this.#seats.get(seatId) !== null) return `${user}: sorry, ${seatId} is taken`;
-    await sleep(50); // 2. wait, e.g. charge the card (other requests run now!)
-    this.#seats.set(seatId, user); // 3. write
-    return `${user}: booked ${seatId}`;
-  }
-  ownerOf(seatId) { return this.#seats.get(seatId); }
+// Gives back a promise that finishes after "ms" milliseconds.
+function sleep(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
 }
+```
 
+**Step 2: the theater.** It checks the seat, waits for the payment, then writes:
+
+```js
+class Theater {
+    constructor() {
+        // seat -> who booked it (null means free)
+        this.seats = new Map([["A1", null]]);
+    }
+
+    async bookSeat(seatId, user) {
+        // 1. Check: is the seat free?
+        if (this.seats.get(seatId) !== null) {
+            return `${user}: sorry, ${seatId} is taken`;
+        }
+
+        // 2. Wait, for example to charge the card.
+        // bookSeat pauses here, and other requests run now!
+        await sleep(50);
+
+        // 3. Write: give the seat to this user.
+        this.seats.set(seatId, user);
+        return `${user}: booked ${seatId}`;
+    }
+
+    ownerOf(seatId) {
+        return this.seats.get(seatId);
+    }
+}
+```
+
+**Step 3: two users book at once.** Both ask for seat A1 at the same moment:
+
+```js
 const theater = new Theater();
-const results = await Promise.all([ // two users press "Book" at the same moment
-  theater.bookSeat('A1', 'Asha'),
-  theater.bookSeat('A1', 'Ben'),
+
+// Two users press "Book" at the same moment.
+// Promise.all waits until both bookings have finished.
+const results = await Promise.all([
+    theater.bookSeat("A1", "Asha"),
+    theater.bookSeat("A1", "Ben"),
 ]);
+
 console.log(results); // [ 'Asha: booked A1', 'Ben: booked A1' ]  <- both "won"
-console.log(theater.ownerOf('A1')); // Ben  <- Asha paid, but the seat is Ben's
+console.log(theater.ownerOf("A1")); // Ben  <- Asha paid, but the seat is Ben's
 ```
 
 What happened, step by step:
@@ -70,30 +102,46 @@ In Java the gap can be anywhere: two threads can be paused at any line, not only
 **Atomic** means "all in one go: nothing can cut in". In JavaScript, plain code with **no `await`** is atomic. So check and claim the seat first, and do the slow work after:
 
 ```js
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
+// Uses the sleep helper from Step 1 above.
 class Theater {
-  #seats = new Map([['A1', null]]);
-
-  async bookSeat(seatId, user) {
-    // Check and write together, with no await between: nothing can cut in.
-    if (this.#seats.get(seatId) !== null) return `${user}: sorry, ${seatId} is taken`;
-    this.#seats.set(seatId, user);
-    try {
-      await sleep(50); // the slow part (charge the card) comes after we hold the seat
-      return `${user}: booked ${seatId}`;
-    } catch (error) {
-      this.#seats.set(seatId, null); // payment failed: give the seat back
-      throw error;
+    constructor() {
+        this.seats = new Map([["A1", null]]);
     }
-  }
-}
 
+    async bookSeat(seatId, user) {
+        // Check and write together, with no await between them.
+        // Nothing can cut in here.
+        if (this.seats.get(seatId) !== null) {
+            return `${user}: sorry, ${seatId} is taken`;
+        }
+        this.seats.set(seatId, user);
+
+        try {
+            // The slow part (charge the card) comes after we hold the seat.
+            // Other requests run during this wait, but the seat is already ours.
+            await sleep(50);
+            return `${user}: booked ${seatId}`;
+        } catch (error) {
+            // Payment failed: give the seat back.
+            this.seats.set(seatId, null);
+            throw error;
+        }
+    }
+}
+```
+
+Two users book at the same moment again:
+
+```js
 const theater = new Theater();
-console.log(await Promise.all([
-  theater.bookSeat('A1', 'Asha'),
-  theater.bookSeat('A1', 'Ben'),
-])); // [ 'Asha: booked A1', 'Ben: sorry, A1 is taken' ]
+
+// Start both bookings, and wait until both have finished.
+const results = await Promise.all([
+    theater.bookSeat("A1", "Asha"),
+    theater.bookSeat("A1", "Ben"),
+]);
+
+console.log(results); // [ 'Asha: booked A1', 'Ben: sorry, A1 is taken' ]
 ```
 
 This is the simplest fix, and the best one for data in memory. The cost: if the slow step fails, you must **undo** the claim, which the `catch` does.
@@ -104,60 +152,100 @@ Sometimes the check itself needs an `await`, for example when the seat is read f
 
 ```js
 class Mutex {
-  #locked = false;
-  #waiting = []; // wake-up functions of tasks waiting for the lock
-
-  async lock() {
-    if (this.#locked) {
-      await new Promise((resolve) => this.#waiting.push(resolve)); // wait in line
-    } else {
-      this.#locked = true;
+    constructor() {
+        this.locked = false;
+        // Wake-up functions of the tasks waiting in line, oldest first.
+        this.waiting = [];
     }
-    let released = false;
-    return () => { // the release function
-      if (released) return; // releasing twice does nothing
-      released = true;
-      const next = this.#waiting.shift();
-      if (next) next(); // hand the lock straight to the next task in line
-      else this.#locked = false;
-    };
-  }
+
+    // Waits until this task holds the lock, then gives back a release function.
+    async lock() {
+        if (this.locked) {
+            // Taken: join the line. "resolve" is our wake-up function.
+            // We stay paused here until the holder calls it.
+            await new Promise((resolve) => {
+                this.waiting.push(resolve);
+            });
+        } else {
+            // Free: take the lock now.
+            this.locked = true;
+        }
+
+        let released = false;
+        const release = () => {
+            // Releasing twice does nothing.
+            if (released) {
+                return;
+            }
+            released = true;
+
+            const next = this.waiting.shift();
+            if (next) {
+                // Hand the lock straight to the next task in line.
+                next();
+            } else {
+                // Nobody is waiting: the lock is free again.
+                this.locked = false;
+            }
+        };
+
+        return release;
+    }
 }
 ```
 
 How it works:
 
-- `lock()` returns a promise. If the lock is free, the task gets it at once. If not, the task waits in the `#waiting` line.
-- The promise gives back a **release function**. Calling it hands the lock to the next task in line, first come, first served.
+- `lock()` returns a promise. If the lock is free, the task gets it at once. If not, the task waits in the `waiting` line.
+- The promise gives back a **release function**. Calling it hands the lock to the next task in line, first come, first served. The lock never becomes free in between, so nobody can jump the line.
 
 Now the booking from the start is safe, even with the `await` in the middle:
 
 ```js
-// Runs together with the Mutex class above, as one file.
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
+// Runs together with the sleep helper and the Mutex class above, as one file.
 class Theater {
-  #seats = new Map([['A1', null]]);
-  #mutex = new Mutex();
-
-  async bookSeat(seatId, user) {
-    const release = await this.#mutex.lock(); // wait for our turn
-    try {
-      if (this.#seats.get(seatId) !== null) return `${user}: sorry, ${seatId} is taken`;
-      await sleep(50); // safe now: nobody else is inside this part
-      this.#seats.set(seatId, user);
-      return `${user}: booked ${seatId}`;
-    } finally {
-      release(); // always unlock, even if something throws
+    constructor() {
+        this.seats = new Map([["A1", null]]);
+        this.mutex = new Mutex();
     }
-  }
-}
 
+    async bookSeat(seatId, user) {
+        // Wait here for our turn. If another booking holds the lock,
+        // we stay paused until it calls its release function.
+        const release = await this.mutex.lock();
+
+        try {
+            if (this.seats.get(seatId) !== null) {
+                return `${user}: sorry, ${seatId} is taken`;
+            }
+
+            // Charge the card. Safe now: every other booking
+            // is still waiting for the lock, so nobody can cut in.
+            await sleep(50);
+
+            this.seats.set(seatId, user);
+            return `${user}: booked ${seatId}`;
+        } finally {
+            // "finally" always runs, after a return or an error.
+            // Unlock here, so the next booking in line can start.
+            release();
+        }
+    }
+}
+```
+
+Two users book at the same moment, as before:
+
+```js
 const theater = new Theater();
-console.log(await Promise.all([
-  theater.bookSeat('A1', 'Asha'),
-  theater.bookSeat('A1', 'Ben'),
-])); // [ 'Asha: booked A1', 'Ben: sorry, A1 is taken' ]
+
+// Start both bookings, and wait until both have finished.
+const results = await Promise.all([
+    theater.bookSeat("A1", "Asha"),
+    theater.bookSeat("A1", "Ben"),
+]);
+
+console.log(results); // [ 'Asha: booked A1', 'Ben: sorry, A1 is taken' ]
 ```
 
 Two things to know:

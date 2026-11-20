@@ -146,7 +146,7 @@ stateDiagram-v2
 - `VendingMachine.restock(product, count)` → for the operator. Moves `OutOfStock` back to `Idle`.
 - `CashBox.pay(paid, changeDue)` → the change, or `null` if exact change is impossible.
 
-Each public action just asks the current state: `insert(money)` runs `this.#state.insert(this, money)`. The main flow, one sale:
+Each public action just asks the current state: `insert(money)` runs `this.state.insert(this, money)`. The main flow, one sale:
 
 ```mermaid
 sequenceDiagram
@@ -171,217 +171,496 @@ sequenceDiagram
 
 ## Step 5: Code
 
-**Part 1: the enum and the small classes.** `CashBox` makes change with the biggest coins first (a "greedy" method).
+The code is split into small parts. Paste them together in order and they run.
+
+### Part 1: Money and products
+
+`Money` is a plain object used as an enum. Its values are the amounts, so they can be added up.
 
 ```js
-const Money = Object.freeze({ ONE: 1, TWO: 2, FIVE: 5, TEN: 10, TWENTY: 20 }); // coins: 1, 2, 5. Notes: 10, 20.
+// The coins and notes the machine takes.
+// Coins: 1, 2, 5. Notes: 10, 20.
+const Money = {
+    ONE: 1,
+    TWO: 2,
+    FIVE: 5,
+    TEN: 10,
+    TWENTY: 20,
+};
+
+// All accepted amounts, to check money quickly at the slot.
 const ACCEPTED = new Set(Object.values(Money));
 
+// A snack and its price.
 class Product {
-  constructor(code, name, price) {
-    this.code = code;
-    this.name = name;
-    this.price = price;
-  }
+    constructor(code, name, price) {
+        this.code = code;
+        this.name = name;
+        this.price = price;
+    }
 }
+```
 
+### Part 2: The inventory
+
+`Inventory` keeps one slot per product code. Each slot holds the product and how many are left. First, adding and finding products:
+
+```js
+// The slots in the machine, and how many items each slot has.
 class Inventory {
-  #slots = new Map(); // code -> { product, count }
-  add(product, count) {
-    const slot = this.#slots.get(product.code) ?? { product, count: 0 };
-    slot.count += count;
-    this.#slots.set(product.code, slot);
-  }
-  find(code) { return this.#slots.get(code)?.product ?? null; }
-  inStock(code) { return (this.#slots.get(code)?.count ?? 0) > 0; }
-  take(code) {
-    this.#slots.get(code).count -= 1;
-    return this.#slots.get(code).product;
-  }
-  get isEmpty() { return [...this.#slots.values()].every((slot) => slot.count === 0); }
-}
+    constructor() {
+        // code -> { product, count }
+        this.slots = new Map();
+    }
 
+    // Put more items of a product into its slot.
+    add(product, count) {
+        let slot = this.slots.get(product.code);
+
+        // First time we see this product: make an empty slot for it.
+        if (slot === undefined) {
+            slot = { product: product, count: 0 };
+            this.slots.set(product.code, slot);
+        }
+
+        slot.count += count;
+    }
+
+    // Find a product by its code. Returns null if there is no such slot.
+    find(code) {
+        const slot = this.slots.get(code);
+        if (slot === undefined) {
+            return null;
+        }
+        return slot.product;
+    }
+```
+
+The rest of the `Inventory` class checks stock and takes items out:
+
+```js
+    // True if the slot has at least one item left.
+    inStock(code) {
+        const slot = this.slots.get(code);
+        if (slot === undefined) {
+            return false;
+        }
+        return slot.count > 0;
+    }
+
+    // Take one item out of its slot.
+    take(code) {
+        const slot = this.slots.get(code);
+        slot.count -= 1;
+        return slot.product;
+    }
+
+    // True when every slot is empty.
+    isEmpty() {
+        for (const slot of this.slots.values()) {
+            if (slot.count !== 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+}
+```
+
+### Part 3: The cash box
+
+`CashBox` counts the coins and notes inside the machine. `pay()` is all or nothing: it either keeps the money and returns change, or changes nothing.
+
+```js
+// The money inside the machine: how many of each coin and note.
 class CashBox {
-  #counts = new Map(); // money value -> how many the machine holds
-  load(values) {
-    for (const v of values) this.#counts.set(v, (this.#counts.get(v) ?? 0) + 1);
-  }
-  // Keep the paid money and hand back change. All or nothing: if exact change is impossible,
-  // nothing changes and it returns null.
-  pay(paid, changeDue) {
-    this.load(paid);
-    const change = this.#pickChange(changeDue);
-    if (change === null) {
-      this.#remove(paid);
-      return null;
+    constructor() {
+        // money value -> how many the machine holds
+        this.counts = new Map();
     }
-    this.#remove(change);
-    return change;
-  }
-  #pickChange(amount) { // greedy: biggest first
-    const change = [];
-    for (const value of [...this.#counts.keys()].sort((a, b) => b - a)) {
-      let left = this.#counts.get(value);
-      while (amount >= value && left > 0) {
-        change.push(value);
-        amount -= value;
-        left--;
-      }
+
+    // Add coins and notes to the box.
+    load(values) {
+        for (const value of values) {
+            let count = this.counts.get(value);
+            if (count === undefined) {
+                count = 0;
+            }
+            this.counts.set(value, count + 1);
+        }
     }
-    return amount === 0 ? change : null;
-  }
-  #remove(values) {
-    for (const v of values) this.#counts.set(v, this.#counts.get(v) - 1);
-  }
+
+    // Keep the paid money and hand back change.
+    // If exact change is impossible, nothing changes and it returns null.
+    pay(paid, changeDue) {
+        // Put the paid money in first, so it can be used as change too.
+        this.load(paid);
+
+        const change = this.pickChange(changeDue);
+
+        // No exact change: take the paid money back out, as if nothing happened.
+        if (change === null) {
+            this.remove(paid);
+            return null;
+        }
+
+        this.remove(change);
+        return change;
+    }
+```
+
+The rest of `CashBox` picks the change with the biggest coins first. This is called a "greedy" method.
+
+```js
+    // Pick coins for the change, biggest first.
+    // Returns null if the box can't make the exact amount.
+    pickChange(amount) {
+        const values = Array.from(this.counts.keys());
+        // Sort from biggest to smallest.
+        values.sort((first, second) => second - first);
+
+        const change = [];
+        let amountLeft = amount;
+
+        for (const value of values) {
+            let coinsLeft = this.counts.get(value);
+
+            // Use this coin as many times as it fits.
+            while (amountLeft >= value && coinsLeft > 0) {
+                change.push(value);
+                amountLeft -= value;
+                coinsLeft -= 1;
+            }
+        }
+
+        // Something is still owed: exact change is impossible.
+        if (amountLeft !== 0) {
+            return null;
+        }
+        return change;
+    }
+
+    // Take coins and notes out of the box.
+    remove(values) {
+        for (const value of values) {
+            const count = this.counts.get(value);
+            this.counts.set(value, count - 1);
+        }
+    }
 }
 ```
 
-**Part 2: the states.** The abstract base refuses everything. Each state allows only what makes sense, and decides the next state.
+### Part 4: The base state
+
+The base state refuses everything. Each real state allows only what makes sense, and picks the next state.
 
 ```js
-class MachineState { // abstract: every action is refused, unless a state allows it
-  constructor() {
-    if (new.target === MachineState) throw new Error('MachineState is abstract');
-  }
-  insert(machine, money) { throw new Error(`${this.name}: can't take money now`); }
-  select(machine, code) { throw new Error(`${this.name}: can't select now`); }
-  cancel(machine) { return []; } // nothing to give back
-  dispense(machine, code, change) { throw new Error(`${this.name}: can't dispense now`); }
-  get name() { return this.constructor.name; }
-}
+// The base for all states. By default, every action is refused.
+class MachineState {
+    constructor() {
+        // "Abstract": you can't make a plain MachineState,
+        // only one of the real states below.
+        if (this.constructor === MachineState) {
+            throw new Error("MachineState is abstract");
+        }
+    }
 
+    insert(machine, money) {
+        throw new Error(`${this.getName()}: can't take money now`);
+    }
+
+    select(machine, code) {
+        throw new Error(`${this.getName()}: can't select now`);
+    }
+
+    // Nothing to give back.
+    cancel(machine) {
+        return [];
+    }
+
+    dispense(machine, code, change) {
+        throw new Error(`${this.getName()}: can't dispense now`);
+    }
+
+    // The class name, like "IdleState". Used in messages.
+    getName() {
+        return this.constructor.name;
+    }
+}
+```
+
+### Part 5: Idle and has-money states
+
+`IdleState` waits for the first coin. Selecting before paying is refused.
+
+```js
+// No money in yet. Waiting for a customer.
 class IdleState extends MachineState {
-  insert(machine, money) {
-    machine.addMoney(money);
-    machine.setState(machine.states.hasMoney);
-    return `Balance: ${machine.balance}`;
-  }
-  select() { throw new Error('Insert money first'); }
-}
+    // The first coin moves the machine to "has money".
+    insert(machine, money) {
+        machine.addMoney(money);
+        machine.setState(machine.states.hasMoney);
+        return `Balance: ${machine.getBalance()}`;
+    }
 
+    select() {
+        throw new Error("Insert money first");
+    }
+}
+```
+
+`HasMoneyState` lets the customer add more money or cancel:
+
+```js
+// Money is in. The customer can add more, buy, or cancel.
 class HasMoneyState extends MachineState {
-  insert(machine, money) {
-    machine.addMoney(money);
-    return `Balance: ${machine.balance}`;
-  }
-  select(machine, code) {
-    const product = machine.inventory.find(code);
-    if (!product) throw new Error(`No product ${code}`);
-    if (!machine.inventory.inStock(code)) throw new Error(`${product.name} is sold out. Pick another or cancel`);
-    const balance = machine.balance;
-    if (balance < product.price) throw new Error(`${product.name} costs ${product.price}. Insert ${product.price - balance} more`);
-    const change = machine.cashBox.pay(machine.inserted, balance - product.price);
-    if (change === null) throw new Error('No change available. Use exact money or cancel');
-    machine.setState(machine.states.dispensing);
-    return machine.dispense(code, change);
-  }
-  cancel(machine) {
-    const refund = machine.takeInsertedMoney();
-    machine.setState(machine.states.idle);
-    return refund;
-  }
+    insert(machine, money) {
+        machine.addMoney(money);
+        return `Balance: ${machine.getBalance()}`;
+    }
+
+    // Give back exactly the money that was put in.
+    cancel(machine) {
+        const refund = machine.takeInsertedMoney();
+        machine.setState(machine.states.idle);
+        return refund;
+    }
+```
+
+The rest of `HasMoneyState` is the sale itself. Each check throws a clear message if it fails.
+
+```js
+    select(machine, code) {
+        const product = machine.inventory.find(code);
+        if (product === null) {
+            throw new Error(`No product ${code}`);
+        }
+        if (!machine.inventory.inStock(code)) {
+            throw new Error(`${product.name} is sold out. Pick another or cancel`);
+        }
+
+        // Not enough money yet: say how much more is needed.
+        const balance = machine.getBalance();
+        if (balance < product.price) {
+            const missing = product.price - balance;
+            throw new Error(`${product.name} costs ${product.price}. Insert ${missing} more`);
+        }
+
+        // Pay and make change. null means the box can't make exact change.
+        const changeDue = balance - product.price;
+        const change = machine.cashBox.pay(machine.inserted, changeDue);
+        if (change === null) {
+            throw new Error("No change available. Use exact money or cancel");
+        }
+
+        // Paid: switch to "dispensing" and drop the product.
+        machine.setState(machine.states.dispensing);
+        return machine.dispense(code, change);
+    }
+}
+```
+
+### Part 6: Dispensing and out-of-stock states
+
+While the motor runs, only `dispense` is allowed. When everything is sold, the machine refuses money until a restock.
+
+```js
+// The motor is running. Everything else is refused.
+class DispensingState extends MachineState {
+    dispense(machine, code, change) {
+        const product = machine.inventory.take(code);
+
+        // The money is now in the cash box, so clear what was put in.
+        machine.takeInsertedMoney();
+
+        // The last item is gone: the machine is out of stock.
+        if (machine.inventory.isEmpty()) {
+            machine.setState(machine.states.outOfStock);
+        } else {
+            machine.setState(machine.states.idle);
+        }
+
+        return { product: product.name, change: change };
+    }
 }
 
-class DispensingState extends MachineState { // the motor is running: everything else is refused
-  dispense(machine, code, change) {
-    const product = machine.inventory.take(code);
-    machine.takeInsertedMoney(); // the money is now in the cash box
-    machine.setState(machine.inventory.isEmpty ? machine.states.outOfStock : machine.states.idle);
-    return { product: product.name, change };
-  }
-}
-
+// Everything is sold out.
 class OutOfStockState extends MachineState {
-  insert() { throw new Error('Sold out. Money returned'); }
-  select() { throw new Error('Sold out'); }
+    insert() {
+        throw new Error("Sold out. Money returned");
+    }
+
+    select() {
+        throw new Error("Sold out");
+    }
 }
 ```
 
-**Part 3: the machine.** It keeps the current state and passes every action to it. The money put in stays separate until a sale, so cancel can return the same coins.
+### Part 7: The machine
+
+The machine keeps the current state and one object for each state. The money put in stays separate until a sale, so cancel can return the same coins.
 
 ```js
+// The main class. The buttons and the coin slot call it.
 class VendingMachine {
-  #state;
-  #inserted = [];
-  states = {
-    idle: new IdleState(),
-    hasMoney: new HasMoneyState(),
-    dispensing: new DispensingState(),
-    outOfStock: new OutOfStockState(),
-  };
-  constructor(inventory, cashBox) {
-    this.inventory = inventory;
-    this.cashBox = cashBox;
-    this.#state = inventory.isEmpty ? this.states.outOfStock : this.states.idle;
-  }
+    constructor(inventory, cashBox) {
+        this.inventory = inventory;
+        this.cashBox = cashBox;
 
-  // What a customer can do. Each action asks the current state what to do.
-  insert(money) {
-    if (!ACCEPTED.has(money)) throw new Error(`Rejected: ${money} is not a coin or note we take`);
-    return this.#state.insert(this, money);
-  }
-  select(code) { return this.#state.select(this, code); }
-  cancel() { return this.#state.cancel(this); }
+        // The money put in for the current sale.
+        this.inserted = [];
 
-  // What the operator can do.
-  restock(product, count) {
-    this.inventory.add(product, count);
-    if (this.#state === this.states.outOfStock) this.setState(this.states.idle);
-  }
+        // One object for each state. The states switch between them.
+        this.states = {
+            idle: new IdleState(),
+            hasMoney: new HasMoneyState(),
+            dispensing: new DispensingState(),
+            outOfStock: new OutOfStockState(),
+        };
 
-  // Helpers for the states.
-  get stateName() { return this.#state.name; }
-  setState(state) { this.#state = state; }
-  dispense(code, change) { return this.#state.dispense(this, code, change); }
-  addMoney(money) { this.#inserted.push(money); }
-  get inserted() { return [...this.#inserted]; }
-  get balance() { return this.#inserted.reduce((sum, m) => sum + m, 0); }
-  takeInsertedMoney() {
-    const money = this.#inserted;
-    this.#inserted = [];
-    return money;
-  }
+        // Nothing to sell yet? Start in "out of stock".
+        if (inventory.isEmpty()) {
+            this.state = this.states.outOfStock;
+        } else {
+            this.state = this.states.idle;
+        }
+    }
+```
+
+Next, what the customer and the operator can do. Each customer action just asks the current state what to do.
+
+```js
+    insert(money) {
+        // Fake coins are rejected here, before any state sees them.
+        if (!ACCEPTED.has(money)) {
+            throw new Error(`Rejected: ${money} is not a coin or note we take`);
+        }
+        return this.state.insert(this, money);
+    }
+
+    select(code) {
+        return this.state.select(this, code);
+    }
+
+    cancel() {
+        return this.state.cancel(this);
+    }
+
+    // For the operator: add items, and wake up a sold-out machine.
+    restock(product, count) {
+        this.inventory.add(product, count);
+
+        if (this.state === this.states.outOfStock) {
+            this.setState(this.states.idle);
+        }
+    }
+```
+
+Last, small helpers the states call to switch state and handle the money.
+
+```js
+    getStateName() {
+        return this.state.getName();
+    }
+
+    setState(state) {
+        this.state = state;
+    }
+
+    dispense(code, change) {
+        return this.state.dispense(this, code, change);
+    }
+
+    addMoney(money) {
+        this.inserted.push(money);
+    }
+
+    // The total of the money put in.
+    getBalance() {
+        let total = 0;
+        for (const money of this.inserted) {
+            total += money;
+        }
+        return total;
+    }
+
+    // Hand over the money put in, and start again with none.
+    takeInsertedMoney() {
+        const money = this.inserted;
+        this.inserted = [];
+        return money;
+    }
 }
 ```
 
-**Part 4: try it.** `show` prints the error message instead of stopping the program.
+### Part 8: Try it
+
+`show` runs an action. If the action throws, it returns the error message, so the program keeps going.
 
 ```js
-const show = (action) => { try { return action(); } catch (e) { return e.message; } };
+// "action" is a small function, like () => machine.select("A1").
+function show(action) {
+    try {
+        return action();
+    } catch (error) {
+        return error.message;
+    }
+}
 
-const chips = new Product('A1', 'Chips', 15);
-const soda = new Product('A2', 'Soda', 25);
+const chips = new Product("A1", "Chips", 15);
+const soda = new Product("A2", "Soda", 25);
+
 const inventory = new Inventory();
 inventory.add(chips, 2);
 inventory.add(soda, 1);
+
+// A little change to start with.
 const cashBox = new CashBox();
-cashBox.load([Money.FIVE, Money.TWO, Money.ONE]); // a little change to start with
-const vm = new VendingMachine(inventory, cashBox);
+cashBox.load([Money.FIVE, Money.TWO, Money.ONE]);
 
-console.log(vm.stateName); // IdleState
-console.log(show(() => vm.select('A1'))); // Insert money first
-console.log(vm.insert(Money.TEN)); // Balance: 10
-console.log(vm.stateName); // HasMoneyState
-console.log(show(() => vm.select('A2'))); // Soda costs 25. Insert 15 more
-console.log(vm.insert(Money.TWENTY)); // Balance: 30
-console.log(vm.select('A2')); // { product: 'Soda', change: [ 5 ] }
-console.log(vm.stateName); // IdleState
+const machine = new VendingMachine(inventory, cashBox);
+```
 
-console.log(show(() => vm.insert(3))); // Rejected: 3 is not a coin or note we take
-console.log(vm.insert(Money.TWENTY)); // Balance: 20
-console.log(show(() => vm.select('A1'))); // No change available. Use exact money or cancel
-console.log(vm.cancel()); // [ 20 ]
+A normal sale. Selecting too early, or with too little money, is refused.
 
-vm.insert(Money.TEN);
-vm.insert(Money.FIVE);
-console.log(vm.select('A1')); // { product: 'Chips', change: [] }
-vm.insert(Money.TWENTY);
-console.log(vm.select('A1')); // { product: 'Chips', change: [ 5 ] }
-console.log(vm.stateName); // OutOfStockState
-console.log(show(() => vm.insert(Money.TEN))); // Sold out. Money returned
+```js
+console.log(machine.getStateName()); // IdleState
+console.log(show(() => machine.select("A1"))); // Insert money first
 
-vm.restock(chips, 5);
-console.log(vm.stateName); // IdleState
+console.log(machine.insert(Money.TEN)); // Balance: 10
+console.log(machine.getStateName()); // HasMoneyState
+console.log(show(() => machine.select("A2"))); // Soda costs 25. Insert 15 more
+
+console.log(machine.insert(Money.TWENTY)); // Balance: 30
+console.log(machine.select("A2")); // { product: 'Soda', change: [ 5 ] }
+console.log(machine.getStateName()); // IdleState
+```
+
+A fake coin, a sale with no change possible, and a cancel:
+
+```js
+console.log(show(() => machine.insert(3))); // Rejected: 3 is not a coin or note we take
+
+console.log(machine.insert(Money.TWENTY)); // Balance: 20
+console.log(show(() => machine.select("A1"))); // No change available. Use exact money or cancel
+
+console.log(machine.cancel()); // [ 20 ]
+```
+
+Selling out, then a restock:
+
+```js
+machine.insert(Money.TEN);
+machine.insert(Money.FIVE);
+console.log(machine.select("A1")); // { product: 'Chips', change: [] }
+
+machine.insert(Money.TWENTY);
+console.log(machine.select("A1")); // { product: 'Chips', change: [ 5 ] }
+console.log(machine.getStateName()); // OutOfStockState
+console.log(show(() => machine.insert(Money.TEN))); // Sold out. Money returned
+
+machine.restock(chips, 5);
+console.log(machine.getStateName()); // IdleState
 ```
 
 Why "No change available" the second time? The only 5 went out with the soda. The box has one 2 and one 1, which make 3, not 5. So the sale is refused, and cancel returns the same 20 note. After the next sale adds a 5 to the box, change works again.
@@ -410,10 +689,15 @@ The danger comes when dispensing takes time. The motor needs a second or two, so
 ```js
 // A fragment, not runnable on its own.
 async select(machine, code) {
-  // ...checks and payment as before...
-  machine.setState(machine.states.dispensing); // first: close the door to other presses
-  await machine.motor.drop(code);              // slow: a second or two
-  machine.setState(machine.states.idle);
+    // ...checks and payment as before...
+
+    // First: close the door to other presses.
+    machine.setState(machine.states.dispensing);
+
+    // Slow: the motor takes a second or two.
+    await machine.motor.drop(code);
+
+    machine.setState(machine.states.idle);
 }
 ```
 

@@ -91,45 +91,116 @@ CREATE TABLE idempotency_keys (
 );
 ```
 
-And the request handler:
+And the request handler, in four small pieces.
+
+#### Step 1: Claim the key
+
+Save the key as `in_progress`. The primary key makes sure only one request wins.
+
+```js
+// Returns true if this request now owns the key
+async function claimKey(userId, key, body) {
+    const result = await db.query(
+        `INSERT INTO idempotency_keys (user_id, idempotency_key, request_hash, status)
+         VALUES ($1, $2, $3, 'in_progress')
+         ON CONFLICT DO NOTHING`,
+        [userId, key, hash(body)]
+    );
+
+    // 1 row added: we own it. 0 rows: the key was already there.
+    return result.rowCount === 1;
+}
+```
+
+#### Step 2: Check a key we have seen before
+
+The key is already in the table, so never do the work again. Decide what to answer instead.
+
+```js
+// Returns the answer to send, or null if this request may run the work
+async function checkSeenKey(userId, key, body) {
+    const row = await findKey(userId, key);
+
+    // The key was freed a moment ago
+    if (!row) {
+        return { code: 409, body: { error: "Try again" } };
+    }
+
+    // Same key, but a different request body
+    if (row.request_hash !== hash(body)) {
+        return { code: 422, body: { error: "Key reused" } };
+    }
+
+    // Finished: send the first answer again
+    if (row.status === "done") {
+        return { code: row.response_code, body: row.response };
+    }
+
+    // Still "in_progress". Take it over only if its request crashed (the UPDATE below).
+    const tookOver = await takeOverStaleKey(userId, key);
+    if (!tookOver) {
+        return { code: 409, body: { error: "Still running" } };
+    }
+
+    return null;
+}
+```
+
+#### Step 3: Do the work once
+
+We own the key. Charge the card, then save the answer.
+
+```js
+async function chargeOnce(userId, key, req, res) {
+    try {
+        // Pass the key down to the card provider
+        const result = await chargeCard(req.body, key);
+
+        // A declined card is an answer too
+        let code = 201;
+        if (result.declined) {
+            code = 402;
+        }
+
+        // Saves the code and body, and sets status = 'done'
+        await saveResponse(userId, key, code, result);
+        return res.status(code).json(result);
+    } catch (error) {
+        // An error, or no answer (a timeout). Free the key, so the client's retry can run the work.
+        // Safe even if the charge went through: the card provider got the same key and won't charge twice.
+        await deleteKey(userId, key);
+        return res.status(503).json({ error: "Please try again" });
+    }
+}
+```
+
+#### Step 4: Put it together
+
+The handler runs the three steps in order.
 
 ```js
 async function createPayment(req, res) {
-  const userId = req.user.id;
-  const key = req.headers['idempotency-key'];
-  if (!key) return res.status(400).json({ error: 'Idempotency-Key header is required' });
+    const userId = req.user.id;
+    const key = req.headers["idempotency-key"];
 
-  // 1. Try to claim the key. The primary key makes sure only one request wins.
-  const claimed = await db.query(
-    `INSERT INTO idempotency_keys (user_id, idempotency_key, request_hash, status)
-     VALUES ($1, $2, $3, 'in_progress')
-     ON CONFLICT DO NOTHING`,
-    [userId, key, hash(req.body)]
-  );
+    if (!key) {
+        return res.status(400).json({ error: "Idempotency-Key header is required" });
+    }
 
-  // 2. Seen before: never do the work again.
-  if (claimed.rowCount === 0) {
-    const row = await findKey(userId, key);
-    if (!row) return res.status(409).json({ error: 'Try again' }); // freed a moment ago
-    if (row.request_hash !== hash(req.body)) return res.status(422).json({ error: 'Key reused' });
-    if (row.status === 'done') return res.status(row.response_code).json(row.response); // the first answer, sent again
-    // Still 'in_progress'. Take it over only if its request crashed (the UPDATE below).
-    const tookOver = await takeOverStaleKey(userId, key);
-    if (!tookOver) return res.status(409).json({ error: 'Still running' });
-  }
+    // 1. Try to claim the key
+    const claimed = await claimKey(userId, key, req.body);
 
-  // 3. We own the key: do the work once, then save the answer.
-  try {
-    const result = await chargeCard(req.body, key);  // pass the key down
-    const code = result.declined ? 402 : 201;        // a declined card is an answer too
-    await saveResponse(userId, key, code, result);   // saves code + body, sets status = 'done'
-    return res.status(code).json(result);
-  } catch (err) {
-    // An error, or no answer (a timeout). Free the key, so the client's retry can run the work.
-    // Safe even if the charge went through: the card provider got the same key and won't charge twice.
-    await deleteKey(userId, key);
-    return res.status(503).json({ error: 'Please try again' });
-  }
+    // 2. Seen before: send the right answer, and stop
+    if (!claimed) {
+        const answer = await checkSeenKey(userId, key, req.body);
+
+        if (answer !== null) {
+            return res.status(answer.code).json(answer.body);
+        }
+    }
+
+    // 3. We own the key: do the work once
+    return chargeOnce(userId, key, req, res);
 }
 ```
 

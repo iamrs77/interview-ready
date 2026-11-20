@@ -39,33 +39,61 @@ Many links **inside** each box, one small link **between** the boxes. That is th
 
 ## Coupling: the bad version
 
-An `Order` that reaches deep into the customer to pay:
+An `Order` that reaches deep into the customer to pay.
+
+**Step 1: the card, the wallet and the customer.** The wallet and the customer leave their insides open for anyone to use:
 
 ```js
 class Card {
-  #balance = 100;
-  charge(amount) {
-    if (amount > this.#balance) return false;
-    this.#balance -= amount;
-    return true;
-  }
-}
-class Wallet { cards = [new Card()]; }
-class Customer { wallet = new Wallet(); }
+    // "#" means private: only code inside Card can use #balance.
+    #balance = 100;
 
+    charge(amount) {
+        if (amount > this.#balance) {
+            return false;
+        }
+
+        this.#balance = this.#balance - amount;
+        return true;
+    }
+}
+
+class Wallet {
+    constructor() {
+        this.cards = [new Card()];
+    }
+}
+
+class Customer {
+    constructor() {
+        this.wallet = new Wallet();
+    }
+}
+```
+
+**Step 2: the order.** To pay, it walks all the way down to the first card:
+
+```js
 class Order {
-  constructor(customer, total) {
-    this.customer = customer;
-    this.total = total;
-  }
-  checkout() {
-    // Order knows Customer, Wallet, Card, AND how cards are stored.
-    const ok = this.customer.wallet.cards[0].charge(this.total);
-    return ok ? 'Paid' : 'Payment failed';
-  }
+    constructor(customer, total) {
+        this.customer = customer;
+        this.total = total;
+    }
+
+    checkout() {
+        // Order knows Customer, Wallet, Card, AND how cards are stored.
+        const paid = this.customer.wallet.cards[0].charge(this.total);
+
+        if (paid) {
+            return "Paid";
+        }
+
+        return "Payment failed";
+    }
 }
 
-console.log(new Order(new Customer(), 40).checkout()); // Paid
+const order = new Order(new Customer(), 40);
+console.log(order.checkout()); // Paid
 ```
 
 `Order` is coupled to **three** classes and to their insides. If `Wallet` stores cards in a `Map`, or picks a default card differently, `Order` breaks, even though nothing about orders changed.
@@ -100,37 +128,83 @@ classDiagram
   Wallet *-- Card
 ```
 
+**Step 1: the card.** It is the same as before:
+
 ```js
 class Card {
-  #balance = 100;
-  charge(amount) {
-    if (amount > this.#balance) return false;
-    this.#balance -= amount;
-    return true;
-  }
+    // "#" means private: only code inside Card can use #balance.
+    #balance = 100;
+
+    charge(amount) {
+        if (amount > this.#balance) {
+            return false;
+        }
+
+        this.#balance = this.#balance - amount;
+        return true;
+    }
 }
+```
+
+**Step 2: the wallet and the customer.** Each one keeps its insides private and offers a simple `pay()` method:
+
+```js
 class Wallet {
-  #cards = [new Card()];
-  pay(amount) { return this.#cards.some((card) => card.charge(amount)); }
-}
-class Customer {
-  #wallet = new Wallet();
-  pay(amount) { return this.#wallet.pay(amount); }
+    // Private: nobody outside the wallet knows how cards are stored.
+    #cards = [new Card()];
+
+    // Try each card until one of them pays.
+    pay(amount) {
+        for (const card of this.#cards) {
+            const paid = card.charge(amount);
+
+            if (paid) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }
 
+class Customer {
+    #wallet = new Wallet();
+
+    pay(amount) {
+        return this.#wallet.pay(amount);
+    }
+}
+```
+
+**Step 3: the order.** It talks only to the customer:
+
+```js
 class Order {
-  constructor(customer, total) {
-    this.customer = customer;
-    this.total = total;
-  }
-  checkout() {
-    return this.customer.pay(this.total) ? 'Paid' : 'Payment failed'; // one dot
-  }
+    constructor(customer, total) {
+        this.customer = customer;
+        this.total = total;
+    }
+
+    checkout() {
+        // One dot: Order asks its customer to pay, and nothing deeper.
+        const paid = this.customer.pay(this.total);
+
+        if (paid) {
+            return "Paid";
+        }
+
+        return "Payment failed";
+    }
 }
 
 const asha = new Customer();
-console.log(new Order(asha, 40).checkout()); // Paid
-console.log(new Order(asha, 90).checkout()); // Payment failed
+
+const firstOrder = new Order(asha, 40);
+console.log(firstOrder.checkout()); // Paid
+
+// The card has 60 left now, so 90 is too much.
+const secondOrder = new Order(asha, 90);
+console.log(secondOrder.checkout()); // Payment failed
 ```
 
 Now `Order` knows only one method: `customer.pay()`. The wallet can change how it stores or picks cards, and `Order` never notices.

@@ -142,15 +142,19 @@ So use **time decay**: recent searches count more. For example, today's searches
 ```js
 // counts[0] = searches today, counts[1] = yesterday, ...
 function score(counts) {
-  let total = 0;
-  counts.forEach((count, daysAgo) => {
-    total += count * Math.pow(0.9, daysAgo);
-  });
-  return total;
+    let total = 0;
+
+    for (let daysAgo = 0; daysAgo < counts.length; daysAgo++) {
+        // Today counts 1, yesterday 0.9, the day before 0.81, ...
+        const weight = Math.pow(0.9, daysAgo);
+        total += counts[daysAgo] * weight;
+    }
+
+    return total;
 }
 
-score([1000, 0, 0]); // 1000  (searched a lot today)
-score([0, 0, 2000]); // 1620  (searched more, but 2 days ago)
+console.log(score([1000, 0, 0])); // 1000  (searched a lot today)
+console.log(score([0, 0, 2000])); // 1620  (searched more, but 2 days ago)
 ```
 
 **Filter** what we suggest:

@@ -25,13 +25,16 @@ A `Stock` price changes. The email alert, the SMS alert and the dashboard all ne
 ```js
 // Not complete code: it only shows the problem.
 class Stock {
-  setPrice(price) {
-    this.price = price;
-    emailAlerts.check(this.symbol, price); // Stock must know about email...
-    smsAlerts.check(this.symbol, price);   // ...and SMS...
-    dashboard.refresh(this.symbol, price); // ...and the dashboard.
-    // A new push alert means editing Stock again.
-  }
+    setPrice(price) {
+        this.price = price;
+
+        // Stock must know about email, SMS and the dashboard.
+        emailAlerts.check(this.symbol, price);
+        smsAlerts.check(this.symbol, price);
+        dashboard.refresh(this.symbol, price);
+
+        // A new push alert means editing Stock again.
+    }
 }
 ```
 
@@ -73,51 +76,98 @@ classDiagram
   PriceObserver <|.. PriceAlert
 ```
 
+The code comes in four small steps. Paste them in order into one file to run it.
+
+**Step 1: the observer interface.** Every observer has one method, `update`.
+
 ```js
-class PriceObserver { // interface
-  update(symbol, price) { throw new Error('not implemented'); }
+// The interface: every observer has update(symbol, price).
+class PriceObserver {
+    update(symbol, price) {
+        throw new Error("not implemented");
+    }
 }
+```
 
-class Stock { // the subject
-  #observers = new Set();
-  #price;
-  constructor(symbol, price) { this.symbol = symbol; this.#price = price; }
+**Step 2: the subject.** The stock keeps a list of observers, and calls each one when its price changes.
 
-  subscribe(observer) { this.#observers.add(observer); }
-  unsubscribe(observer) { this.#observers.delete(observer); }
+```js
+class Stock {
+    constructor(symbol, price) {
+        this.symbol = symbol;
+        this.price = price;
 
-  get price() { return this.#price; }
-  set price(newPrice) {
-    this.#price = newPrice;
-    this.#notify();
-  }
-  #notify() {
-    for (const observer of this.#observers) observer.update(this.symbol, this.#price);
-  }
+        // A Set is a list that can't hold the same observer twice.
+        this.observers = new Set();
+    }
+
+    subscribe(observer) {
+        this.observers.add(observer);
+    }
+
+    unsubscribe(observer) {
+        this.observers.delete(observer);
+    }
+
+    setPrice(newPrice) {
+        this.price = newPrice;
+        this.notify();
+    }
+
+    // Tell every observer about the new price.
+    notify() {
+        for (const observer of this.observers) {
+            observer.update(this.symbol, this.price);
+        }
+    }
 }
+```
 
+**Step 3: two observers.** Each one decides for itself what to do with the news.
+
+```js
+// Shows every new price.
 class Dashboard extends PriceObserver {
-  update(symbol, price) { console.log(`Dashboard: ${symbol} = ${price}`); }
+    update(symbol, price) {
+        console.log(`Dashboard: ${symbol} = ${price}`);
+    }
 }
 
+// Speaks up only when the price falls to the limit or below.
 class PriceAlert extends PriceObserver {
-  #limit;
-  constructor(limit) { super(); this.#limit = limit; }
-  update(symbol, price) {
-    if (price <= this.#limit) console.log(`Alert: ${symbol} fell to ${price}`);
-  }
+    constructor(limit) {
+        super();
+        this.limit = limit;
+    }
+
+    update(symbol, price) {
+        if (price <= this.limit) {
+            console.log(`Alert: ${symbol} fell to ${price}`);
+        }
+    }
 }
+```
 
-const apple = new Stock('AAPL', 200);
-const alert = new PriceAlert(180);
-apple.subscribe(new Dashboard());
-apple.subscribe(alert);
+**Step 4: use it.** Subscribe both observers, change the price, then unsubscribe the alert.
 
-apple.price = 190; // Dashboard: AAPL = 190
-apple.price = 175; // Dashboard: AAPL = 175
-                   // Alert: AAPL fell to 175
-apple.unsubscribe(alert);
-apple.price = 170; // Dashboard: AAPL = 170
+```js
+const apple = new Stock("AAPL", 200);
+const dashboard = new Dashboard();
+const priceAlert = new PriceAlert(180);
+
+apple.subscribe(dashboard);
+apple.subscribe(priceAlert);
+
+apple.setPrice(190);
+// Dashboard: AAPL = 190
+
+apple.setPrice(175);
+// Dashboard: AAPL = 175
+// Alert: AAPL fell to 175
+
+apple.unsubscribe(priceAlert);
+apple.setPrice(170);
+// Dashboard: AAPL = 170
 ```
 
 When the price changes, the stock calls each observer in turn:
@@ -128,7 +178,7 @@ sequenceDiagram
   participant S as Stock
   participant D as Dashboard
   participant A as PriceAlert
-  App->>S: price = 175
+  App->>S: setPrice(175)
   S->>D: update(AAPL, 175)
   S->>A: update(AAPL, 175)
   Note over A: 175 is under the 180 limit: alert
@@ -147,23 +197,43 @@ Here the subject **pushes** the data (`symbol` and `price`) to each observer. In
 In JavaScript you rarely write the subscriber list yourself. An observer is usually just a function (a callback), and Node.js gives you `EventEmitter`:
 
 ```js
-import { EventEmitter } from 'node:events';
+import { EventEmitter } from "node:events";
 
-class Channel extends EventEmitter { // EventEmitter already has the subscriber list
-  upload(title) { this.emit('video', title); }
+// EventEmitter already has the subscriber list built in.
+class Channel extends EventEmitter {
+    upload(title) {
+        // Tell everyone listening for "video" events.
+        this.emit("video", title);
+    }
 }
 
-const channel = new Channel();
-const asha = (title) => console.log(`Asha gets: ${title}`);
-channel.on('video', asha); // subscribe
-channel.on('video', (title) => console.log(`Ben gets: ${title}`));
+// Two observers. Each one is just a function.
+function asha(title) {
+    console.log(`Asha gets: ${title}`);
+}
 
-channel.upload('Strategy in 5 minutes');
+function ben(title) {
+    console.log(`Ben gets: ${title}`);
+}
+```
+
+Now subscribe them, upload a video, and unsubscribe one:
+
+```js
+const channel = new Channel();
+
+// Subscribe both to "video" events.
+channel.on("video", asha);
+channel.on("video", ben);
+
+channel.upload("Strategy in 5 minutes");
 // Asha gets: Strategy in 5 minutes
 // Ben gets: Strategy in 5 minutes
 
-channel.off('video', asha); // unsubscribe
-channel.upload('Observer in 5 minutes');
+// Unsubscribe Asha.
+channel.off("video", asha);
+
+channel.upload("Observer in 5 minutes");
 // Ben gets: Observer in 5 minutes
 ```
 

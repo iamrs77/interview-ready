@@ -23,18 +23,23 @@ A parking lot charges by the hour on weekdays, a flat price at weekends, and giv
 
 ```js
 function parkingFee(hours, rule) {
-  if (rule === 'HOURLY') {
-    return Math.ceil(hours) * 3;
-  } else if (rule === 'WEEKEND') {
-    return 20; // flat price for the whole day
-  } else if (rule === 'FREE_FIRST_HOUR') {
-    return Math.max(0, Math.ceil(hours) - 1) * 3; // holiday offer
-  }
-  throw new Error(`Unknown rule: ${rule}`);
+    if (rule === "HOURLY") {
+        // $3 for each started hour
+        return Math.ceil(hours) * 3;
+    } else if (rule === "WEEKEND") {
+        // flat price for the whole day
+        return 20;
+    } else if (rule === "FREE_FIRST_HOUR") {
+        // holiday offer: the first hour is free
+        const paidHours = Math.max(0, Math.ceil(hours) - 1);
+        return paidHours * 3;
+    }
+
+    throw new Error(`Unknown rule: ${rule}`);
 }
 
-console.log(parkingFee(2.5, 'HOURLY')); // 9
-console.log(parkingFee(2.5, 'WEEKEND')); // 20
+console.log(parkingFee(2.5, "HOURLY")); // 9
+console.log(parkingFee(2.5, "WEEKEND")); // 20
 ```
 
 Why it hurts:
@@ -75,44 +80,99 @@ classDiagram
   FeeStrategy <|.. FreeFirstHourFee
 ```
 
+The code comes in five small steps. Paste them in order into one file to run it.
+
+**Step 1: the interface.** Every fee rule has the same method, `calculate(hours)`.
+
 ```js
-class FeeStrategy { // interface
-  calculate(hours) { throw new Error('not implemented'); }
+// The interface: every fee rule must have calculate(hours).
+class FeeStrategy {
+    calculate(hours) {
+        throw new Error("not implemented");
+    }
 }
+```
 
+**Step 2: two fee rules.** Each rule is its own small class.
+
+```js
+// $rate for each started hour.
 class HourlyFee extends FeeStrategy {
-  #rate;
-  constructor(rate) { super(); this.#rate = rate; }
-  calculate(hours) { return Math.ceil(hours) * this.#rate; }
+    constructor(rate) {
+        super();
+        this.rate = rate;
+    }
+
+    calculate(hours) {
+        // 2.5 hours counts as 3 hours.
+        const fullHours = Math.ceil(hours);
+        return fullHours * this.rate;
+    }
 }
 
+// One flat price for the whole day.
 class WeekendFee extends FeeStrategy {
-  calculate(hours) { return 20; } // flat price for the whole day
+    calculate(hours) {
+        return 20;
+    }
 }
+```
 
+**Step 3: the holiday rule.** The first hour is free.
+
+```js
+// The first hour is free. After that, $rate for each started hour.
 class FreeFirstHourFee extends FeeStrategy {
-  #rate;
-  constructor(rate) { super(); this.#rate = rate; }
-  calculate(hours) { return Math.max(0, Math.ceil(hours) - 1) * this.#rate; }
-}
+    constructor(rate) {
+        super();
+        this.rate = rate;
+    }
 
-class ParkingLot { // the context: it uses a strategy, it doesn't know which one
-  #feeStrategy;
-  constructor(feeStrategy) { this.#feeStrategy = feeStrategy; }
-  set feeStrategy(strategy) { this.#feeStrategy = strategy; } // swap at run time
-  checkout(plate, hours) {
-    return `${plate} pays $${this.#feeStrategy.calculate(hours)}`;
-  }
-}
+    calculate(hours) {
+        const fullHours = Math.ceil(hours);
 
+        // Math.max(0, ...) stops the result from going below 0.
+        const paidHours = Math.max(0, fullHours - 1);
+
+        return paidHours * this.rate;
+    }
+}
+```
+
+**Step 4: the parking lot.** This is the context. It holds one fee rule and calls it, without knowing which one it is.
+
+```js
+// The context: it uses a fee rule, but doesn't know which one.
+class ParkingLot {
+    constructor(feeStrategy) {
+        this.feeStrategy = feeStrategy;
+    }
+
+    // Swap the fee rule while the program runs.
+    setFeeStrategy(strategy) {
+        this.feeStrategy = strategy;
+    }
+
+    checkout(plate, hours) {
+        const fee = this.feeStrategy.calculate(hours);
+        return `${plate} pays $${fee}`;
+    }
+}
+```
+
+**Step 5: use it.** Start with the hourly rule, then swap it.
+
+```js
 const lot = new ParkingLot(new HourlyFee(3));
-console.log(lot.checkout('KA-01', 2.5)); // KA-01 pays $9
+console.log(lot.checkout("KA-01", 2.5)); // KA-01 pays $9
 
-lot.feeStrategy = new WeekendFee(); // Saturday morning
-console.log(lot.checkout('KA-02', 2.5)); // KA-02 pays $20
+// Saturday morning: switch to the weekend price.
+lot.setFeeStrategy(new WeekendFee());
+console.log(lot.checkout("KA-02", 2.5)); // KA-02 pays $20
 
-lot.feeStrategy = new FreeFirstHourFee(3); // holiday offer
-console.log(lot.checkout('KA-03', 2.5)); // KA-03 pays $6
+// Holiday offer.
+lot.setFeeStrategy(new FreeFirstHourFee(3));
+console.log(lot.checkout("KA-03", 2.5)); // KA-03 pays $6
 ```
 
 What changed:
@@ -130,20 +190,41 @@ In JavaScript, functions are values. A strategy with one method can simply be a 
 
 ```js
 // Each strategy is just a function: hours in, price out.
-const hourly = (rate) => (hours) => Math.ceil(hours) * rate;
-const weekend = () => 20;
-const freeFirstHour = (rate) => (hours) => Math.max(0, Math.ceil(hours) - 1) * rate;
-
-function checkout(plate, hours, feeRule) {
-  return `${plate} pays $${feeRule(hours)}`;
+function hourlyFee(hours) {
+    const fullHours = Math.ceil(hours);
+    return fullHours * 3;
 }
 
-console.log(checkout('KA-01', 2.5, hourly(3))); // KA-01 pays $9
-console.log(checkout('KA-02', 2.5, weekend)); // KA-02 pays $20
+function weekendFee(hours) {
+    return 20;
+}
+
+function freeFirstHourFee(hours) {
+    const fullHours = Math.ceil(hours);
+    const paidHours = Math.max(0, fullHours - 1);
+    return paidHours * 3;
+}
+```
+
+Now `checkout` gets the fee rule as a normal argument, and calls it:
+
+```js
+function checkout(plate, hours, feeRule) {
+    const fee = feeRule(hours);
+    return `${plate} pays $${fee}`;
+}
+
+console.log(checkout("KA-01", 2.5, hourlyFee)); // KA-01 pays $9
+console.log(checkout("KA-02", 2.5, weekendFee)); // KA-02 pays $20
 
 // Pick a strategy by name with a lookup table, not an if/else chain.
-const feeRules = { weekday: hourly(3), weekend, holiday: freeFirstHour(3) };
-console.log(checkout('KA-03', 2.5, feeRules.holiday)); // KA-03 pays $6
+const feeRules = {
+    weekday: hourlyFee,
+    weekend: weekendFee,
+    holiday: freeFirstHourFee,
+};
+
+console.log(checkout("KA-03", 2.5, feeRules.holiday)); // KA-03 pays $6
 ```
 
 Use **classes** when a strategy has several methods or its own setup. Use **plain functions** when it is one small calculation. Both are the Strategy pattern.
@@ -172,15 +253,28 @@ Use **classes** when a strategy has several methods or its own setup. Use **plai
 
 ```js
 const cars = [
-  { plate: 'B-22', hours: 5 },
-  { plate: 'C-33', hours: 2 },
-  { plate: 'A-11', hours: 9 },
+    { plate: "B-22", hours: 5 },
+    { plate: "C-33", hours: 2 },
+    { plate: "A-11", hours: 9 },
 ];
-const byHours = (a, b) => a.hours - b.hours; // a strategy for comparing
-const byPlate = (a, b) => a.plate.localeCompare(b.plate); // another one
 
-console.log(cars.toSorted(byHours).map((car) => car.plate)); // [ 'C-33', 'B-22', 'A-11' ]
-console.log(cars.toSorted(byPlate).map((car) => car.plate)); // [ 'A-11', 'B-22', 'C-33' ]
+// A strategy for comparing: fewer hours first.
+// A negative result means carA comes before carB.
+function byHours(carA, carB) {
+    return carA.hours - carB.hours;
+}
+
+// Another strategy: plates in A to Z order.
+function byPlate(carA, carB) {
+    return carA.plate.localeCompare(carB.plate);
+}
+
+// toSorted gives back a new sorted array. It doesn't change cars.
+const sortedByHours = cars.toSorted(byHours);
+const sortedByPlate = cars.toSorted(byPlate);
+
+console.log(sortedByHours.map((car) => car.plate)); // [ 'C-33', 'B-22', 'A-11' ]
+console.log(sortedByPlate.map((car) => car.plate)); // [ 'A-11', 'B-22', 'C-33' ]
 ```
 
 - **Passport.js**, the login library for Node.js, calls each login method a "strategy": `passport-local` for a username and password, `passport-google-oauth20` for Google, and more. You plug in the ones you need with `passport.use(...)`.

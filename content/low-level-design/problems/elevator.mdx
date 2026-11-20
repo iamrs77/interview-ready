@@ -178,220 +178,492 @@ stateDiagram-v2
 
 ## Step 5: Code
 
-**Part 1: the enum and small classes.** A hall button asks the controller. A car button talks to its own car.
+Run all the parts together as one `.mjs` file. Long classes come in a few pieces. Paste the pieces in order and they make the whole class.
+
+### Part 1: The enum and small classes
+
+**The direction and the request.** A request is a hall call: "someone on this floor wants to go this way".
 
 ```js
-const Direction = Object.freeze({ UP: 'UP', DOWN: 'DOWN', IDLE: 'IDLE' });
+const Direction = {
+    UP: "UP",
+    DOWN: "DOWN",
+    IDLE: "IDLE",
+};
 
-class Request { // a hall call: "someone on this floor wants to go this way"
-  constructor(floor, direction) {
-    this.floor = floor;
-    this.direction = direction;
-  }
-}
-
-class HallButton { // on a floor: the controller must choose a car
-  constructor(floor, direction, controller) {
-    this.floor = floor;
-    this.direction = direction;
-    this.controller = controller;
-  }
-  press() { return this.controller.call(new Request(this.floor, this.direction)); }
-}
-
-class CarButton { // inside a car: goes straight to that car
-  constructor(floor, car) {
-    this.floor = floor;
-    this.car = car;
-  }
-  press() { this.car.addStop(this.floor); }
-}
-
-class Floor {
-  constructor(number, topFloor, controller) {
-    this.number = number;
-    // The top floor has no up button. The ground floor has no down button.
-    this.upButton = number < topFloor ? new HallButton(number, Direction.UP, controller) : null;
-    this.downButton = number > 0 ? new HallButton(number, Direction.DOWN, controller) : null;
-  }
+class Request {
+    constructor(floor, direction) {
+        this.floor = floor;
+        this.direction = direction;
+    }
 }
 ```
 
-**Part 2: the car and its states.** Each state decides what one `tick()` does. The car only keeps its data and its stops.
+**The buttons.** A hall button asks the controller to choose a car. A car button talks to its own car.
 
 ```js
-class ElevatorState { // interface
-  get name() { throw new Error('not implemented'); }
-  tick(car) { throw new Error('not implemented'); }
+// On a floor: the controller must choose a car.
+class HallButton {
+    constructor(floor, direction, controller) {
+        this.floor = floor;
+        this.direction = direction;
+        this.controller = controller;
+    }
+
+    // Returns the car that will come.
+    press() {
+        const request = new Request(this.floor, this.direction);
+        return this.controller.call(request);
+    }
 }
 
+// Inside a car: goes straight to that car.
+class CarButton {
+    constructor(floor, car) {
+        this.floor = floor;
+        this.car = car;
+    }
+
+    press() {
+        this.car.addStop(this.floor);
+    }
+}
+```
+
+**A floor.** Each floor has an up button and a down button, except at the ends.
+
+```js
+class Floor {
+    constructor(number, topFloor, controller) {
+        this.number = number;
+
+        // The top floor has no up button.
+        this.upButton = null;
+        if (number < topFloor) {
+            this.upButton = new HallButton(number, Direction.UP, controller);
+        }
+
+        // The ground floor has no down button.
+        this.downButton = null;
+        if (number > 0) {
+            this.downButton = new HallButton(number, Direction.DOWN, controller);
+        }
+    }
+}
+```
+
+### Part 2: The car and its states
+
+Each state decides what one `tick()` does. The car only keeps its data and its stops.
+
+**The state interface.** Every state has a name and a `tick(car)` method.
+
+```js
+class ElevatorState {
+    constructor(name) {
+        this.name = name;
+    }
+
+    tick(car) {
+        throw new Error("not implemented");
+    }
+}
+```
+
+**Idle.** The car waits. When it gets a stop, it opens its doors here or starts moving.
+
+```js
 class IdleState extends ElevatorState {
-  get name() { return 'Idle'; }
-  tick(car) {
-    if (car.hasStop(car.floor)) return car.arrive(); // someone called it to this floor
-    const next = car.nextMove();
-    if (next instanceof IdleState) return; // nothing to do
-    car.setState(next);
-    next.tick(car); // start moving in this same step
-  }
-}
+    constructor() {
+        super("Idle");
+    }
 
+    tick(car) {
+        // Someone called it to this floor: open the doors.
+        if (car.hasStop(car.floor)) {
+            car.arrive();
+            return;
+        }
+
+        // No stops anywhere: nothing to do.
+        const next = car.nextMove();
+        if (next instanceof IdleState) {
+            return;
+        }
+
+        car.setState(next);
+        // Start moving in this same step.
+        next.tick(car);
+    }
+}
+```
+
+**Moving up and moving down.** Move one floor. If that floor is a stop, arrive.
+
+```js
 class MovingUpState extends ElevatorState {
-  get name() { return 'MovingUp'; }
-  tick(car) {
-    car.floor += 1;
-    if (car.hasStop(car.floor)) car.arrive();
-  }
+    constructor() {
+        super("MovingUp");
+    }
+
+    tick(car) {
+        car.floor += 1;
+        if (car.hasStop(car.floor)) {
+            car.arrive();
+        }
+    }
 }
 
 class MovingDownState extends ElevatorState {
-  get name() { return 'MovingDown'; }
-  tick(car) {
-    car.floor -= 1;
-    if (car.hasStop(car.floor)) car.arrive();
-  }
-}
+    constructor() {
+        super("MovingDown");
+    }
 
-class DoorsOpenState extends ElevatorState {
-  get name() { return 'DoorsOpen'; }
-  tick(car) { car.setState(car.nextMove()); } // close the doors, then decide where to go
-}
-
-class Elevator {
-  #stops = new Set(); // a Set: pressing 7 twice adds it once
-  constructor(id, floorCount, startFloor = 0) {
-    this.id = id;
-    this.floor = startFloor;
-    this.direction = Direction.IDLE;
-    this.state = new IdleState();
-    this.buttons = Array.from({ length: floorCount }, (_, f) => new CarButton(f, this));
-  }
-  addStop(floor) {
-    if (floor < 0 || floor >= this.buttons.length) throw new Error(`No floor ${floor}`);
-    if (floor === this.floor && this.state instanceof DoorsOpenState) return; // doors already open here
-    this.#stops.add(floor);
-  }
-  hasStop(floor) { return this.#stops.has(floor); }
-  get stops() { return [...this.#stops].sort((x, y) => x - y); }
-
-  setState(state) {
-    this.state = state;
-    if (state instanceof MovingUpState) this.direction = Direction.UP;
-    if (state instanceof MovingDownState) this.direction = Direction.DOWN;
-    if (state instanceof IdleState) this.direction = Direction.IDLE;
-  }
-  arrive() {
-    this.#stops.delete(this.floor);
-    this.setState(new DoorsOpenState());
-  }
-  // LOOK: keep going the same way while there are stops ahead, then turn around.
-  nextMove() {
-    const above = this.stops.some((f) => f > this.floor);
-    const below = this.stops.some((f) => f < this.floor);
-    if (above && this.direction !== Direction.DOWN) return new MovingUpState();
-    if (below) return new MovingDownState();
-    if (above) return new MovingUpState();
-    return new IdleState();
-  }
-  lastStopAhead() { // where this run ends: the highest stop going up, the lowest going down
-    const stops = this.stops;
-    if (stops.length === 0) return this.floor;
-    return this.direction === Direction.UP ? stops.at(-1) : stops[0];
-  }
-  tick() { this.state.tick(this); }
-  toString() { return `${this.id}: floor ${this.floor}, ${this.state.name}`; }
+    tick(car) {
+        car.floor -= 1;
+        if (car.hasStop(car.floor)) {
+            car.arrive();
+        }
+    }
 }
 ```
 
-**Part 3: choosing a car.** Two strategies. "Nearest" only counts floors. "LOOK" counts how many steps until the car really reaches you.
+**Doors open.** Close the doors, then decide where to go next.
 
 ```js
-class DispatchStrategy { // interface
-  choose(elevators, request) { throw new Error('not implemented'); }
-}
+class DoorsOpenState extends ElevatorState {
+    constructor() {
+        super("DoorsOpen");
+    }
 
-const minBy = (items, score) => items.reduce((best, x) => (score(x) < score(best) ? x : best));
-
-class NearestCarStrategy extends DispatchStrategy {
-  choose(elevators, request) {
-    return minBy(elevators, (car) => Math.abs(car.floor - request.floor));
-  }
-}
-
-class LookStrategy extends DispatchStrategy {
-  choose(elevators, request) {
-    return minBy(elevators, (car) => this.#cost(car, request));
-  }
-  #cost(car, request) {
-    const distance = Math.abs(car.floor - request.floor);
-    if (car.direction === Direction.IDLE) return distance;
-    const ahead = car.direction === Direction.UP ? request.floor >= car.floor : request.floor <= car.floor;
-    if (ahead && car.direction === request.direction) return distance; // picks you up on the way
-    const end = car.lastStopAhead(); // it must finish its run first, then come back
-    return Math.abs(car.floor - end) + Math.abs(end - request.floor);
-  }
+    tick(car) {
+        const next = car.nextMove();
+        car.setState(next);
+    }
 }
 ```
 
-**Part 4: the main service.** The controller owns the floors and cars, and gets its strategy from outside.
+**The `Elevator`, piece 1: its data and its stops.**
+
+```js
+class Elevator {
+    constructor(id, floorCount, startFloor = 0) {
+        this.id = id;
+        this.floor = startFloor;
+        this.direction = Direction.IDLE;
+        this.state = new IdleState();
+        // A Set: pressing 7 twice adds it once.
+        this.stops = new Set();
+
+        // One button inside the car for each floor.
+        this.buttons = [];
+        for (let floor = 0; floor < floorCount; floor++) {
+            this.buttons.push(new CarButton(floor, this));
+        }
+    }
+
+    addStop(floor) {
+        if (floor < 0 || floor >= this.buttons.length) {
+            throw new Error(`No floor ${floor}`);
+        }
+
+        // The doors are already open on this floor.
+        if (floor === this.floor && this.state instanceof DoorsOpenState) {
+            return;
+        }
+
+        this.stops.add(floor);
+    }
+```
+
+**The `Elevator`, piece 2: changing state.** The states call these methods.
+
+```js
+    hasStop(floor) {
+        return this.stops.has(floor);
+    }
+
+    // Change the state, and keep `direction` in step with it.
+    // DoorsOpen keeps the old direction, so the car still knows which way it was going.
+    setState(state) {
+        this.state = state;
+
+        if (state instanceof MovingUpState) {
+            this.direction = Direction.UP;
+        }
+        if (state instanceof MovingDownState) {
+            this.direction = Direction.DOWN;
+        }
+        if (state instanceof IdleState) {
+            this.direction = Direction.IDLE;
+        }
+    }
+
+    // Reached a stop: cross it off and open the doors.
+    arrive() {
+        this.stops.delete(this.floor);
+        this.setState(new DoorsOpenState());
+    }
+```
+
+**The `Elevator`, piece 3: where to go next.** This is LOOK: keep going the same way while there are stops ahead, then turn around.
+
+```js
+    nextMove() {
+        let stopsAbove = false;
+        let stopsBelow = false;
+        for (const stop of this.stops) {
+            if (stop > this.floor) {
+                stopsAbove = true;
+            }
+            if (stop < this.floor) {
+                stopsBelow = true;
+            }
+        }
+
+        // Stops above, and not going down: go up, or keep going up.
+        if (stopsAbove && this.direction !== Direction.DOWN) {
+            return new MovingUpState();
+        }
+
+        // Stops below: go down. If we were going down, this keeps the direction.
+        if (stopsBelow) {
+            return new MovingDownState();
+        }
+
+        // Only stops above, but we were going down: turn around.
+        if (stopsAbove) {
+            return new MovingUpState();
+        }
+
+        return new IdleState();
+    }
+```
+
+**The `Elevator`, piece 4: the end of the run, and `tick`.** These finish the `Elevator` class.
+
+```js
+    // Where this run ends: the highest stop going up, the lowest stop otherwise.
+    lastStopAhead() {
+        if (this.stops.size === 0) {
+            return this.floor;
+        }
+
+        // Sort the stops as numbers, lowest first.
+        // Without the compare function, sort() would compare them as text.
+        const sorted = Array.from(this.stops);
+        sorted.sort((first, second) => first - second);
+
+        if (this.direction === Direction.UP) {
+            return sorted[sorted.length - 1];
+        }
+
+        return sorted[0];
+    }
+
+    tick() {
+        // Let the current state decide what this step does.
+        this.state.tick(this);
+    }
+
+    toString() {
+        return `${this.id}: floor ${this.floor}, ${this.state.name}`;
+    }
+}
+```
+
+### Part 3: Choosing a car
+
+Two strategies. "Nearest" only counts floors. "LOOK" counts how many steps until the car really reaches you.
+
+**The interface, a helper, and "nearest car".** Both strategies give each car a score, and pick the car with the lowest one.
+
+```js
+// The interface: a strategy picks one car for a request.
+class DispatchStrategy {
+    choose(elevators, request) {
+        throw new Error("not implemented");
+    }
+}
+
+// scoreOf is a function that gives a car a score.
+// On a tie, the first car in the list wins.
+function pickLowest(elevators, scoreOf) {
+    let bestCar = elevators[0];
+    for (const car of elevators) {
+        if (scoreOf(car) < scoreOf(bestCar)) {
+            bestCar = car;
+        }
+    }
+
+    return bestCar;
+}
+
+class NearestCarStrategy extends DispatchStrategy {
+    choose(elevators, request) {
+        // The score is how many floors away the car is.
+        return pickLowest(elevators, (car) => Math.abs(car.floor - request.floor));
+    }
+}
+```
+
+**LOOK.** The score is the number of steps until the car reaches the caller.
+
+```js
+class LookStrategy extends DispatchStrategy {
+    choose(elevators, request) {
+        return pickLowest(elevators, (car) => this.cost(car, request));
+    }
+
+    cost(car, request) {
+        const distance = Math.abs(car.floor - request.floor);
+
+        // A free car comes straight here.
+        if (car.direction === Direction.IDLE) {
+            return distance;
+        }
+
+        // Is the caller ahead of the car, in the way it is going?
+        let isAhead;
+        if (car.direction === Direction.UP) {
+            isAhead = request.floor >= car.floor;
+        } else {
+            isAhead = request.floor <= car.floor;
+        }
+
+        // Ahead, and going the caller's way: it picks them up on the way.
+        if (isAhead && car.direction === request.direction) {
+            return distance;
+        }
+
+        // Otherwise it must finish its run first, then come back.
+        const end = car.lastStopAhead();
+        const toEnd = Math.abs(car.floor - end);
+        const endToCaller = Math.abs(end - request.floor);
+        return toEnd + endToCaller;
+    }
+}
+```
+
+### Part 4: The main service
+
+The controller owns the floors and cars, and gets its strategy from outside.
+
+**Piece 1: building the floors and cars.**
 
 ```js
 class ElevatorController {
-  constructor(floorCount, strategy) {
-    this.strategy = strategy;
-    this.elevators = [];
-    this.floors = Array.from({ length: floorCount }, (_, n) => new Floor(n, floorCount - 1, this));
-  }
-  addElevator(id, startFloor = 0) {
-    const car = new Elevator(id, this.floors.length, startFloor);
-    this.elevators.push(car);
-    return car;
-  }
-  call(request) { // a hall button was pressed. No `await` between choosing and adding the stop.
-    const car = this.strategy.choose(this.elevators, request);
-    car.addStop(request.floor);
-    return car;
-  }
-  tick() { for (const car of this.elevators) car.tick(); }
-  status() { return this.elevators.join(' | '); }
+    constructor(floorCount, strategy) {
+        this.strategy = strategy;
+        this.elevators = [];
+
+        // Floors 0 to floorCount - 1. The top floor is floorCount - 1.
+        this.floors = [];
+        for (let number = 0; number < floorCount; number++) {
+            this.floors.push(new Floor(number, floorCount - 1, this));
+        }
+    }
+
+    addElevator(id, startFloor = 0) {
+        const car = new Elevator(id, this.floors.length, startFloor);
+        this.elevators.push(car);
+        return car;
+    }
+```
+
+**Piece 2: calls, ticks and status.** These finish the `ElevatorController` class.
+
+```js
+    // A hall button was pressed.
+    // No await between choosing the car and adding the stop.
+    call(request) {
+        const car = this.strategy.choose(this.elevators, request);
+        car.addStop(request.floor);
+        return car;
+    }
+
+    // Move time one step for every car.
+    tick() {
+        for (const car of this.elevators) {
+            car.tick();
+        }
+    }
+
+    // One line about every car, like "A: floor 3, MovingDown | B: floor 8, Idle".
+    status() {
+        const parts = this.elevators.map((car) => car.toString());
+        return parts.join(" | ");
+    }
 }
 ```
 
-**Part 5: try it.** Car A is at floor 4 and car B is at floor 8.
+### Part 5: Try it
+
+Car A is at floor 4 and car B is at floor 8.
+
+**A rider in car A goes down.**
 
 ```js
-const building = new ElevatorController(10, new LookStrategy()); // floors 0 to 9
-const a = building.addElevator('A', 4);
-const b = building.addElevator('B', 8);
+// Floors 0 to 9, using the LOOK rule.
+const building = new ElevatorController(10, new LookStrategy());
+const carA = building.addElevator("A", 4);
+const carB = building.addElevator("B", 8);
 
-a.buttons[0].press(); // a rider in car A wants the ground floor
+// A rider in car A wants the ground floor.
+carA.buttons[0].press();
 building.tick();
 console.log(building.status()); // A: floor 3, MovingDown | B: floor 8, Idle
+```
 
-// Someone on floor 5 wants to go up. Which car should come?
+**Someone on floor 5 wants to go up.** Which car should come?
+
+```js
 const request = new Request(5, Direction.UP);
-console.log(new NearestCarStrategy().choose(building.elevators, request).id); // A
-console.log(building.floors[5].upButton.press().id); // B
+const nearestRule = new NearestCarStrategy();
+const nearestCar = nearestRule.choose(building.elevators, request);
+console.log(nearestCar.id); // A
 
+// The building uses LOOK when the real button is pressed.
+const chosenCar = building.floors[5].upButton.press();
+console.log(chosenCar.id); // B
+```
+
+"Nearest car" picks A: it is only 2 floors from floor 5. But A is going **down** to floor 0, so the rider waits 3 + 5 = 8 steps. LOOK picks B: it is free and 3 steps away.
+
+**Let time run.**
+
+```js
 building.tick();
 console.log(building.status()); // A: floor 2, MovingDown | B: floor 7, MovingDown
+
 building.tick();
 building.tick();
 console.log(building.status()); // A: floor 0, DoorsOpen | B: floor 5, DoorsOpen
 
-b.buttons[9].press(); // the new rider in B wants floor 9
+// The new rider in B wants floor 9.
+carB.buttons[9].press();
 building.tick();
 console.log(building.status()); // A: floor 0, Idle | B: floor 5, MovingUp
-for (let i = 0; i < 4; i++) building.tick();
+
+for (let i = 0; i < 4; i++) {
+    building.tick();
+}
 console.log(building.status()); // A: floor 0, Idle | B: floor 9, DoorsOpen
-
-try { a.addStop(12); } catch (e) { console.log(e.message); } // No floor 12
-
-building.strategy = new NearestCarStrategy(); // swap the rule; nothing else changes
-console.log(building.floors[1].upButton.press().id); // A
 ```
 
-"Nearest car" picks A: it is only 2 floors from floor 5. But A is going **down** to floor 0, so the rider waits 3 + 5 = 8 steps. LOOK picks B: it is free and 3 steps away.
+**A floor that doesn't exist, and a new rule.** Swapping the rule changes nothing else.
+
+```js
+try {
+    carA.addStop(12);
+} catch (error) {
+    console.log(error.message); // No floor 12
+}
+
+building.strategy = new NearestCarStrategy();
+const carForFloor1 = building.floors[1].upButton.press();
+console.log(carForFloor1.id); // A
+```
 
 ## Step 6: Edge cases and extensions
 
@@ -417,9 +689,14 @@ In JavaScript, each button press is one event, and the event loop runs one event
 ```js
 // NOT SAFE. A fragment, not runnable on its own.
 async call(request) {
-  const car = this.strategy.choose(this.elevators, request); // chosen from where the cars are now
-  await this.log.save(request);                              // ticks run while we wait; the cars move on
-  car.addStop(request.floor);                                // the choice may be out of date
+    // Chosen from where the cars are now.
+    const car = this.strategy.choose(this.elevators, request);
+
+    // Ticks run while we wait, and the cars move on.
+    await this.log.save(request);
+
+    // The choice may be out of date.
+    car.addStop(request.floor);
 }
 ```
 

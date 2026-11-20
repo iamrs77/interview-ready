@@ -44,9 +44,12 @@ A **UUID** (universally unique identifier) is a 128-bit ID, written like `550e84
 - **UUID v7** starts with a timestamp, followed by random bits, so it is **sorted by time**. It was standardized in 2024.
 
 ```js
-import { randomUUID } from 'node:crypto';
+import { randomUUID } from "node:crypto";
 
-randomUUID(); // 'b3e1c0a2-5f1e-4c8e-9a51-2f7d6c1e9b44' (v4, random)
+// A v4 UUID: random, so it is different every time
+const id = randomUUID();
+
+console.log(id); // b3e1c0a2-5f1e-4c8e-9a51-2f7d6c1e9b44
 ```
 
 | Good | Bad |
@@ -75,28 +78,89 @@ flowchart LR
 
 Because the timestamp comes **first**, a bigger ID almost always means a newer ID. Each server makes IDs **on its own**, with no network call. One server can make up to 4,096 IDs per millisecond, which is about 4 million per second.
 
+In code, in four small steps.
+
+**Step 1: The starting values.** The numbers end in `n`. That makes them **BigInts**, a JavaScript number type that can hold 64 bits safely.
+
 ```js
-const EPOCH = 1288834974657n; // Twitter's chosen start date, in November 2010
+// Twitter's chosen start date (the epoch), in November 2010, in milliseconds
+const EPOCH = 1288834974657n;
+
+// The millisecond of the last ID we made, and the counter inside it
 let lastMs = -1n;
 let sequence = 0n;
+```
 
-function nextId(machineId) {
-  if (machineId < 0 || machineId > 1023) throw new Error('Machine ID must fit in 10 bits (0 to 1023).');
-  let now = BigInt(Date.now());
-  if (now < lastMs) throw new Error('Clock moved backward. Refusing to make IDs.');
+**Step 2: Two helpers.** One waits for the clock to tick forward. The other packs the three parts into one number.
 
-  if (now === lastMs) {
-    sequence = (sequence + 1n) & 4095n;              // keep it to 12 bits
-    if (sequence === 0n) {                           // used all 4,096 this millisecond
-      while (now <= lastMs) now = BigInt(Date.now()); // wait for the next one
+```js
+// Keep reading the clock until it moves past lastMs
+function waitForNextMillisecond() {
+    let now = BigInt(Date.now());
+
+    while (now <= lastMs) {
+        now = BigInt(Date.now());
     }
-  } else {
-    sequence = 0n;
-  }
-  lastMs = now;
 
-  return ((now - EPOCH) << 22n) | (BigInt(machineId) << 12n) | sequence;
+    return now;
 }
+
+// Line the parts up: [ timestamp: 41 bits ][ machine ID: 10 bits ][ sequence: 12 bits ]
+function buildId(now, machineId, sequence) {
+    // "<< 22n" moves the timestamp 22 bits to the left, to make room for the other parts
+    const timePart = (now - EPOCH) << 22n;
+
+    // "<< 12n" moves the machine ID 12 bits to the left, to make room for the sequence
+    const machinePart = BigInt(machineId) << 12n;
+
+    // "|" joins the parts. They don't overlap, so this works like adding them.
+    return timePart | machinePart | sequence;
+}
+```
+
+**Step 3: Make the next ID.**
+
+```js
+function nextId(machineId) {
+    if (machineId < 0 || machineId > 1023) {
+        throw new Error("Machine ID must fit in 10 bits (0 to 1023).");
+    }
+
+    let now = BigInt(Date.now());
+
+    if (now < lastMs) {
+        throw new Error("Clock moved backward. Refusing to make IDs.");
+    }
+
+    if (now === lastMs) {
+        // Same millisecond as the last ID: count up
+        sequence = sequence + 1n;
+
+        // The sequence has 12 bits, so it only goes up to 4095.
+        // Past that, all 4,096 IDs of this millisecond are used: wait for the next one.
+        if (sequence > 4095n) {
+            sequence = 0n;
+            now = waitForNextMillisecond();
+        }
+    } else {
+        // A new millisecond: start counting from 0 again
+        sequence = 0n;
+    }
+
+    lastMs = now;
+
+    return buildId(now, machineId, sequence);
+}
+```
+
+**Step 4: Use it.** IDs made later are bigger.
+
+```js
+const firstId = nextId(7);
+const secondId = nextId(7);
+
+console.log(firstId); // 2123844905603198976n (the "n" means BigInt)
+console.log(secondId > firstId); // true
 ```
 
 Things to watch:

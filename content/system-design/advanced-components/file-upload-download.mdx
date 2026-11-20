@@ -74,14 +74,19 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const s3 = new S3Client({ region: "ap-south-1" });
 
-// The server picks the key, never the user
-const key = `uploads/${userId}/${crypto.randomUUID()}.jpg`;
+// The server picks the file's name (its "key"), never the user
+const fileId = crypto.randomUUID();
+const key = `uploads/${userId}/${fileId}.jpg`;
 
-const url = await getSignedUrl(
-  s3,
-  new PutObjectCommand({ Bucket: "my-app-uploads", Key: key, ContentType: "image/jpeg" }),
-  { expiresIn: 900 } // valid for 15 minutes
-);
+// The one upload we allow: this bucket, this key, this file type
+const command = new PutObjectCommand({
+    Bucket: "my-app-uploads",
+    Key: key,
+    ContentType: "image/jpeg",
+});
+
+// Sign it. The URL works for 900 seconds (15 minutes).
+const url = await getSignedUrl(s3, command, { expiresIn: 900 });
 ```
 
 ### Keeping it safe

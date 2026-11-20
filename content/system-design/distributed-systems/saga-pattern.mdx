@@ -115,28 +115,37 @@ You can build an orchestrator yourself, but tools do the hard parts (saving prog
 
 Here is the shape of a saga as code. With a tool like Temporal, each call is saved, so a crash halfway doesn't lose the progress:
 
-```ts
-async function bookTrip(trip: Trip) {
-  const undo: Array<() => Promise<void>> = [];
-  try {
-    // Add each undo BEFORE its step runs (see below why)
-    undo.push(() => cancelFlight(trip));
-    await bookFlight(trip);
+```js
+async function bookTrip(trip) {
+    // A list of undo functions. "() => cancelFlight(trip)" is a small
+    // function: we save it now, and call it later only if something fails.
+    const undoSteps = [];
 
-    undo.push(() => cancelHotel(trip));
-    await bookHotel(trip);
+    try {
+        // Add each undo BEFORE its step runs (see below why)
+        undoSteps.push(() => cancelFlight(trip));
+        await bookFlight(trip);
 
-    undo.push(() => refundCard(trip));
-    await chargeCard(trip);
+        undoSteps.push(() => cancelHotel(trip));
+        await bookHotel(trip);
 
-    undo.push(() => cancelCar(trip));      // the last step too: its reply can be lost
-    await rentCar(trip);
-  } catch (err) {
-    for (const step of undo.reverse()) {  // undo in reverse order
-      await retryUntilDone(step);         // retry with backoff until it works
+        undoSteps.push(() => refundCard(trip));
+        await chargeCard(trip);
+
+        // The last step too: its reply can be lost
+        undoSteps.push(() => cancelCar(trip));
+        await rentCar(trip);
+    } catch (error) {
+        // Undo in reverse order: the newest step first
+        undoSteps.reverse();
+
+        for (const undoStep of undoSteps) {
+            // Retry with backoff until it works
+            await retryUntilDone(undoStep);
+        }
+
+        throw error;
     }
-    throw err;
-  }
 }
 ```
 

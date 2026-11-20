@@ -27,23 +27,47 @@ If "is a" sounds wrong, or only half true, the answer is composition.
 
 Let's model ducks with inheritance. A normal duck flies and quacks. A rubber duck squeaks and can't fly. A wooden duck can't do either.
 
+**Step 1: The parent.** A normal duck flies and quacks:
+
 ```js
 class Duck {
-  fly() { return 'flaps its wings'; }
-  quack() { return 'Quack!'; }
-}
+    fly() {
+        return "flaps its wings";
+    }
 
+    quack() {
+        return "Quack!";
+    }
+}
+```
+
+**Step 2: The children.** Each one overrides what it can't do:
+
+```js
 class RubberDuck extends Duck {
-  fly() { return "can't fly"; } // override just to switch it off
-  quack() { return 'Squeak!'; }
+    // Override fly() just to switch it off
+    fly() {
+        return "can't fly";
+    }
+
+    quack() {
+        return "Squeak!";
+    }
 }
 
 class WoodenDuck extends Duck {
-  fly() { return "can't fly"; } // the same code, copied again
-  quack() { return '...'; }
+    // The same code, copied again
+    fly() {
+        return "can't fly";
+    }
+
+    quack() {
+        return "...";
+    }
 }
 
-console.log(new RubberDuck().fly()); // can't fly
+const rubberDuck = new RubberDuck();
+console.log(rubberDuck.fly()); // can't fly
 ```
 
 ```mermaid
@@ -71,42 +95,104 @@ It gets worse quickly:
 
 ## The fix: a duck that has parts
 
-Pull each behavior out into its own small part, behind an interface. The duck **has** a fly part and a quack part, and asks them to do the work:
+Pull each behavior out into its own small part, behind an interface. The duck **has** a fly part and a quack part, and asks them to do the work.
+
+**Step 1: The fly parts.** One interface, and one small class for each way of flying:
 
 ```js
-class FlyBehavior { // interface
-  fly() { throw new Error('not implemented'); }
+// interface
+class FlyBehavior {
+    fly() {
+        throw new Error("not implemented");
+    }
 }
-class FlyWithWings extends FlyBehavior { fly() { return 'flaps its wings'; } }
-class NoFly extends FlyBehavior { fly() { return "can't fly"; } }
-class RocketFly extends FlyBehavior { fly() { return 'zooms with a rocket!'; } }
 
-class QuackBehavior { // interface
-  quack() { throw new Error('not implemented'); }
+class FlyWithWings extends FlyBehavior {
+    fly() {
+        return "flaps its wings";
+    }
 }
-class Quack extends QuackBehavior { quack() { return 'Quack!'; } }
-class Squeak extends QuackBehavior { quack() { return 'Squeak!'; } }
 
+class NoFly extends FlyBehavior {
+    fly() {
+        return "can't fly";
+    }
+}
+
+class RocketFly extends FlyBehavior {
+    fly() {
+        return "zooms with a rocket!";
+    }
+}
+```
+
+**Step 2: The quack parts.** The same idea for quacking:
+
+```js
+// interface
+class QuackBehavior {
+    quack() {
+        throw new Error("not implemented");
+    }
+}
+
+class Quack extends QuackBehavior {
+    quack() {
+        return "Quack!";
+    }
+}
+
+class Squeak extends QuackBehavior {
+    quack() {
+        return "Squeak!";
+    }
+}
+```
+
+**Step 3: The duck.** It holds one fly part and one quack part, and asks them to do the work:
+
+```js
 class Duck {
-  #flyer;
-  #quacker;
+    // The # makes these fields private: only Duck's own code can use them
+    #flyer;
+    #quacker;
 
-  constructor(name, flyer, quacker) {
-    this.name = name;
-    this.#flyer = flyer; // the duck HAS a way of flying
-    this.#quacker = quacker; // and a way of quacking
-  }
+    constructor(name, flyer, quacker) {
+        this.name = name;
 
-  fly() { console.log(`${this.name} ${this.#flyer.fly()}`); }
-  quack() { console.log(`${this.name} says ${this.#quacker.quack()}`); }
-  setFlyBehavior(flyer) { this.#flyer = flyer; } // swap a part while running
+        // The duck HAS a way of flying and a way of quacking
+        this.#flyer = flyer;
+        this.#quacker = quacker;
+    }
+
+    fly() {
+        const flyText = this.#flyer.fly();
+        console.log(`${this.name} ${flyText}`);
+    }
+
+    quack() {
+        const quackText = this.#quacker.quack();
+        console.log(`${this.name} says ${quackText}`);
+    }
+
+    // Swap the fly part while the program runs
+    setFlyBehavior(flyer) {
+        this.#flyer = flyer;
+    }
 }
+```
 
-const mallard = new Duck('Mallard', new FlyWithWings(), new Quack());
-const rubber = new Duck('Rubber duck', new NoFly(), new Squeak());
+**Step 4: Use it.** Build each duck from the parts it needs:
+
+```js
+const mallard = new Duck("Mallard", new FlyWithWings(), new Quack());
+const rubber = new Duck("Rubber duck", new NoFly(), new Squeak());
+
 mallard.fly(); // Mallard flaps its wings
 rubber.fly(); // Rubber duck can't fly
 rubber.quack(); // Rubber duck says Squeak!
+
+// Give the rubber duck a rocket while the program runs
 rubber.setFlyBehavior(new RocketFly());
 rubber.fly(); // Rubber duck zooms with a rocket!
 ```

@@ -59,14 +59,27 @@ The "API" is what producers and consumers can do. Real systems like Kafka use a 
 
 ```js
 // Producer: send a message
-await producer.send({ topic: 'orders', key: 'user-42', value: '{"orderId": 7}' });
-// → { partition: 3, offset: 1042 }
+const sent = await producer.send({
+    topic: "orders",
+    key: "user-42",
+    value: JSON.stringify({ orderId: 7 }),
+});
 
-// Consumer: read a batch, starting from where this group left off
-const messages = await consumer.poll({ topic: 'orders', group: 'email-service', max: 100 });
+console.log(sent); // { partition: 3, offset: 1042 }
+
+// Consumer: read a batch of up to 100, starting from where this group left off
+const messages = await consumer.poll({
+    topic: "orders",
+    group: "email-service",
+    max: 100,
+});
 
 // Consumer: save progress ("we are done with 1042, so next time start at 1043")
-await consumer.commit({ topic: 'orders', partition: 3, offset: 1043 });
+await consumer.commit({
+    topic: "orders",
+    partition: 3,
+    offset: 1043,
+});
 ```
 
 Notice the consumer **asks** for messages. This is a **pull** model. Each consumer reads at its own speed, so a slow consumer is never flooded (see [Backpressure](../reliability-security/backpressure.mdx)).

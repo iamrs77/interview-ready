@@ -145,161 +145,333 @@ sequenceDiagram
 
 ## Step 5: Code
 
-**Part 1: the enum and small classes.** `Snake` and `Ladder` check their own direction when they are made.
+The code comes in small parts. Paste them together in order, and they run as one file.
+
+### Part 1: The enum and the jump
+
+A `Jump` is "land on `from`, go to `to`". Snakes and ladders are both jumps.
 
 ```js
-const GameStatus = Object.freeze({ IN_PROGRESS: 'IN_PROGRESS', FINISHED: 'FINISHED' });
+const GameStatus = {
+    IN_PROGRESS: "IN_PROGRESS",
+    FINISHED: "FINISHED",
+};
 
-class Jump { // abstract: land on `from`, go to `to`
-  constructor(from, to) {
-    if (new.target === Jump) throw new Error('Jump is abstract');
-    this.from = from;
-    this.to = to;
-  }
-  describe() { throw new Error('not implemented'); }
+// Abstract: we only make a Snake or a Ladder, never a plain Jump.
+class Jump {
+    constructor(from, to) {
+        // this.constructor is the class that `new` was called with.
+        if (this.constructor === Jump) {
+            throw new Error("Jump is abstract");
+        }
+
+        this.from = from;
+        this.to = to;
+    }
+
+    describe() {
+        throw new Error("not implemented");
+    }
 }
+```
 
+### Part 2: Snakes and ladders
+
+Each one checks its own direction when it is made: a snake must go down, and a ladder must go up.
+
+```js
 class Snake extends Jump {
-  constructor(head, tail) {
-    if (tail >= head) throw new Error(`A snake must go down: ${head} -> ${tail}`);
-    super(head, tail);
-  }
-  describe() { return `snake down to ${this.to}`; }
+    constructor(head, tail) {
+        if (tail >= head) {
+            throw new Error(`A snake must go down: ${head} -> ${tail}`);
+        }
+
+        super(head, tail);
+    }
+
+    describe() {
+        return `snake down to ${this.to}`;
+    }
 }
 
 class Ladder extends Jump {
-  constructor(bottom, top) {
-    if (top <= bottom) throw new Error(`A ladder must go up: ${bottom} -> ${top}`);
-    super(bottom, top);
-  }
-  describe() { return `ladder up to ${this.to}`; }
-}
+    constructor(bottom, top) {
+        if (top <= bottom) {
+            throw new Error(`A ladder must go up: ${bottom} -> ${top}`);
+        }
 
-class Player {
-  constructor(name) {
-    this.name = name;
-    this.position = 0; // 0 = not on the board yet
-  }
+        super(bottom, top);
+    }
+
+    describe() {
+        return `ladder up to ${this.to}`;
+    }
 }
 ```
 
-**Part 2: the dice, the rule and the board.** Each dice and each rule is a small class behind an interface.
+### Part 3: A player
+
+A player starts off the board, at cell 0.
 
 ```js
-class Dice { // interface
-  roll() { throw new Error('not implemented'); }
-}
-class RandomDice extends Dice {
-  constructor(faces = 6, random = Math.random) { // pass a seeded random function for repeatable games
-    super();
-    this.faces = faces;
-    this.random = random;
-  }
-  roll() { return 1 + Math.floor(this.random() * this.faces); }
-}
-class FixedDice extends Dice { // for tests and demos: rolls the given numbers, in order
-  #rolls;
-  #next = 0;
-  constructor(rolls) {
-    super();
-    this.#rolls = rolls;
-  }
-  roll() { return this.#rolls[this.#next++ % this.#rolls.length]; }
-}
-
-class MoveRule { // interface: where does this roll take you?
-  target(from, roll, size) { throw new Error('not implemented'); }
-}
-class ExactFinishRule extends MoveRule { // the normal rule: no move if you would go past the end
-  target(from, roll, size) { return from + roll > size ? from : from + roll; }
-}
-
-class Board {
-  #jumps = new Map(); // start cell -> Jump
-  constructor(size = 100) { this.size = size; }
-  addSnake(head, tail) { return this.#add(new Snake(head, tail)); }
-  addLadder(bottom, top) { return this.#add(new Ladder(bottom, top)); }
-  jumpAt(cell) { return this.#jumps.get(cell) ?? null; }
-
-  #add(jump) {
-    if (jump.from < 1 || jump.to < 1 || jump.from > this.size || jump.to > this.size) {
-      throw new Error(`${jump.from} -> ${jump.to} is not on the board`);
+class Player {
+    constructor(name) {
+        this.name = name;
+        // 0 means "not on the board yet".
+        this.position = 0;
     }
-    if (jump.from === this.size) throw new Error('Nothing can start on the last cell');
-    if (this.#jumps.has(jump.from)) throw new Error(`Cell ${jump.from} already has a snake or ladder`);
-    const ends = new Set([...this.#jumps.values()].map((j) => j.to));
-    if (this.#jumps.has(jump.to) || ends.has(jump.from)) throw new Error('No chains: a jump cannot end where another starts');
-    this.#jumps.set(jump.from, jump);
-    return this; // so calls can be chained
-  }
 }
 ```
 
-**Part 3: the main service.** `Game` gets the board, players, dice and rule from outside. One `playTurn()` is one turn.
+### Part 4: The dice
+
+`Dice` is the "interface": a base class whose method only throws. `RandomDice` is for real games.
+
+```js
+// Interface: every dice has a roll() method.
+class Dice {
+    roll() {
+        throw new Error("not implemented");
+    }
+}
+
+class RandomDice extends Dice {
+    // Pass your own seeded random function to get the same game every time.
+    constructor(faces = 6, random = Math.random) {
+        super();
+        this.faces = faces;
+        this.random = random;
+    }
+
+    roll() {
+        // random() gives a number from 0 up to 1 (never 1 itself).
+        const fromZero = Math.floor(this.random() * this.faces);
+        return fromZero + 1;
+    }
+}
+```
+
+`FixedDice` is for tests and demos. It rolls the numbers you give it, in order.
+
+```js
+class FixedDice extends Dice {
+    constructor(rolls) {
+        super();
+        this.rolls = rolls;
+        this.nextIndex = 0;
+    }
+
+    roll() {
+        const roll = this.rolls[this.nextIndex];
+
+        // Move to the next number. After the last one, start again from the first.
+        this.nextIndex = (this.nextIndex + 1) % this.rolls.length;
+        return roll;
+    }
+}
+```
+
+### Part 5: The move rule
+
+The rule says where a roll takes you. The normal rule: if you would go past the end, you don't move.
+
+```js
+// Interface: where does this roll take you?
+class MoveRule {
+    target(from, roll, size) {
+        throw new Error("not implemented");
+    }
+}
+
+class ExactFinishRule extends MoveRule {
+    target(from, roll, size) {
+        const newPosition = from + roll;
+        if (newPosition > size) {
+            return from;
+        }
+        return newPosition;
+    }
+}
+```
+
+### Part 6: The board
+
+The board keeps every jump by its start cell. The class goes on over the next two blocks.
+
+```js
+class Board {
+    constructor(size = 100) {
+        this.size = size;
+        // start cell -> Jump
+        this.jumps = new Map();
+    }
+
+    addSnake(head, tail) {
+        return this.add(new Snake(head, tail));
+    }
+
+    addLadder(bottom, top) {
+        return this.add(new Ladder(bottom, top));
+    }
+
+    // The jump that starts on this cell, or null.
+    jumpAt(cell) {
+        if (!this.jumps.has(cell)) {
+            return null;
+        }
+        return this.jumps.get(cell);
+    }
+```
+
+**Checking a new jump.** `add` refuses a jump that doesn't make sense on this board. It returns the board, so calls can be chained.
+
+```js
+    add(jump) {
+        const startsOnBoard = jump.from >= 1 && jump.from <= this.size;
+        const endsOnBoard = jump.to >= 1 && jump.to <= this.size;
+        if (!startsOnBoard || !endsOnBoard) {
+            throw new Error(`${jump.from} -> ${jump.to} is not on the board`);
+        }
+
+        if (jump.from === this.size) {
+            throw new Error("Nothing can start on the last cell");
+        }
+
+        if (this.jumps.has(jump.from)) {
+            throw new Error(`Cell ${jump.from} already has a snake or ladder`);
+        }
+
+        // No chains: a jump can't end where another starts, or start where another ends.
+        if (this.jumps.has(jump.to) || this.endsAt(jump.from)) {
+            throw new Error("No chains: a jump cannot end where another starts");
+        }
+
+        this.jumps.set(jump.from, jump);
+        return this;
+    }
+```
+
+**Finding where jumps end.** A small helper for the "no chains" check.
+
+```js
+    // Does any jump end on this cell?
+    endsAt(cell) {
+        for (const jump of this.jumps.values()) {
+            if (jump.to === cell) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+```
+
+### Part 7: The game
+
+`Game` is the main service. It gets the board, players, dice and rule from outside. The class goes on over the next two blocks.
 
 ```js
 class Game {
-  #board;
-  #players;
-  #dice;
-  #rule;
-  #turn = 0;
-  constructor(board, players, dice, rule = new ExactFinishRule()) {
-    if (players.length < 2) throw new Error('Need at least 2 players');
-    this.#board = board;
-    this.#players = players;
-    this.#dice = dice;
-    this.#rule = rule;
-    this.status = GameStatus.IN_PROGRESS;
-    this.winner = null;
-  }
-  get currentPlayer() { return this.#players[this.#turn]; }
+    constructor(board, players, dice, rule = new ExactFinishRule()) {
+        if (players.length < 2) {
+            throw new Error("Need at least 2 players");
+        }
 
-  playTurn() {
-    if (this.status === GameStatus.FINISHED) throw new Error(`Game over. ${this.winner.name} won.`);
-    const player = this.currentPlayer;
-    const roll = this.#dice.roll();
-    const from = player.position;
-    const target = this.#rule.target(from, roll, this.#board.size);
-    let text = `${player.name} rolled ${roll}: `;
-    if (target === from) {
-      text += `${from + roll} is past ${this.#board.size}, stays at ${from}`;
-    } else {
-      const jump = this.#board.jumpAt(target);
-      player.position = jump ? jump.to : target;
-      text += `${from} -> ${target}${jump ? `, ${jump.describe()}` : ''}`;
+        this.board = board;
+        this.players = players;
+        this.dice = dice;
+        this.rule = rule;
+        // The index of the player whose turn it is.
+        this.turn = 0;
+        this.status = GameStatus.IN_PROGRESS;
+        this.winner = null;
     }
-    if (player.position === this.#board.size) {
-      this.status = GameStatus.FINISHED;
-      this.winner = player;
-      return `${text}. ${player.name} wins!`;
-    }
-    this.#turn = (this.#turn + 1) % this.#players.length; // next player
-    return text;
-  }
 
-  play(maxTurns = 10_000) { // the game loop; maxTurns stops a broken test dice from looping forever
-    const log = [];
-    while (this.status === GameStatus.IN_PROGRESS && log.length < maxTurns) log.push(this.playTurn());
-    return log;
-  }
+    currentPlayer() {
+        return this.players[this.turn];
+    }
+```
+
+**One turn.** `playTurn` rolls, moves, checks for a win, and passes the turn on. `play` is the game loop: it plays turns until someone wins.
+
+```js
+    playTurn() {
+        if (this.status === GameStatus.FINISHED) {
+            throw new Error(`Game over. ${this.winner.name} won.`);
+        }
+
+        const player = this.currentPlayer();
+        const roll = this.dice.roll();
+        const text = this.move(player, roll);
+
+        if (player.position === this.board.size) {
+            this.status = GameStatus.FINISHED;
+            this.winner = player;
+            return `${text}. ${player.name} wins!`;
+        }
+
+        // Next player. After the last player, go back to the first.
+        this.turn = (this.turn + 1) % this.players.length;
+        return text;
+    }
+
+    // maxTurns stops a broken test dice from looping forever.
+    play(maxTurns = 10000) {
+        const log = [];
+        while (this.status === GameStatus.IN_PROGRESS && log.length < maxTurns) {
+            const line = this.playTurn();
+            log.push(line);
+        }
+        return log;
+    }
+```
+
+**Moving a player.** `move` asks the rule where the roll goes, follows a snake or ladder, and returns a line of text about the move.
+
+```js
+    move(player, roll) {
+        const from = player.position;
+        const target = this.rule.target(from, roll, this.board.size);
+        const start = `${player.name} rolled ${roll}: `;
+
+        // The rule said "don't move".
+        if (target === from) {
+            return `${start}${from + roll} is past ${this.board.size}, stays at ${from}`;
+        }
+
+        player.position = target;
+
+        const jump = this.board.jumpAt(target);
+        if (jump === null) {
+            return `${start}${from} -> ${target}`;
+        }
+
+        // Follow the snake or ladder. The game never asks which one it is.
+        player.position = jump.to;
+        return `${start}${from} -> ${target}, ${jump.describe()}`;
+    }
 }
 ```
 
-**Part 4: try it.** A `FixedDice` makes the game the same every time.
+### Part 8: Try it
+
+A `FixedDice` makes the game the same every time. Each `add` call returns the board, so the calls are chained.
 
 ```js
-const show = (fn) => { try { return fn(); } catch (e) { console.log(e.message); } };
-
 const board = new Board(100)
-  .addLadder(4, 56)
-  .addLadder(59, 96)
-  .addSnake(14, 7)
-  .addSnake(98, 12);
-const players = [new Player('Asha'), new Player('Ravi')];
-const game = new Game(board, players, new FixedDice([4, 5, 3, 6, 6, 3, 4]));
+    .addLadder(4, 56)
+    .addLadder(59, 96)
+    .addSnake(14, 7)
+    .addSnake(98, 12);
 
-for (const line of game.play()) console.log(line);
+const players = [new Player("Asha"), new Player("Ravi")];
+const dice = new FixedDice([4, 5, 3, 6, 6, 3, 4]);
+const game = new Game(board, players, dice);
+
+const lines = game.play();
+for (const line of lines) {
+    console.log(line);
+}
 // Asha rolled 4: 0 -> 4, ladder up to 56
 // Ravi rolled 5: 0 -> 5
 // Asha rolled 3: 56 -> 59, ladder up to 96
@@ -309,10 +481,23 @@ for (const line of game.play()) console.log(line);
 // Asha rolled 4: 96 -> 100. Asha wins!
 
 console.log(game.status, game.winner.name); // FINISHED Asha
-show(() => game.playTurn()); // Game over. Asha won.
-show(() => board.addSnake(20, 30)); // A snake must go down: 20 -> 30
-show(() => board.addLadder(14, 40)); // Cell 14 already has a snake or ladder
-show(() => board.addLadder(50, 98)); // No chains: a jump cannot end where another starts
+```
+
+Things that are refused. `printError` runs an action and prints the error message if it throws.
+
+```js
+function printError(action) {
+    try {
+        return action();
+    } catch (error) {
+        console.log(error.message);
+    }
+}
+
+printError(() => game.playTurn()); // Game over. Asha won.
+printError(() => board.addSnake(20, 30)); // A snake must go down: 20 -> 30
+printError(() => board.addLadder(14, 40)); // Cell 14 already has a snake or ladder
+printError(() => board.addLadder(50, 98)); // No chains: a jump cannot end where another starts
 ```
 
 For a real game, use `new RandomDice()`. Nothing else changes.
@@ -344,15 +529,21 @@ On one computer, players take turns, so nothing runs at the same time. Online, i
 ```js
 // Add to the code above. An online game refuses a roll from the wrong player.
 class OnlineGame extends Game {
-  playTurnFor(name) {
-    if (this.currentPlayer.name !== name) throw new Error(`Not your turn, ${name}`);
-    return this.playTurn();
-  }
+    playTurnFor(name) {
+        if (this.currentPlayer().name !== name) {
+            throw new Error(`Not your turn, ${name}`);
+        }
+
+        return this.playTurn();
+    }
 }
-const online = new OnlineGame(new Board(100), [new Player('Asha'), new Player('Ravi')], new FixedDice([2]));
-show(() => online.playTurnFor('Ravi')); // Not your turn, Ravi
-console.log(online.playTurnFor('Asha')); // Asha rolled 2: 0 -> 2
-show(() => online.playTurnFor('Asha')); // Not your turn, Asha
+
+const onlinePlayers = [new Player("Asha"), new Player("Ravi")];
+const online = new OnlineGame(new Board(100), onlinePlayers, new FixedDice([2]));
+
+printError(() => online.playTurnFor("Ravi")); // Not your turn, Ravi
+console.log(online.playTurnFor("Asha")); // Asha rolled 2: 0 -> 2
+printError(() => online.playTurnFor("Asha")); // Not your turn, Asha
 ```
 
 With many servers, keep each game on one server, or save each move with its turn number, so that only one save for "turn 7" can win. See [Race Conditions and Locks](../concurrency/race-conditions-locks.mdx).
@@ -364,13 +555,23 @@ With many servers, keep each game on one server, or save each move with its turn
 ```js
 // Add to the code above. Going past 100 bounces you back: 96 + 6 = 102, so you end on 98.
 class BounceBackRule extends MoveRule {
-  target(from, roll, size) {
-    const t = from + roll;
-    return t > size ? size - (t - size) : t;
-  }
+    target(from, roll, size) {
+        const newPosition = from + roll;
+        if (newPosition <= size) {
+            return newPosition;
+        }
+
+        // Go back by the number of steps you went past the end.
+        const stepsPast = newPosition - size;
+        return size - stepsPast;
+    }
 }
-const bouncy = new Game(new Board(100).addLadder(4, 96), [new Player('Asha'), new Player('Ravi')],
-  new FixedDice([4, 1, 6]), new BounceBackRule());
+
+const bouncyBoard = new Board(100).addLadder(4, 96);
+const bouncyPlayers = [new Player("Asha"), new Player("Ravi")];
+const bouncy = new Game(bouncyBoard, bouncyPlayers, new FixedDice([4, 1, 6]), new BounceBackRule());
+
+// Asha climbs to 96, and Ravi moves to 1. Then Asha rolls a 6.
 bouncy.playTurn();
 bouncy.playTurn();
 console.log(bouncy.playTurn()); // Asha rolled 6: 96 -> 98

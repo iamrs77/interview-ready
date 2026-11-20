@@ -53,34 +53,79 @@ The rules:
 - `take()` waits while the queue is empty;
 - each side wakes up one waiting task on the other side.
 
+**Step 1: a waiting line.** A small helper that lets a task pause until another task wakes it up:
+
+```js
+// A line of paused tasks. Each one waits until someone wakes it up.
+class WaitingLine {
+    constructor() {
+        // One wake-up function per waiting task, oldest first.
+        this.wakeUps = [];
+    }
+
+    // Gives back a promise that finishes only when wakeOne() is called.
+    // A task that awaits it stays paused until then.
+    wait() {
+        return new Promise((resolve) => {
+            // Calling resolve later finishes the promise and wakes the task.
+            this.wakeUps.push(resolve);
+        });
+    }
+
+    // Wakes the task that has waited longest. Does nothing if nobody waits.
+    wakeOne() {
+        const wakeUp = this.wakeUps.shift();
+
+        if (wakeUp) {
+            wakeUp();
+        }
+    }
+}
+```
+
+**Step 2: the queue.** It keeps two waiting lines, one for each side:
+
 ```js
 class BoundedQueue {
-  #items = [];
-  #capacity;
-  #waitingTakers = []; // consumers waiting for an item
-  #waitingPutters = []; // producers waiting for room
-
-  constructor(capacity) { this.#capacity = capacity; }
-
-  get size() { return this.#items.length; }
-  get isFull() { return this.#items.length >= this.#capacity; }
-
-  async put(item) {
-    while (this.isFull) { // full: wait until a consumer makes room
-      await new Promise((resolve) => this.#waitingPutters.push(resolve));
+    constructor(capacity) {
+        this.items = [];
+        this.capacity = capacity;
+        // Consumers waiting for an item.
+        this.waitingTakers = new WaitingLine();
+        // Producers waiting for room.
+        this.waitingPutters = new WaitingLine();
     }
-    this.#items.push(item);
-    this.#waitingTakers.shift()?.(); // wake one waiting consumer, if any
-  }
 
-  async take() {
-    while (this.size === 0) { // empty: wait until a producer adds something
-      await new Promise((resolve) => this.#waitingTakers.push(resolve));
+    isEmpty() {
+        return this.items.length === 0;
     }
-    const item = this.#items.shift();
-    this.#waitingPutters.shift()?.(); // wake one waiting producer, if any
-    return item;
-  }
+
+    isFull() {
+        return this.items.length >= this.capacity;
+    }
+
+    async put(item) {
+        // Full: pause until a consumer makes room. Then check again.
+        while (this.isFull()) {
+            await this.waitingPutters.wait();
+        }
+
+        this.items.push(item);
+        // There is an item now: wake one waiting consumer.
+        this.waitingTakers.wakeOne();
+    }
+
+    async take() {
+        // Empty: pause until a producer adds an item. Then check again.
+        while (this.isEmpty()) {
+            await this.waitingTakers.wait();
+        }
+
+        const item = this.items.shift();
+        // There is room now: wake one waiting producer.
+        this.waitingPutters.wakeOne();
+        return item;
+    }
 }
 ```
 
@@ -88,40 +133,87 @@ Notice the `while`, not `if`. When a task wakes up, another task may already hav
 
 ## Try it: 2 producers and 2 consumers
 
-Two producers take orders quickly (every 10 ms). Two cooks are slow (45 ms per order). The queue holds only 2 orders.
+Two producers take orders quickly (every 10 ms). Two cooks are slow (45 ms per order). The queue holds only 2 orders. The four parts below run together with the two classes above, as one file.
+
+**Part 1: the setup.** A `sleep` helper, a small queue, and a stop signal:
 
 ```js
-// Runs together with the BoundedQueue class above, as one file.
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const queue = new BoundedQueue(2); // room for only 2 orders
-const STOP = Symbol('stop'); // a "no more work" signal
+// Gives back a promise that finishes after "ms" milliseconds.
+function sleep(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
 
+// Room for only 2 orders.
+const queue = new BoundedQueue(2);
+
+// A special item that means "no more work: stop".
+const STOP = "STOP";
+```
+
+**Part 2: the producer.** It adds its orders one by one:
+
+```js
 async function producer(name, count) {
-  for (let i = 1; i <= count; i++) {
-    const order = `${name}-order${i}`;
-    if (queue.isFull) console.log(`${name} waits: queue full`);
-    await queue.put(order);
-    console.log(`${name} added ${order}`);
-    await sleep(10); // taking an order is quick
-  }
-}
+    for (let i = 1; i <= count; i++) {
+        const order = `${name}-order${i}`;
 
+        if (queue.isFull()) {
+            console.log(`${name} waits: queue full`);
+        }
+
+        // Wait here until the queue has room for this order.
+        await queue.put(order);
+        console.log(`${name} added ${order}`);
+
+        // Taking the next order is quick: wait 10 ms.
+        await sleep(10);
+    }
+}
+```
+
+**Part 3: the consumer.** It takes orders and cooks them until it gets the stop signal:
+
+```js
 async function consumer(name) {
-  while (true) {
-    if (queue.size === 0) console.log(`${name} waits: queue empty`);
-    const order = await queue.take();
-    if (order === STOP) return;
-    console.log(`${name} cooks ${order}`);
-    await sleep(45); // cooking is slow
-  }
-}
+    while (true) {
+        if (queue.isEmpty()) {
+            console.log(`${name} waits: queue empty`);
+        }
 
-const cooks = [consumer('C1'), consumer('C2')];
-await Promise.all([producer('P1', 3), producer('P2', 3)]);
-await queue.put(STOP); // one stop signal per consumer
+        // Wait here until there is an order to take.
+        const order = await queue.take();
+
+        if (order === STOP) {
+            return;
+        }
+
+        console.log(`${name} cooks ${order}`);
+
+        // Cooking is slow: wait 45 ms before taking the next order.
+        await sleep(45);
+    }
+}
+```
+
+**Part 4: run it.** Start the cooks first, then the producers:
+
+```js
+// Start both cooks. They wait in the background for orders.
+const cooks = [consumer("C1"), consumer("C2")];
+
+// Start both producers, and wait until all their orders are in the queue.
+await Promise.all([producer("P1", 3), producer("P2", 3)]);
+
+// One stop signal per consumer.
+// Each put waits if the queue is full.
 await queue.put(STOP);
+await queue.put(STOP);
+
+// Wait until both cooks have stopped.
 await Promise.all(cooks);
-console.log('all orders cooked');
+console.log("all orders cooked");
 ```
 
 It prints:

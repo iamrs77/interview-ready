@@ -24,17 +24,18 @@ The first version puts every level in one function:
 
 ```js
 function handleTicket(ticket) {
-  if (ticket.issue === 'password reset') {
-    return 'Bot: sent a reset link';
-  } else if (ticket.severity <= 2) {
-    return `Agent: fixed "${ticket.issue}"`;
-  } else if (ticket.severity <= 4) {
-    return `Manager: fixed "${ticket.issue}"`;
-  }
-  return `Nobody could handle "${ticket.issue}"`;
+    if (ticket.issue === "password reset") {
+        return "Bot: sent a reset link";
+    } else if (ticket.severity <= 2) {
+        return `Agent: fixed "${ticket.issue}"`;
+    } else if (ticket.severity <= 4) {
+        return `Manager: fixed "${ticket.issue}"`;
+    }
+
+    return `Nobody could handle "${ticket.issue}"`;
 }
 
-console.log(handleTicket({ issue: 'double charge', severity: 2 }));
+console.log(handleTicket({ issue: "double charge", severity: 2 }));
 // Agent: fixed "double charge"
 ```
 
@@ -73,44 +74,93 @@ classDiagram
   SupportHandler <|-- Manager
 ```
 
+The code comes in three small steps. Paste them in order into one file to run it.
+
+**Step 1: the base handler.** It holds the "pass it on" logic, so each real handler only says what it can handle.
+
 ```js
-class SupportHandler { // abstract
-  #next = null;
-  constructor() {
-    if (new.target === SupportHandler) throw new Error('SupportHandler is abstract');
-  }
-  setNext(handler) {
-    this.#next = handler;
-    return handler; // so calls can be chained: a.setNext(b).setNext(c)
-  }
-  handle(ticket) {
-    if (this.canHandle(ticket)) return `${this.constructor.name}: fixed "${ticket.issue}"`;
-    if (this.#next) return this.#next.handle(ticket); // not mine: pass it on
-    return `Nobody could handle "${ticket.issue}"`; // end of the chain
-  }
-  canHandle(ticket) { throw new Error('not implemented'); }
-}
+// The base handler. Don't create it directly: create a Bot, Agent or Manager.
+class SupportHandler {
+    constructor() {
+        this.next = null;
+    }
 
+    // It returns the handler it was given, so you can also
+    // write bot.setNext(agent).setNext(manager) in one line.
+    setNext(handler) {
+        this.next = handler;
+        return handler;
+    }
+
+    handle(ticket) {
+        if (this.canHandle(ticket)) {
+            // this.constructor.name is the class name, like "Agent".
+            const name = this.constructor.name;
+            return `${name}: fixed "${ticket.issue}"`;
+        }
+
+        // Not mine: pass it on to the next handler.
+        if (this.next) {
+            return this.next.handle(ticket);
+        }
+
+        // End of the chain, and nobody took it.
+        return `Nobody could handle "${ticket.issue}"`;
+    }
+
+    // Each handler must fill this in.
+    canHandle(ticket) {
+        throw new Error("not implemented");
+    }
+}
+```
+
+**Step 2: the three handlers.** Each one only answers "can I handle this ticket?".
+
+```js
+// The bot only handles password resets.
 class Bot extends SupportHandler {
-  canHandle(ticket) { return ticket.issue === 'password reset'; }
+    canHandle(ticket) {
+        return ticket.issue === "password reset";
+    }
 }
+
+// An agent handles easy problems: severity 1 or 2.
 class Agent extends SupportHandler {
-  canHandle(ticket) { return ticket.severity <= 2; }
+    canHandle(ticket) {
+        return ticket.severity <= 2;
+    }
 }
+
+// A manager handles anything up to severity 4.
 class Manager extends SupportHandler {
-  canHandle(ticket) { return ticket.severity <= 4; }
+    canHandle(ticket) {
+        return ticket.severity <= 4;
+    }
 }
+```
 
-const support = new Bot();
-support.setNext(new Agent()).setNext(new Manager());
+**Step 3: build the chain and use it.** Every ticket goes to the first handler, the bot.
 
-console.log(support.handle({ issue: 'password reset', severity: 1 }));
+```js
+const bot = new Bot();
+const agent = new Agent();
+const manager = new Manager();
+
+// Link them: bot, then agent, then manager.
+bot.setNext(agent);
+agent.setNext(manager);
+
+console.log(bot.handle({ issue: "password reset", severity: 1 }));
 // Bot: fixed "password reset"
-console.log(support.handle({ issue: 'double charge', severity: 2 }));
+
+console.log(bot.handle({ issue: "double charge", severity: 2 }));
 // Agent: fixed "double charge"
-console.log(support.handle({ issue: 'account hacked', severity: 4 }));
+
+console.log(bot.handle({ issue: "account hacked", severity: 4 }));
 // Manager: fixed "account hacked"
-console.log(support.handle({ issue: 'data center fire', severity: 5 }));
+
+console.log(bot.handle({ issue: "data center fire", severity: 5 }));
 // Nobody could handle "data center fire"
 ```
 
@@ -143,26 +193,60 @@ Web servers in Node use the second form. Each handler is a function that gets th
 
 ```js
 // A tiny middleware runner, like the one inside Express.
-function chain(...handlers) {
-  return (req) => {
-    let i = 0;
-    const next = () => handlers[i++]?.(req, next); // call the next handler, if any
+// It takes a list of handlers and gives back one function that runs them in order.
+function chain(handlers) {
+    return function (request) {
+        let index = 0;
+
+        // Call the next handler in the list, if there is one.
+        function next() {
+            if (index >= handlers.length) {
+                return;
+            }
+
+            const handler = handlers[index];
+            index = index + 1;
+            handler(request, next);
+        }
+
+        next();
+    };
+}
+```
+
+Three handlers. `auth` stops the request by not calling `next()`:
+
+```js
+function logger(request, next) {
+    console.log(`${request.method} ${request.path}`);
     next();
-  };
 }
 
-const logger = (req, next) => { console.log(`${req.method} ${req.path}`); next(); };
-const auth = (req, next) => {
-  if (!req.user) return console.log('401: please log in'); // stop here: no next()
-  next();
-};
-const profile = (req) => console.log(`200: hello ${req.user}`);
+function auth(request, next) {
+    // No user: stop here, and don't call next().
+    if (!request.user) {
+        console.log("401: please log in");
+        return;
+    }
 
-const app = chain(logger, auth, profile);
-app({ method: 'GET', path: '/me', user: 'asha' });
+    next();
+}
+
+function profile(request) {
+    console.log(`200: hello ${request.user}`);
+}
+```
+
+Join them into one chain and send two requests through it:
+
+```js
+const app = chain([logger, auth, profile]);
+
+app({ method: "GET", path: "/me", user: "asha" });
 // GET /me
 // 200: hello asha
-app({ method: 'GET', path: '/me' });
+
+app({ method: "GET", path: "/me" });
 // GET /me
 // 401: please log in
 ```
@@ -171,9 +255,10 @@ The same chain in Express. Each Express middleware gets `(req, res, next)`:
 
 ```js
 // Not run here: it needs the express package. Shown to compare.
-app.use(logger);         // every request goes through logger,
-app.use(auth);           // then auth,
-app.get('/me', profile); // then the route.
+// Every request goes through logger, then auth, then the route.
+app.use(logger);
+app.use(auth);
+app.get("/me", profile);
 ```
 
 Java web apps do the same with servlet filters: each filter calls `chain.doFilter(request, response)` to pass the request on.

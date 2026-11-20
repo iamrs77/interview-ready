@@ -187,110 +187,174 @@ See [Sequence Diagrams](./modeling-uml/sequence-diagrams.mdx).
 
 **Time:** 15 to 20 minutes.
 
-Write the core classes and the main flow. Not every getter, not a UI. Write small, clean methods, and talk while you type. The three parts below run together as one file.
+Write the core classes and the main flow. Not every getter, not a UI. Write small, clean methods, and talk while you type. The parts below run together as one file.
 
-**Part 1: the enum and the small classes.**
+**Part 1: the enum and the drink.** A drink is just data: a name, a price and a recipe.
 
 ```js
-// Part 1: the enum and the small classes
-const Ingredient = Object.freeze({ WATER: 'WATER', MILK: 'MILK', BEANS: 'BEANS' });
+// enum: Object.freeze locks the object, so no one can change the list
+const Ingredient = Object.freeze({
+    WATER: "WATER",
+    MILK: "MILK",
+    BEANS: "BEANS",
+});
 
 class Drink {
-  constructor(name, price, recipe) {
-    this.name = name;
-    this.price = price;
-    this.recipe = recipe; // ingredient -> amount, like { MILK: 150 }
-  }
-}
+    constructor(name, price, recipe) {
+        this.name = name;
+        this.price = price;
 
-class Inventory {
-  #stock = new Map(); // ingredient -> amount left
-
-  refill(ingredient, amount) {
-    if (!Object.values(Ingredient).includes(ingredient)) throw new Error(`Unknown ingredient: ${ingredient}`);
-    if (amount <= 0) throw new Error('Amount must be positive');
-    this.#stock.set(ingredient, this.#amountOf(ingredient) + amount);
-  }
-
-  hasEnough(recipe) {
-    return Object.entries(recipe).every(([ingredient, needed]) => this.#amountOf(ingredient) >= needed);
-  }
-
-  use(recipe) {
-    for (const [ingredient, needed] of Object.entries(recipe)) {
-      this.#stock.set(ingredient, this.#amountOf(ingredient) - needed);
+        // How much of each ingredient the drink needs, like { MILK: 150 }
+        this.recipe = recipe;
     }
-  }
-
-  #amountOf(ingredient) {
-    return this.#stock.get(ingredient) ?? 0;
-  }
 }
 ```
 
-**Part 2: the payment interface and the main class.**
+**Part 2: the inventory.** It keeps track of how much of each ingredient is left.
 
 ```js
-// Part 2: the payment interface and the main class (continues Part 1)
-class PaymentMethod { // interface
-  pay(amount) { throw new Error('not implemented'); }
+class Inventory {
+    // Private (#). A Map from each ingredient to the amount left.
+    #stock = new Map();
+
+    refill(ingredient, amount) {
+        const knownIngredients = Object.values(Ingredient);
+        if (!knownIngredients.includes(ingredient)) {
+            throw new Error(`Unknown ingredient: ${ingredient}`);
+        }
+
+        if (amount <= 0) {
+            throw new Error("Amount must be positive");
+        }
+
+        const newAmount = this.#amountOf(ingredient) + amount;
+        this.#stock.set(ingredient, newAmount);
+    }
+
+    // true only if there is enough of every ingredient in the recipe
+    hasEnough(recipe) {
+        for (const ingredient of Object.keys(recipe)) {
+            const needed = recipe[ingredient];
+            if (this.#amountOf(ingredient) < needed) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    use(recipe) {
+        for (const ingredient of Object.keys(recipe)) {
+            const needed = recipe[ingredient];
+            const newAmount = this.#amountOf(ingredient) - needed;
+            this.#stock.set(ingredient, newAmount);
+        }
+    }
+
+    // How much of one ingredient is left (0 if it was never added)
+    #amountOf(ingredient) {
+        if (this.#stock.has(ingredient)) {
+            return this.#stock.get(ingredient);
+        }
+
+        return 0;
+    }
+}
+```
+
+**Part 3: the payment interface.** The machine only knows "it can pay".
+
+```js
+// interface
+class PaymentMethod {
+    pay(amount) {
+        throw new Error("not implemented");
+    }
 }
 
 class CardPayment extends PaymentMethod {
-  pay(amount) {
-    console.log(`Card charged ${amount}`); // a real one would ask the bank
-    return true;
-  }
-}
-
-class CoffeeMachine {
-  #menu = new Map(); // drink name -> Drink
-  #inventory = new Inventory(); // the machine owns its inventory
-
-  constructor(drinks) {
-    for (const drink of drinks) this.#menu.set(drink.name, drink);
-  }
-
-  showMenu() {
-    return [...this.#menu.values()].map((drink) => `${drink.name}: ${drink.price}`);
-  }
-
-  refill(ingredient, amount) {
-    this.#inventory.refill(ingredient, amount);
-  }
-
-  order(name, payment) {
-    const drink = this.#menu.get(name);
-    if (!drink) throw new Error(`Unknown drink: ${name}`);
-    if (!this.#inventory.hasEnough(drink.recipe)) return `Sorry, not enough ingredients for ${name}`;
-    if (!payment.pay(drink.price)) return 'Payment failed';
-    this.#inventory.use(drink.recipe);
-    return `Here is your ${name}`;
-  }
+    pay(amount) {
+        // A real one would ask the bank
+        console.log(`Card charged ${amount}`);
+        return true;
+    }
 }
 ```
 
-**Part 3: try it.**
+**Part 4: the coffee machine.** The main class. It checks the stock **before** it takes the money.
 
 ```js
-// Part 3: try it (continues Parts 1 and 2)
-const { WATER, MILK, BEANS } = Ingredient;
-const machine = new CoffeeMachine([
-  new Drink('espresso', 2, { [WATER]: 30, [BEANS]: 10 }),
-  new Drink('latte', 4, { [WATER]: 30, [MILK]: 150, [BEANS]: 10 }),
-  new Drink('cappuccino', 3, { [WATER]: 30, [MILK]: 100, [BEANS]: 10 }),
-]);
-machine.refill(WATER, 500);
-machine.refill(MILK, 200);
-machine.refill(BEANS, 100);
+class CoffeeMachine {
+    // Private (#). A Map from drink name to Drink.
+    #menu = new Map();
+
+    // The machine creates and owns its inventory
+    #inventory = new Inventory();
+
+    constructor(drinks) {
+        for (const drink of drinks) {
+            this.#menu.set(drink.name, drink);
+        }
+    }
+
+    // One line per drink, like "latte: 4"
+    showMenu() {
+        const lines = [];
+        for (const drink of this.#menu.values()) {
+            lines.push(`${drink.name}: ${drink.price}`);
+        }
+
+        return lines;
+    }
+
+    refill(ingredient, amount) {
+        this.#inventory.refill(ingredient, amount);
+    }
+
+    order(name, payment) {
+        const drink = this.#menu.get(name);
+        if (!drink) {
+            throw new Error(`Unknown drink: ${name}`);
+        }
+
+        if (!this.#inventory.hasEnough(drink.recipe)) {
+            return `Sorry, not enough ingredients for ${name}`;
+        }
+
+        const paid = payment.pay(drink.price);
+        if (!paid) {
+            return "Payment failed";
+        }
+
+        this.#inventory.use(drink.recipe);
+        return `Here is your ${name}`;
+    }
+}
+```
+
+**Part 5: try it.** Fill the machine, then order three drinks.
+
+```js
+// Each recipe uses the Ingredient names as keys
+const espresso = new Drink("espresso", 2, { WATER: 30, BEANS: 10 });
+const latte = new Drink("latte", 4, { WATER: 30, MILK: 150, BEANS: 10 });
+const cappuccino = new Drink("cappuccino", 3, { WATER: 30, MILK: 100, BEANS: 10 });
+
+const machine = new CoffeeMachine([espresso, latte, cappuccino]);
+machine.refill(Ingredient.WATER, 500);
+machine.refill(Ingredient.MILK, 200);
+machine.refill(Ingredient.BEANS, 100);
 
 const card = new CardPayment();
 console.log(machine.showMenu()); // [ 'espresso: 2', 'latte: 4', 'cappuccino: 3' ]
-console.log(machine.order('latte', card));
+
+console.log(machine.order("latte", card));
 // Card charged 4
 // Here is your latte
-console.log(machine.order('latte', card)); // Sorry, not enough ingredients for latte
-console.log(machine.order('espresso', card));
+
+console.log(machine.order("latte", card)); // Sorry, not enough ingredients for latte
+
+console.log(machine.order("espresso", card));
 // Card charged 2
 // Here is your espresso
 ```

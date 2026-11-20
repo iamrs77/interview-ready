@@ -100,56 +100,103 @@ To keep the diagram narrow, creating the `Loan` is drawn as a self-call on `Libr
 
 ## The same flow in code
 
-Each arrow is one line of code. This version prints a line for every call between objects, so you can match the output to the arrows:
+Each arrow is one line of code. This version prints a line for every call between objects, so you can match the output to the arrows. The parts below run together as one file.
+
+**Step 1: The member.** It answers `canBorrow()` and stores new loans:
 
 ```js
-const CopyStatus = Object.freeze({ AVAILABLE: 'AVAILABLE', BORROWED: 'BORROWED' });
-const log = (line) => console.log(line);
+const CopyStatus = {
+    AVAILABLE: "AVAILABLE",
+    BORROWED: "BORROWED",
+};
 
 class Member {
-  loans = [];
-  canBorrow() {
-    log('Library -> Member: canBorrow()');
-    return this.loans.length < 3;
-  }
-  addLoan(loan) {
-    log('Library -> Member: addLoan()');
-    this.loans.push(loan);
-  }
+    loans = [];
+
+    canBorrow() {
+        console.log("Library -> Member: canBorrow()");
+        return this.loans.length < 3;
+    }
+
+    addLoan(loan) {
+        console.log("Library -> Member: addLoan()");
+        this.loans.push(loan);
+    }
 }
+```
+
+**Step 2: The book and the loan.** The book finds a free copy. A new loan works out its due day:
+
+```js
 class Book {
-  copies = [{ barcode: 'C1', status: CopyStatus.AVAILABLE }];
-  availableCopy() {
-    log('Library -> Book: availableCopy()');
-    return this.copies.find((c) => c.status === CopyStatus.AVAILABLE);
-  }
-}
-class Loan {
-  constructor(copy, member, today) {
-    log('Library: new Loan()');
-    Object.assign(this, { copy, member, dueDay: today + 14 });
-  }
-}
-class Library {
-  books = new Map([['978-0', new Book()]]);
-  borrow(member, isbn, today) {
-    log('User -> Library: borrow()');
-    const allowed = member.canBorrow();
-    const copy = this.books.get(isbn)?.availableCopy();
-    if (!allowed || !copy) return null;
-    copy.status = CopyStatus.BORROWED;
-    const loan = new Loan(copy, member, today);
-    member.addLoan(loan);
-    return loan;
-  }
+    // One copy on the shelf, to keep it short
+    copies = [
+        { barcode: "C1", status: CopyStatus.AVAILABLE },
+    ];
+
+    availableCopy() {
+        console.log("Library -> Book: availableCopy()");
+        return this.copies.find((copy) => copy.status === CopyStatus.AVAILABLE);
+    }
 }
 
-const loan = new Library().borrow(new Member(), '978-0', 1);
+class Loan {
+    constructor(copy, member, today) {
+        console.log("Library: new Loan()");
+        this.copy = copy;
+        this.member = member;
+        this.dueDay = today + 14;
+    }
+}
+```
+
+**Step 3: The library.** It is in charge. It asks the member and the book, then makes the loan:
+
+```js
+class Library {
+    books = new Map();
+
+    constructor() {
+        // This small library has one book, found by its isbn
+        this.books.set("978-0", new Book());
+    }
+
+    borrow(member, isbn, today) {
+        console.log("User -> Library: borrow()");
+        const allowed = member.canBorrow();
+
+        const book = this.books.get(isbn);
+        if (!book) {
+            return null;
+        }
+
+        const copy = book.availableCopy();
+        if (!allowed || !copy) {
+            return null;
+        }
+
+        copy.status = CopyStatus.BORROWED;
+
+        const loan = new Loan(copy, member, today);
+        member.addLoan(loan);
+        return loan;
+    }
+}
+```
+
+**Step 4: Run it.** Each printed line matches one arrow in the diagram:
+
+```js
+const library = new Library();
+const member = new Member();
+
+const loan = library.borrow(member, "978-0", 1);
 // User -> Library: borrow()
 // Library -> Member: canBorrow()
 // Library -> Book: availableCopy()
 // Library: new Loan()
 // Library -> Member: addLoan()
+
 console.log(loan.copy.barcode, loan.dueDay); // C1 15
 ```
 

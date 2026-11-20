@@ -42,43 +42,93 @@ The database was fine with zero queries for that key. Now it gets 1,000 at once,
 3. **Serve the old value while refreshing.** Keep the stale value a little longer, return it, and refresh it in the background. A few seconds of old data is better than a database outage.
 4. **Add jitter to TTLs.** When many keys are loaded at once with the same TTL, they also expire at once. A few random seconds per key spreads the misses out. (When a huge number of keys expire together, or a whole cache server dies, some people call it a **cache avalanche**.)
 
-Fix 1 in code, using a Redis lock:
+Fix 1 in code, using a Redis lock. It comes in three small pieces.
+
+**Step 1: Small helpers.** A pause, a database read, and a script that releases the lock.
 
 ```js
-import { randomUUID } from 'node:crypto';
+import { randomUUID } from "node:crypto";
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// Wait for some milliseconds
+function sleep(milliseconds) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, milliseconds);
+    });
+}
 
-// Delete the lock only if it still holds our token (one step, in Lua)
-const RELEASE = `
-  if redis.call("GET", KEYS[1]) == ARGV[1] then
-    return redis.call("DEL", KEYS[1])
-  end
-  return 0
-`;
+// Read from the database. "Nothing" (undefined) becomes null, so it can be cached.
+async function loadValue(loadFromDb) {
+    const value = await loadFromDb();
 
-async function getWithLock(key, loadFromDb, triesLeft = 20) {
-  const cached = await redis.get(key);
-  if (cached !== null) return JSON.parse(cached);
-
-  // NX = set only if the key does not exist. Only one request wins.
-  const token = randomUUID();
-  const gotLock = await redis.set(`lock:${key}`, token, 'NX', 'EX', 10);
-  if (gotLock) {
-    try {
-      const value = (await loadFromDb()) ?? null;
-      await redis.set(key, JSON.stringify(value), 'EX', value ? 600 : 60);
-      return value;
-    } finally {
-      await redis.eval(RELEASE, 1, `lock:${key}`, token);
+    if (value === undefined) {
+        return null;
     }
-  }
 
-  // Someone else is loading it. Wait a moment, then check the cache again.
-  // After about 1 second, stop waiting and read the database directly.
-  if (triesLeft === 0) return (await loadFromDb()) ?? null;
-  await sleep(50);
-  return getWithLock(key, loadFromDb, triesLeft - 1);
+    return value;
+}
+
+// A small Lua script. Redis runs it as one step:
+// delete the lock only if it still holds our token.
+const RELEASE = `
+    if redis.call("GET", KEYS[1]) == ARGV[1] then
+        return redis.call("DEL", KEYS[1])
+    end
+    return 0
+`;
+```
+
+**Step 2: The main function.** Check the cache. On a miss, try to take the lock. If someone else has it, wait and try again.
+
+```js
+async function getWithLock(key, loadFromDb, triesLeft = 20) {
+    // 1. Look in the cache
+    const cached = await redis.get(key);
+
+    if (cached !== null) {
+        return JSON.parse(cached);
+    }
+
+    // 2. Try to take the lock. NX = set only if the key does not exist,
+    // so only one request wins. EX 10 = the lock expires after 10 seconds.
+    const lockKey = `lock:${key}`;
+    const token = randomUUID();
+    const gotLock = await redis.set(lockKey, token, "NX", "EX", 10);
+
+    if (gotLock) {
+        return loadAndSave(key, loadFromDb, lockKey, token);
+    }
+
+    // 3. Someone else is loading it. After 20 tries (about 1 second),
+    // stop waiting and read the database directly.
+    if (triesLeft === 0) {
+        return loadValue(loadFromDb);
+    }
+
+    // Wait a moment, then check the cache again
+    await sleep(50);
+    return getWithLock(key, loadFromDb, triesLeft - 1);
+}
+```
+
+**Step 3: The winner loads the data.** It reads the database, saves a copy in the cache, and releases the lock.
+
+```js
+async function loadAndSave(key, loadFromDb, lockKey, token) {
+    try {
+        const value = await loadValue(loadFromDb);
+
+        // Found: keep it 10 minutes. Not found (null): only 1 minute.
+        let seconds = 60;
+        if (value) {
+            seconds = 600;
+        }
+
+        await redis.set(key, JSON.stringify(value), "EX", seconds);
+        return value;
+    } finally {
+        // This runs even if the database call failed
+        await redis.eval(RELEASE, 1, lockKey, token);
+    }
 }
 ```
 

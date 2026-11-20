@@ -29,21 +29,30 @@ A `NotificationService` that tells customers their order has shipped:
 
 ```js
 class EmailSender {
-  sendEmail(address, subject, body) {
-    return `Email to ${address}: [${subject}] ${body}`;
-  }
+    sendEmail(address, subject, body) {
+        return `Email to ${address}: [${subject}] ${body}`;
+    }
 }
 
 class NotificationService {
-  #email = new EmailSender(); // tied to one low-level class
+    constructor() {
+        // Tied to one low-level class: it builds its own EmailSender.
+        this.emailSender = new EmailSender();
+    }
 
-  orderShipped(customer) {
-    return this.#email.sendEmail(customer.email, 'Shipped', 'Your order is on the way');
-  }
+    orderShipped(customer) {
+        return this.emailSender.sendEmail(
+            customer.email,
+            "Shipped",
+            "Your order is on the way"
+        );
+    }
 }
 
 const service = new NotificationService();
-console.log(service.orderShipped({ email: 'asha@example.com' }));
+const asha = { email: "asha@example.com" };
+
+console.log(service.orderShipped(asha));
 // Email to asha@example.com: [Shipped] Your order is on the way
 ```
 
@@ -86,30 +95,62 @@ classDiagram
   MessageSender <|.. SmsSender
 ```
 
+**Step 1: the interface and the senders.** Each sender follows the `MessageSender` shape:
+
 ```js
-class MessageSender { // interface, shaped by what the business rule needs
-  send(customer, text) { throw new Error('not implemented'); }
+// The interface, shaped by what the business rule needs: "send this customer a text".
+// JavaScript has no "interface" keyword, so a base class that throws stands in for one.
+class MessageSender {
+    send(customer, text) {
+        throw new Error("not implemented");
+    }
 }
 
 class EmailSender extends MessageSender {
-  send(customer, text) { return `Email to ${customer.email}: ${text}`; }
+    send(customer, text) {
+        return `Email to ${customer.email}: ${text}`;
+    }
 }
+
 class SmsSender extends MessageSender {
-  send(customer, text) { return `SMS to ${customer.phone}: ${text}`; }
+    send(customer, text) {
+        return `SMS to ${customer.phone}: ${text}`;
+    }
 }
+```
 
+**Step 2: the business rule.** `NotificationService` gets a list of senders and never asks what kind they are:
+
+```js
 class NotificationService {
-  #senders;
-  constructor(senders) { this.#senders = senders; } // any MessageSender works
+    // Any list of MessageSenders works.
+    constructor(senders) {
+        this.senders = senders;
+    }
 
-  orderShipped(customer) {
-    return this.#senders.map((sender) => sender.send(customer, 'Your order is on the way'));
-  }
+    // Sends the message through every sender. Gives back one line per sender.
+    orderShipped(customer) {
+        const results = [];
+
+        for (const sender of this.senders) {
+            const result = sender.send(customer, "Your order is on the way");
+            results.push(result);
+        }
+
+        return results;
+    }
 }
+```
 
-const asha = { email: 'asha@example.com', phone: '555-0101' };
+**Step 3: use it.** Pass in the senders you want:
+
+```js
+const asha = { email: "asha@example.com", phone: "555-0101" };
 const service = new NotificationService([new EmailSender(), new SmsSender()]);
-for (const line of service.orderShipped(asha)) console.log(line);
+
+for (const line of service.orderShipped(asha)) {
+    console.log(line);
+}
 // Email to asha@example.com: Your order is on the way
 // SMS to 555-0101: Your order is on the way
 ```

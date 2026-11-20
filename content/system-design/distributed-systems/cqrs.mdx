@@ -66,17 +66,31 @@ The read store can be anything that suits the query: Elasticsearch for search, R
 
 A projector, made safe to run twice:
 
-```ts
+```js
 // Keeps the "my orders" view up to date
-async function onOrderPlaced(e: OrderPlaced) {
-  await readDb.collection('order_list').updateOne(
-    { _id: e.orderId },                    // one document per order
-    {
-      $set: { userId: e.userId, total: e.total, placedAt: e.placedAt },
-      $setOnInsert: { status: 'PENDING' }, // only when the document is new
-    },
-    { upsert: true }                       // insert or update: running it twice does no harm
-  );
+async function onOrderPlaced(event) {
+    const orderList = readDb.collection("order_list");
+
+    // One document per order, found by the order ID
+    const filter = { _id: event.orderId };
+
+    const changes = {
+        // $set: always write these fields
+        $set: {
+            userId: event.userId,
+            total: event.total,
+            placedAt: event.placedAt,
+        },
+
+        // $setOnInsert: write this only when the document is new
+        $setOnInsert: {
+            status: "PENDING",
+        },
+    };
+
+    // upsert = insert the document if it is missing, update it if it is there.
+    // So running this twice does no harm.
+    await orderList.updateOne(filter, changes, { upsert: true });
 }
 ```
 

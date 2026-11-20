@@ -19,13 +19,20 @@ A pizza has many options. Put them all in the constructor, and you get this:
 
 ```js
 class Pizza {
-  constructor(size, crust, cheese, olives, onions, extraSauce) {
-    Object.assign(this, { size, crust, cheese, olives, onions, extraSauce });
-  }
+    constructor(size, crust, cheese, olives, onions, extraSauce) {
+        this.size = size;
+        this.crust = crust;
+        this.cheese = cheese;
+        this.olives = olives;
+        this.onions = onions;
+        this.extraSauce = extraSauce;
+    }
 }
 
-const pizza = new Pizza('L', 'thin', true, false, true, false);
-console.log(pizza.onions); // true  (but which `true` was onions?)
+const pizza = new Pizza("L", "thin", true, false, true, false);
+
+// Which "true" was onions? You can't tell from the line above.
+console.log(pizza.onions); // true
 ```
 
 - You can't tell what `true, false, true, false` means without opening the class.
@@ -69,44 +76,109 @@ classDiagram
   PizzaBuilder ..> Pizza : creates
 ```
 
+### Step 1: The finished pizza
+
+`Pizza` is the product. Once it is made, nobody can change it.
+
 ```js
-const Size = Object.freeze({ S: 'S', M: 'M', L: 'L' });
+const Size = {
+    S: "S",
+    M: "M",
+    L: "L",
+};
 
 class Pizza {
-  constructor({ size, crust, toppings }) {
-    Object.assign(this, { size, crust, toppings: Object.freeze(toppings) });
-    Object.freeze(this); // can't change after it is built
-  }
-  describe() { return `${this.size} ${this.crust} pizza with ${this.toppings.join(', ')}`; }
-}
+    constructor(size, crust, toppings) {
+        this.size = size;
+        this.crust = crust;
+        this.toppings = toppings;
 
-class PizzaBuilder {
-  #size = null;
-  #crust = 'classic';
-  #toppings = [];
-
-  size(size) { this.#size = size; return this; }
-  crust(type) { this.#crust = type; return this; }
-  cheese() { return this.topping('cheese'); }
-  topping(name) { this.#toppings.push(name); return this; }
-
-  build() { // all the checks live here
-    if (!Object.values(Size).includes(this.#size)) throw new Error('Pick a size: S, M or L');
-    if (this.#crust === 'stuffed' && this.#size !== Size.L) {
-      throw new Error('Stuffed crust comes only in size L');
+        // Object.freeze locks an object, so nobody can change it later.
+        Object.freeze(this.toppings);
+        Object.freeze(this);
     }
-    if (this.#toppings.length === 0) throw new Error('Add at least one topping');
-    return new Pizza({ size: this.#size, crust: this.#crust, toppings: [...this.#toppings] });
-  }
-}
 
-const pizza = new PizzaBuilder().size('L').crust('thin').cheese().topping('olives').build();
+    describe() {
+        const toppingList = this.toppings.join(", ");
+
+        return `${this.size} ${this.crust} pizza with ${toppingList}`;
+    }
+}
+```
+
+### Step 2: The builder
+
+The builder keeps each choice in a private field (`#` in front of a name means only code inside the class can see it). Each step saves one choice and returns the builder itself (`this`), so the calls can chain.
+
+```js
+class PizzaBuilder {
+    #size = null;
+    #crust = "classic";
+    #toppings = [];
+
+    size(size) {
+        this.#size = size;
+        return this;
+    }
+
+    crust(type) {
+        this.#crust = type;
+        return this;
+    }
+
+    topping(name) {
+        this.#toppings.push(name);
+        return this;
+    }
+
+    cheese() {
+        return this.topping("cheese");
+    }
+
+    // All the checks live here, where every choice is known.
+    build() {
+        if (!Object.values(Size).includes(this.#size)) {
+            throw new Error("Pick a size: S, M or L");
+        }
+
+        if (this.#crust === "stuffed" && this.#size !== Size.L) {
+            throw new Error("Stuffed crust comes only in size L");
+        }
+
+        if (this.#toppings.length === 0) {
+            throw new Error("Add at least one topping");
+        }
+
+        // Copy the array, so a later topping() call can't change this pizza.
+        const toppings = [...this.#toppings];
+        return new Pizza(this.#size, this.#crust, toppings);
+    }
+}
+```
+
+### Step 3: Build a pizza
+
+Each call adds one choice. `build()` checks the rules and hands over the pizza.
+
+```js
+const pizza = new PizzaBuilder()
+    .size("L")
+    .crust("thin")
+    .cheese()
+    .topping("olives")
+    .build();
+
 console.log(pizza.describe()); // L thin pizza with cheese, olives
 
+// Stuffed crust in size M breaks a rule, so build() throws an error.
 try {
-  new PizzaBuilder().crust('stuffed').size('M').cheese().build();
-} catch (e) {
-  console.log(e.message); // Stuffed crust comes only in size L
+    new PizzaBuilder()
+        .crust("stuffed")
+        .size("M")
+        .cheese()
+        .build();
+} catch (error) {
+    console.log(error.message); // Stuffed crust comes only in size L
 }
 ```
 
@@ -121,12 +193,25 @@ The textbook ("Gang of Four") form also has a **Director**: a class that knows r
 JavaScript already has named, optional arguments: pass **one object** and destructure it with defaults.
 
 ```js
-function createPizza({ size, crust = 'classic', toppings = ['cheese'] } = {}) {
-  if (!['S', 'M', 'L'].includes(size)) throw new Error('Pick a size: S, M or L');
-  return Object.freeze({ size, crust, toppings });
+// The { } in the parameter list unpacks the options object.
+// crust and toppings get these default values when they are left out.
+function createPizza({ size, crust = "classic", toppings = ["cheese"] }) {
+    const validSizes = ["S", "M", "L"];
+
+    if (!validSizes.includes(size)) {
+        throw new Error("Pick a size: S, M or L");
+    }
+
+    const pizza = {
+        size: size,
+        crust: crust,
+        toppings: toppings,
+    };
+
+    return Object.freeze(pizza);
 }
 
-const pizza = createPizza({ size: 'L', toppings: ['cheese', 'olives'] });
+const pizza = createPizza({ size: "L", toppings: ["cheese", "olives"] });
 console.log(pizza.crust); // classic
 ```
 

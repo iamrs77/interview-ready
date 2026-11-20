@@ -20,38 +20,75 @@ Java and TypeScript have both as keywords. Plain JavaScript has **neither**, so 
 
 ## An interface in JavaScript
 
-Write a base class named after the **role**, mark it with an `// interface` comment, and make every method throw:
+Write a base class named after the **role**, mark it with an `// interface` comment, and make every method throw.
+
+**Step 1: The interface.** Every method only throws. A child class must write its own:
 
 ```js
-class PaymentMethod { // interface
-  pay(amount) { throw new Error('not implemented'); }
-  refund(amount) { throw new Error('not implemented'); }
-}
+// interface
+class PaymentMethod {
+    pay(amount) {
+        throw new Error("not implemented");
+    }
 
+    refund(amount) {
+        throw new Error("not implemented");
+    }
+}
+```
+
+**Step 2: Classes that keep the promise.** `Card` and `Upi` write both methods:
+
+```js
 class Card extends PaymentMethod {
-  pay(amount) { return `Paid ${amount} by card`; }
-  refund(amount) { return `Refunded ${amount} to card`; }
+    pay(amount) {
+        return `Paid ${amount} by card`;
+    }
+
+    refund(amount) {
+        return `Refunded ${amount} to card`;
+    }
 }
 
 class Upi extends PaymentMethod {
-  pay(amount) { return `Paid ${amount} by UPI`; }
-  refund(amount) { return `Refunded ${amount} by UPI`; }
-}
+    pay(amount) {
+        return `Paid ${amount} by UPI`;
+    }
 
-class Cash extends PaymentMethod { // forgot refund()!
-  pay(amount) { return `Paid ${amount} in cash`; }
+    refund(amount) {
+        return `Refunded ${amount} by UPI`;
+    }
 }
+```
 
-for (const method of [new Card(), new Upi()]) {
-  console.log(method.pay(10));
+**Step 3: A class that breaks it.** `Cash` forgot to write `refund()`:
+
+```js
+class Cash extends PaymentMethod {
+    pay(amount) {
+        return `Paid ${amount} in cash`;
+    }
+}
+```
+
+**Step 4: Use them.** The missing method fails only when it is called:
+
+```js
+const methods = [new Card(), new Upi()];
+
+for (const method of methods) {
+    console.log(method.pay(10));
 }
 // Paid 10 by card
 // Paid 10 by UPI
 
+// Cash has no refund() of its own, so the interface's refund() runs and throws
+const cash = new Cash();
+
 try {
-  new Cash().refund(10);
-} catch (err) {
-  console.log(err.message); // not implemented
+    cash.refund(10);
+} catch (error) {
+    console.log(error.message); // not implemented
 }
 ```
 
@@ -84,37 +121,65 @@ In Java you write `interface PaymentMethod { String pay(int amount); }` and `cla
 
 ## An abstract class in JavaScript
 
-Block direct use in the constructor with `new.target`, and make the abstract methods throw. Shared methods have real code:
+Block direct use in the constructor with `new.target`, and make the abstract methods throw. Shared methods have real code.
+
+**Step 1: The abstract class.** It has shared code, plus one method each child must fill in:
 
 ```js
-class Vehicle { // abstract
-  constructor(plate) {
-    if (new.target === Vehicle) throw new Error('Vehicle is abstract');
-    this.plate = plate;
-  }
+// abstract
+class Vehicle {
+    constructor(plate) {
+        // new.target is the class that `new` was called with.
+        // If someone writes `new Vehicle(...)` directly, stop them.
+        if (new.target === Vehicle) {
+            throw new Error("Vehicle is abstract");
+        }
 
-  parkFee(hours) { throw new Error('not implemented'); } // abstract method
+        this.plate = plate;
+    }
 
-  receipt(hours) { // shared code: every vehicle gets it
-    return `${this.plate}: ${hours}h = ${this.parkFee(hours)}`;
-  }
+    // Abstract method: each child must write its own
+    parkFee(hours) {
+        throw new Error("not implemented");
+    }
+
+    // Shared code: every vehicle gets it
+    receipt(hours) {
+        const fee = this.parkFee(hours);
+        return `${this.plate}: ${hours}h = ${fee}`;
+    }
 }
+```
 
+**Step 2: The children.** Each one fills in only `parkFee()`:
+
+```js
 class Car extends Vehicle {
-  parkFee(hours) { return hours * 20; }
+    parkFee(hours) {
+        return hours * 20;
+    }
 }
 
 class Truck extends Vehicle {
-  parkFee(hours) { return hours * 50; }
+    parkFee(hours) {
+        return hours * 50;
+    }
 }
+```
 
-console.log(new Car('KA-01-1234').receipt(3)); // KA-01-1234: 3h = 60
-console.log(new Truck('MH-02-9876').receipt(2)); // MH-02-9876: 2h = 100
+**Step 3: Use them.** The children work, but a plain `Vehicle` can't be made:
+
+```js
+const car = new Car("KA-01-1234");
+console.log(car.receipt(3)); // KA-01-1234: 3h = 60
+
+const truck = new Truck("MH-02-9876");
+console.log(truck.receipt(2)); // MH-02-9876: 2h = 100
 
 try {
-  new Vehicle('X-1');
-} catch (err) {
-  console.log(err.message); // Vehicle is abstract
+    new Vehicle("X-1");
+} catch (error) {
+    console.log(error.message); // Vehicle is abstract
 }
 ```
 

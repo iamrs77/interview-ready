@@ -41,12 +41,18 @@ import { z } from "zod";
 
 // strictObject: reject any field we didn't list
 const CreateOrder = z.strictObject({
-  productId: z.uuid(),
-  quantity: z.number().int().min(1).max(10),
-  note: z.string().max(200).optional(),
+    // Must be a UUID
+    productId: z.uuid(),
+
+    // A whole number from 1 to 10
+    quantity: z.number().int().min(1).max(10),
+
+    // Text of at most 200 characters. optional() means it can be left out.
+    note: z.string().max(200).optional(),
 });
 
-const input = CreateOrder.parse(req.body); // throws if anything is wrong: return 400
+// parse() throws an error if anything is wrong. Then we answer 400.
+const input = CreateOrder.parse(req.body);
 ```
 
 **Why `strictObject` matters: mass assignment.** Say your "update my profile" endpoint copies the whole request body into the user's record. An attacker adds `"role": "admin"` to the body and makes themselves an admin. Only accept the fields you listed.

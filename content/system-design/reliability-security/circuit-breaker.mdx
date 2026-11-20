@@ -77,40 +77,74 @@ A tiny version, to show the idea:
 
 ```js
 class CircuitBreaker {
-  constructor(callService, { failureLimit = 5, openMs = 30000 } = {}) {
-    this.callService = callService;
-    this.failureLimit = failureLimit;
-    this.openMs = openMs;
-    this.state = "CLOSED";
-    this.failures = 0;
-    this.openedAt = 0;
-  }
+    constructor(callService, failureLimit = 5, openMs = 30000) {
+        this.callService = callService;
+        this.failureLimit = failureLimit;
+        this.openMs = openMs;
+        this.state = "CLOSED";
+        this.failures = 0;
+        this.openedAt = 0;
+    }
 
-  async call(...args) {
-    if (this.state === "OPEN") {
-      if (Date.now() - this.openedAt < this.openMs) {
-        throw new Error("Circuit open: failing fast"); // don't even try
-      }
-      this.state = "HALF_OPEN"; // wait is over: let a test call through
+    async call(request) {
+        if (this.state === "OPEN") {
+            const waitedMs = Date.now() - this.openedAt;
+
+            // Still in the wait: don't even try, fail fast
+            if (waitedMs < this.openMs) {
+                throw new Error("Circuit open: failing fast");
+            }
+
+            // The wait is over: let a test call through
+            this.state = "HALF_OPEN";
+        }
+
+        try {
+            const result = await this.callService(request);
+
+            // It worked: back to normal
+            this.state = "CLOSED";
+            this.failures = 0;
+            return result;
+        } catch (error) {
+            this.failures++;
+
+            // A failed test call, or too many failures: trip the breaker
+            if (this.state === "HALF_OPEN" || this.failures >= this.failureLimit) {
+                this.state = "OPEN";
+                this.openedAt = Date.now();
+            }
+
+            throw error;
+        }
     }
-    try {
-      const result = await this.callService(...args);
-      this.state = "CLOSED"; // it worked: back to normal
-      this.failures = 0;
-      return result;
-    } catch (err) {
-      this.failures++;
-      if (this.state === "HALF_OPEN" || this.failures >= this.failureLimit) {
-        this.state = "OPEN"; // trip the breaker
-        this.openedAt = Date.now();
-      }
-      throw err;
-    }
-  }
 }
 ```
 
-This one counts failures in a row. Real libraries look at a **failure rate** over a sliding window (the last N calls, or the last N seconds), count **slow** calls as failures too, and allow only a few calls at once in half-open.
+Try it with a service that is down, and a limit of 3 failures:
+
+```js
+async function brokenService() {
+    throw new Error("Service is down");
+}
+
+const breaker = new CircuitBreaker(brokenService, 3);
+
+for (let i = 1; i <= 4; i++) {
+    try {
+        await breaker.call();
+    } catch (error) {
+        console.log(i, error.message);
+    }
+}
+
+// 1 Service is down
+// 2 Service is down
+// 3 Service is down
+// 4 Circuit open: failing fast
+```
+
+This breaker counts failures in a row. Real libraries look at a **failure rate** over a sliding window (the last N calls, or the last N seconds), count **slow** calls as failures too, and allow only a few calls at once in half-open.
 
 ## Fallbacks
 

@@ -48,15 +48,27 @@ There are two queues:
 - **Microtasks:** promise callbacks and the code after an `await`. All of them run **before** the next task.
 
 ```js
-console.log('1. start');
-setTimeout(() => console.log('4. timer (a task)'), 0);
-Promise.resolve().then(() => console.log('3. promise (a microtask)'));
-console.log('2. end of the script');
+console.log("1. start");
+
+// setTimeout puts this callback in the task queue, even with a 0 ms delay.
+setTimeout(() => {
+    console.log("4. timer (a task)");
+}, 0);
+
+// .then() puts this callback in the microtask queue.
+Promise.resolve().then(() => {
+    console.log("3. promise (a microtask)");
+});
+
+console.log("2. end of the script");
+
 // 1. start
 // 2. end of the script
 // 3. promise (a microtask)
 // 4. timer (a task)
 ```
+
+The script runs to the end first. Then all microtasks run. Only then does the timer task get its turn.
 
 The key rule: **while a piece of JavaScript runs, nothing else runs.** A task is never stopped halfway for another one. (Node's real loop has named phases, like timers, poll and check, but this picture is enough for interviews.)
 
@@ -64,18 +76,44 @@ The key rule: **while a piece of JavaScript runs, nothing else runs.** A task is
 
 `await` pauses **only the current function**, not the thread. While it waits, the event loop runs other work.
 
-```js
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+First, a small `sleep` helper that stands in for slow work, and a `cook` function that uses it:
 
-async function cook(dish, ms) {
-  console.log(`start ${dish}`);
-  await sleep(ms); // this function pauses here; the thread is free for other work
-  console.log(`done ${dish}`);
+```js
+// Gives back a promise that finishes after "ms" milliseconds.
+function sleep(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
 }
 
+async function cook(dish, ms) {
+    console.log(`start ${dish}`);
+
+    // cook() pauses here until the timer ends.
+    // The thread is free to run other work meanwhile.
+    await sleep(ms);
+
+    console.log(`done ${dish}`);
+}
+```
+
+Now cook two dishes at once:
+
+```js
 const started = Date.now();
-await Promise.all([cook('rice', 300), cook('soup', 200)]);
-console.log(`total: about ${Math.round((Date.now() - started) / 100) * 100} ms`);
+
+// Start both dishes. Each call runs until its first await,
+// then gives back a promise right away. Neither waits for the other.
+const rice = cook("rice", 300);
+const soup = cook("soup", 200);
+
+// Wait here until both dishes are done.
+await Promise.all([rice, soup]);
+
+const elapsed = Date.now() - started;
+const roundedMs = Math.round(elapsed / 100) * 100;
+console.log(`total: about ${roundedMs} ms`);
+
 // start rice
 // start soup
 // done soup
@@ -91,11 +129,26 @@ Heavy CPU work holds the one thread, and everything else waits: timers, callback
 
 ```js
 const started = Date.now();
-const elapsed = () => Math.round((Date.now() - started) / 100) * 100;
-setTimeout(() => console.log(`timer ran after about ${elapsed()} ms`), 0);
 
-while (Date.now() - started < 500) {} // 500 ms of pure CPU work: nothing else can run
-console.log('busy loop done');
+// How many ms since the start, rounded to the nearest 100.
+function elapsed() {
+    const ms = Date.now() - started;
+    return Math.round(ms / 100) * 100;
+}
+
+// Ask for this callback to run after 0 ms.
+setTimeout(() => {
+    console.log(`timer ran after about ${elapsed()} ms`);
+}, 0);
+
+// 500 ms of pure CPU work. The thread is stuck in this loop,
+// so the timer callback can't run until the loop ends.
+while (Date.now() - started < 500) {
+    // Do nothing. Just keep the thread busy.
+}
+
+console.log("busy loop done");
+
 // busy loop done
 // timer ran after about 500 ms   (it asked for 0 ms)
 ```
@@ -109,19 +162,45 @@ A **worker thread** is a second JavaScript thread, with its own event loop and i
 - **Use a worker** for CPU-heavy work: resizing images, hashing or compressing big files, heavy math.
 - **Don't use one** for waiting work. A database call already leaves the thread free.
 
-```js
-import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
+The example below is one file. First, the import and a slow function:
 
-if (isMainThread) {
-  // Start this same file again, but in a new thread.
-  const worker = new Worker(new URL(import.meta.url), { workerData: 40 });
-  worker.on('message', (result) => console.log(`fib(40) = ${result}`));
-  setTimeout(() => console.log('main thread is still free'), 10);
-} else {
-  // This part runs in the worker thread.
-  const fib = (n) => (n < 2 ? n : fib(n - 1) + fib(n - 2)); // slow on purpose
-  parentPort.postMessage(fib(workerData));
+```js
+import { Worker, isMainThread, parentPort, workerData } from "node:worker_threads";
+
+// Slow on purpose: for 40, it calls itself hundreds of millions of times.
+function fib(number) {
+    if (number < 2) {
+        return number;
+    }
+
+    return fib(number - 1) + fib(number - 2);
 }
+```
+
+Next, the main thread starts a worker that runs this same file. `isMainThread` tells each copy which side it is on:
+
+```js
+if (isMainThread) {
+    // Start this same file again, but in a new thread.
+    // workerData is the input we hand to the worker.
+    const thisFile = new URL(import.meta.url);
+    const worker = new Worker(thisFile, { workerData: 40 });
+
+    // Runs later, when the worker sends its answer back.
+    worker.on("message", (result) => {
+        console.log(`fib(40) = ${result}`);
+    });
+
+    // The main thread is not busy, so this timer runs on time.
+    setTimeout(() => {
+        console.log("main thread is still free");
+    }, 10);
+} else {
+    // This part runs in the worker thread.
+    const result = fib(workerData);
+    parentPort.postMessage(result);
+}
+
 // main thread is still free
 // fib(40) = 102334155
 ```
@@ -149,28 +228,53 @@ sequenceDiagram
   N-->>B: response B
 ```
 
-You can see it with a real server. User B arrives 100 ms after user A, while A is still waiting:
+You can see it with a real server. The example is one file, in two parts.
+
+**Part 1: the server.** Every request waits 300 ms, like a slow database call, then answers "ok":
 
 ```js
-import http from 'node:http';
+import http from "node:http";
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// Gives back a promise that finishes after "ms" milliseconds.
+function sleep(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
 
-const server = http.createServer(async (req, res) => {
-  console.log(`start ${req.url}`);
-  await sleep(300); // like a slow database call: the thread serves others meanwhile
-  console.log(`end ${req.url}`);
-  res.end('ok');
+const server = http.createServer(async (request, response) => {
+    console.log(`start ${request.url}`);
+
+    // Like a slow database call. This request pauses here,
+    // and the thread is free to start other requests meanwhile.
+    await sleep(300);
+
+    console.log(`end ${request.url}`);
+    response.end("ok");
+});
+```
+
+**Part 2: two users.** User B arrives 100 ms after user A, while A is still waiting:
+
+```js
+// Port 0 means "any free port". The callback runs once the server is ready.
+server.listen(0, async () => {
+    const port = server.address().port;
+    const url = `http://localhost:${port}`;
+
+    // User A sends a request. We don't wait for the answer yet.
+    const requestA = fetch(`${url}/a`);
+
+    // Wait 100 ms, then user B sends a request.
+    await sleep(100);
+    const requestB = fetch(`${url}/b`);
+
+    // Wait until both users have their answers, then shut down.
+    await Promise.all([requestA, requestB]);
+    server.close();
+    server.closeAllConnections();
 });
 
-server.listen(0, async () => { // port 0: any free port
-  const url = `http://localhost:${server.address().port}`;
-  const first = fetch(`${url}/a`);
-  await sleep(100); // a second user arrives 100 ms later
-  await Promise.all([first, fetch(`${url}/b`)]);
-  server.close();
-  server.closeAllConnections();
-});
 // start /a
 // start /b   <- B starts while A is still waiting
 // end /a
