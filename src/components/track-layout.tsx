@@ -5,6 +5,7 @@ import type { LayoutTab } from 'fumadocs-ui/layouts/shared';
 import { baseOptions } from '@/lib/layout.shared';
 import { getTrackFolder, source, TRACKS, type Track } from '@/lib/source';
 import { SidebarDoneMarks } from '@/components/sidebar-done-marks';
+import { JsPlayground, JsPlaygroundButton } from '@/components/js-playground';
 
 /*
  * Fumadocs centers the whole layout, so on wide screens the sidebar gets empty space on its left.
@@ -46,17 +47,25 @@ function trackTabs(): LayoutTab[] {
   });
 }
 
-/** The docs layout (sidebar, track switch, done ticks) for one track. */
+/** Tracks that get the JS playground. Only DSA for now. */
+const PLAYGROUND_TRACKS: Track[] = ['dsa'];
+
+/** The docs layout (sidebar, track switch, done ticks, and the JS playground on DSA) for one track. */
 export function TrackLayout({ track, children }: { track: Track; children: ReactNode }) {
+  const hasPlayground = PLAYGROUND_TRACKS.includes(track);
+
   return (
     <DocsLayout
       tree={trackTree(track)}
       tabs={trackTabs()}
       containerProps={{ style: { gridTemplate } }}
+      // The JS Playground button sits under search, where the cursor already goes.
+      sidebar={{ banner: hasPlayground ? <JsPlaygroundButton /> : undefined }}
       {...baseOptions()}
     >
       <SidebarDoneMarks />
       {children}
+      {hasPlayground && <JsPlayground />}
     </DocsLayout>
   );
 }
