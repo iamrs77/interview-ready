@@ -105,6 +105,9 @@ function drawChart(text: string): Promise<string> {
   if (!promise) {
     promise = (async () => {
       const { default: mermaid } = await import('mermaid');
+      // Mermaid sizes each box from its text. Measured before the site font loads, the boxes come out
+      // too small for the real font, and the right edge of the diagram gets cut off. So wait for fonts.
+      await document.fonts.ready;
       mermaid.initialize(mermaidConfig);
       const { svg } = await mermaid.render(`${idPrefix}${++drawCount}`, text);
       svgCache.set(text, svg);
