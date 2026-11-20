@@ -15,7 +15,7 @@ A **deque** (say "deck", short for **d**ouble-**e**nded **que**ue) is a line tha
 You meet queues all the time:
 
 - A **printer** prints documents in the order they were sent.
-- JavaScript's **event loop** keeps waiting callbacks (from `setTimeout`, for example) in a queue and runs them in order.
+- JavaScript's **event loop** keeps callbacks that are ready to run (a click handler, for example) in a queue and runs them in order.
 - **Message queues** like Kafka, RabbitMQ and SQS pass jobs between servers in order.
 - **BFS**, the search that finds the fewest steps, visits things in the order it found them (more below).
 
@@ -35,20 +35,20 @@ You meet queues all the time:
 The easy way: `push` to join at the back, `shift` to leave from the front.
 
 ```js
-const queue = [];
+const line = [];
 
 // Join at the back.
-queue.push("Ana");
-queue.push("Ben");
-queue.push("Cara");
-console.log(queue); // [ 'Ana', 'Ben', 'Cara' ]
+line.push("Ana");
+line.push("Ben");
+line.push("Cara");
+console.log(line); // [ 'Ana', 'Ben', 'Cara' ]
 
 // Serve the front.
-console.log(queue.shift()); // Ana
-console.log(queue); // [ 'Ben', 'Cara' ]
+console.log(line.shift()); // Ana
+console.log(line); // [ 'Ben', 'Cara' ]
 
 // Peek at the front.
-console.log(queue[0]); // Ben
+console.log(line[0]); // Ben
 ```
 
 This works, and it's fine for a few items. But `shift()` is slow.
@@ -91,7 +91,7 @@ console.log(shiftByHand(bigLine)); // 999999
 
 One `shift()` on a million items moves 999,999 items: **O(n)**. Emptying a whole queue of `n` items with `shift()` moves about n²/2 items in total: **O(n²)**.
 
-You can feel it. In one test with Node 24, emptying a 100,000-item array with `shift()` took about **8 seconds**, and 200,000 items took about **32 seconds**: twice the items, four times the time. The fast queue below emptied 100,000 items in **under a millisecond**. Engines sometimes have tricks that make `shift()` faster, but you can't count on them. In an interview, treat it as O(n).
+You can feel it. In one test with Node 24, emptying a 100,000-item array with `shift()` took about **8 seconds**, and 200,000 items took about **32 seconds**: twice the items, four times the time. The fast queue below emptied 100,000 items in **under a millisecond**. Engines do have tricks: V8 (the engine in Node and Chrome) makes `shift()` fast on smaller arrays. In the same test, 10,000 items took about 2 ms, but 20,000 items already took about 0.3 seconds. You can't count on the trick, so in an interview, treat `shift()` as O(n).
 
 ### A fast queue: keep a head index
 
@@ -491,7 +491,7 @@ console.log(maxSlidingWindow([9, 8, 7], 1)); // [ 9, 8, 7 ]
 console.log(maxSlidingWindow([4, 2, 12, 3], 4)); // [ 12 ]
 ```
 
-**Time:** O(n). Each index is added once and removed at most once, from the front or the back. **Space:** O(n): the answer holds n - k + 1 numbers. The live part of the deque (from `head` to the end) never holds more than `k` indexes.
+**Time:** O(n). Each index is added once and removed at most once, from the front or the back. **Space:** O(n). The answer holds n - k + 1 numbers, and the deque array can grow to n, because old indexes stay before `head`. The live part (from `head` to the end) never holds more than `k` indexes.
 
 For more window problems, see [Sliding Window](../two-pointers/sliding-window.mdx).
 
