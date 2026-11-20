@@ -327,11 +327,16 @@ export function JsPlaygroundButton() {
     <button
       type="button"
       onClick={() => window.dispatchEvent(new Event(TOGGLE_EVENT))}
-      className="inline-flex w-full items-center gap-2 rounded-lg border bg-fd-secondary/50 p-1.5 ps-2 text-sm text-fd-muted-foreground transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground"
+      // Soft indigo, the same color as the panel's top bar, so it stands out from the gray search box above.
+      className="inline-flex w-full items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 p-1.5 ps-1.5 text-sm font-medium text-indigo-700 shadow-sm transition-colors hover:border-indigo-300 hover:bg-indigo-100"
     >
-      <SquareTerminal className="size-4" />
+      <span className="grid size-6 place-items-center rounded-md bg-indigo-600 text-white">
+        <SquareTerminal className="size-3.5" />
+      </span>
       JS Playground
-      <kbd className="ms-auto rounded-md border bg-fd-background px-1.5 font-sans text-xs">Ctrl `</kbd>
+      <kbd className="ms-auto rounded-md border border-indigo-200 bg-white px-1.5 font-sans text-xs font-normal text-indigo-600">
+        Ctrl `
+      </kbd>
     </button>
   );
 }
