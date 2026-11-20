@@ -2,9 +2,412 @@
 title: "2D Dynamic Programming"
 description: "DP on grids and on two strings."
 icon: Table2
-planned: true
 ---
 
-- Unique paths
-- Longest common subsequence
-- Edit distance
+## The idea
+
+In **2D DP**, **two values change** as the problem gets smaller: a row and a column of a grid, or a position in each of two strings. So the answers fit in a **table**: `dp[row][col]`.
+
+Think of a **spreadsheet** where every cell has a formula like "the cell above + the cell to the left". You fill the first row and first column by hand. Then you drag the formula across, row by row, and every cell works itself out from cells that are already filled. That is exactly how 2D DP works.
+
+The [DP recipe](./dp-basics.mdx) stays the same: **1. what `dp[row][col]` means, 2. the recurrence, 3. base cases, 4. order of filling.**
+
+## How it works
+
+### Making a table in JavaScript
+
+A table is an array of rows, and each row is an array. Make each row a **new** array, or every row will be the same array.
+
+```js
+const rows = 3;
+const cols = 4;
+
+// One new array per row: the arrow function runs once for each row.
+const grid = Array.from({ length: rows }, () => new Array(cols).fill(0));
+
+grid[0][0] = 5;
+console.log(grid[0]); // [ 5, 0, 0, 0 ]
+console.log(grid[1]); // [ 0, 0, 0, 0 ]
+
+// Bug: fill() puts the SAME row array into every slot.
+const broken = new Array(rows).fill(new Array(cols).fill(0));
+
+broken[0][0] = 5;
+console.log(broken[1]); // [ 5, 0, 0, 0 ]
+```
+
+In `broken`, changing row 0 changed row 1 too, because they are one array. Always use `Array.from` with a function.
+
+### Which cells can `dp[row][col]` use?
+
+In almost every 2D problem, a cell is built from its three neighbours that come **earlier**: above, left, and the diagonal above-left.
+
+|  | col - 1 | col |
+| --- | --- | --- |
+| **row - 1** | ↖ diagonal: `dp[row - 1][col - 1]` | ↑ above: `dp[row - 1][col]` |
+| **row** | ← left: `dp[row][col - 1]` | **`dp[row][col]`** (the cell we fill) |
+
+So the **order of filling** (recipe step 4) is usually: **row by row, left to right.** When you reach a cell, the cells above, left and diagonal are already done.
+
+### Two strings: one extra row and column
+
+When the two values are positions in two strings, `dp[row][col]` means "the answer for the **first `row` letters** of the first string and the **first `col` letters** of the second". So the table is `(length1 + 1) × (length2 + 1)`. Row 0 and column 0 stand for the **empty string**, and they hold the base cases. The newest letters are `text1[row - 1]` and `text2[col - 1]`.
+
+## Classic problems
+
+### 1. Unique Paths
+
+**Problem:** a robot starts at the top-left of a grid with `rows` × `cols` cells. It can only move **right** or **down**. How many different paths reach the bottom-right? A 3 × 7 grid → **28**.
+
+**Idea:** the robot can only enter a cell from **above** or from the **left**. So the paths to a cell = paths to the cell above + paths to the cell on the left.
+
+1. **What `dp[row][col]` means:** the number of paths from the top-left to this cell.
+2. **Recurrence:** `dp[row][col] = dp[row - 1][col] + dp[row][col - 1]`
+3. **Base cases:** every cell in the first row and the first column is 1 (only one way: go straight).
+4. **Order:** row by row, left to right. **Answer:** `dp[rows - 1][cols - 1]`.
+
+The filled table for a 3 × 4 grid. Each cell = the cell above + the cell on the left:
+
+|  | col 0 | col 1 | col 2 | col 3 |
+| --- | --- | --- | --- | --- |
+| **row 0** | 1 | 1 | 1 | 1 |
+| **row 1** | 1 | 1 + 1 = 2 | 1 + 2 = 3 | 1 + 3 = 4 |
+| **row 2** | 1 | 2 + 1 = 3 | 3 + 3 = 6 | 4 + 6 = **10** |
+
+```js
+function uniquePaths(rows, cols) {
+    // dp[row][col] = number of paths from the top-left to this cell.
+    const dp = Array.from({ length: rows }, () => new Array(cols).fill(0));
+
+    // Base cases: one straight path to any cell in row 0 or column 0.
+    for (let col = 0; col < cols; col++) {
+        dp[0][col] = 1;
+    }
+    for (let row = 0; row < rows; row++) {
+        dp[row][0] = 1;
+    }
+
+    // Row by row, left to right: above and left are always ready.
+    for (let row = 1; row < rows; row++) {
+        for (let col = 1; col < cols; col++) {
+            const fromAbove = dp[row - 1][col];
+            const fromLeft = dp[row][col - 1];
+            dp[row][col] = fromAbove + fromLeft;
+        }
+    }
+
+    return dp[rows - 1][cols - 1];
+}
+
+console.log(uniquePaths(3, 4)); // 10
+console.log(uniquePaths(3, 7)); // 28
+```
+
+**Saving space: keep one row.** Each cell only needs the row above and the current row. So keep a single row and update it in place: before the update, `dp[col]` still holds the cell **above**; `dp[col - 1]` already holds the new cell on the **left**.
+
+```js
+function uniquePathsOneRow(rows, cols) {
+    // One row of the table. Row 0 is all 1s.
+    const dp = new Array(cols).fill(1);
+
+    for (let row = 1; row < rows; row++) {
+        for (let col = 1; col < cols; col++) {
+            // dp[col] is still the cell above (the old row).
+            // dp[col - 1] is already the new cell on the left.
+            dp[col] = dp[col] + dp[col - 1];
+        }
+    }
+
+    return dp[cols - 1];
+}
+
+console.log(uniquePathsOneRow(3, 4)); // 10
+console.log(uniquePathsOneRow(3, 7)); // 28
+```
+
+The single row for a 3 × 4 grid goes `[1, 1, 1, 1]` → `[1, 2, 3, 4]` → `[1, 3, 6, 10]`: the same rows as the table above.
+
+**Time:** O(rows × cols), one step per cell. **Space:** O(rows × cols) for the table, O(cols) with one row.
+
+### 2. Longest Common Subsequence
+
+**Problem:** find the length of the longest sequence of letters that appears in **both** strings, in the same order (letters may be skipped). `"abcde"` and `"ace"` → **3** (`"ace"`).
+
+**In the real world:** tools like `git diff` compare two files by finding the lines they have in common, in order. That is this same question, with lines instead of letters.
+
+**Idea:** look at the **last letter** of each prefix. If they match, that letter is part of the answer: take it, and solve both shorter prefixes. If they don't match, at least one of them is not in the answer: drop the last letter of one string or the other, and keep the better result.
+
+1. **What `dp[row][col]` means:** the LCS length of the first `row` letters of `text1` and the first `col` letters of `text2`.
+2. **Recurrence:** if `text1[row - 1] === text2[col - 1]`: `dp[row][col] = dp[row - 1][col - 1] + 1` (diagonal + 1). Otherwise: `dp[row][col] = max(dp[row - 1][col], dp[row][col - 1])` (best of above and left).
+3. **Base cases:** row 0 and column 0 are all 0 (an empty string shares nothing).
+4. **Order:** row by row, left to right. **Answer:** the bottom-right cell, `dp[length1][length2]`.
+
+The filled table for `"abcde"` (rows) and `"ace"` (columns). **Bold** cells are letter matches (diagonal + 1):
+
+|  | "" | a | c | e |
+| --- | --- | --- | --- | --- |
+| **""** | 0 | 0 | 0 | 0 |
+| **a** | 0 | **1** | 1 | 1 |
+| **b** | 0 | 1 | 1 | 1 |
+| **c** | 0 | 1 | **2** | 2 |
+| **d** | 0 | 1 | 2 | 2 |
+| **e** | 0 | 1 | 2 | **3** |
+
+For example, row `c`, column `c`: the letters match, so take the diagonal (row `b`, column `a`) = 1, plus 1 = 2.
+
+**Bottom-up (tabulation):**
+
+```js
+function longestCommonSubsequence(text1, text2) {
+    const rows = text1.length + 1;
+    const cols = text2.length + 1;
+
+    // dp[row][col] = LCS of the first `row` letters of text1
+    // and the first `col` letters of text2. Row 0 and column 0 stay 0.
+    const dp = Array.from({ length: rows }, () => new Array(cols).fill(0));
+
+    for (let row = 1; row < rows; row++) {
+        for (let col = 1; col < cols; col++) {
+            if (text1[row - 1] === text2[col - 1]) {
+                // Same last letter: it joins the LCS of both shorter parts.
+                dp[row][col] = dp[row - 1][col - 1] + 1;
+            } else {
+                // Different: drop a letter from one side, keep the better.
+                const dropFromText1 = dp[row - 1][col];
+                const dropFromText2 = dp[row][col - 1];
+                dp[row][col] = Math.max(dropFromText1, dropFromText2);
+            }
+        }
+    }
+
+    return dp[rows - 1][cols - 1];
+}
+
+console.log(longestCommonSubsequence("abcde", "ace")); // 3
+console.log(longestCommonSubsequence("abc", "def")); // 0
+```
+
+**Top-down (memoization).** With two changing values, the memo key is both numbers joined into one string, like `"5,3"`.
+
+```js
+function lcsMemo(text1, text2) {
+    const memo = {};
+
+    // best(row, col) = LCS of the first `row` and first `col` letters.
+    function best(row, col) {
+        // An empty string shares nothing.
+        if (row === 0 || col === 0) {
+            return 0;
+        }
+
+        const key = row + "," + col;
+        if (memo[key] !== undefined) {
+            return memo[key];
+        }
+
+        let answer = 0;
+        if (text1[row - 1] === text2[col - 1]) {
+            answer = best(row - 1, col - 1) + 1;
+        } else {
+            answer = Math.max(best(row - 1, col), best(row, col - 1));
+        }
+
+        memo[key] = answer;
+        return answer;
+    }
+
+    return best(text1.length, text2.length);
+}
+
+console.log(lcsMemo("abcde", "ace")); // 3
+```
+
+**Time:** O(m × n), where m and n are the two lengths: one step per cell. **Space:** O(m × n) for the table (or memo). Each cell only reads the row above, so keeping two rows brings it down to O(n).
+
+### 3. Edit Distance
+
+**Problem:** find the fewest edits to turn `word1` into `word2`. One edit is: **insert** a letter, **delete** a letter, or **replace** a letter. `"horse"` → `"ros"` takes **3**: replace h with r (`rorse`), delete r (`rose`), delete e (`ros`).
+
+**In the real world:** spell checkers use this number to suggest the closest real word when you make a typo.
+
+**Idea:** look at the last letter of each prefix. If they are the same, no edit is needed for them: the answer is the diagonal. If they differ, try all three edits and keep the cheapest, plus 1 for the edit itself:
+
+- **delete** the last letter of `word1` → then solve `dp[row - 1][col]` (above);
+- **insert** the last letter of `word2` → then solve `dp[row][col - 1]` (left);
+- **replace** one last letter with the other → then solve `dp[row - 1][col - 1]` (diagonal).
+
+1. **What `dp[row][col]` means:** the fewest edits to turn the first `row` letters of `word1` into the first `col` letters of `word2`.
+2. **Recurrence:** same letter: `dp[row][col] = dp[row - 1][col - 1]`. Different: `dp[row][col] = 1 + min(above, left, diagonal)`.
+3. **Base cases:** `dp[row][0] = row` (delete every letter), `dp[0][col] = col` (insert every letter). **Not** zeros, unlike LCS.
+4. **Order:** row by row, left to right. **Answer:** the bottom-right cell.
+
+The filled table for `"horse"` (rows) and `"ros"` (columns). **Bold** cells are same-letter cells (copied from the diagonal):
+
+|  | "" | r | o | s |
+| --- | --- | --- | --- | --- |
+| **""** | 0 | 1 | 2 | 3 |
+| **h** | 1 | 1 | 2 | 3 |
+| **o** | 2 | 2 | **1** | 2 |
+| **r** | 3 | **2** | 2 | 2 |
+| **s** | 4 | 3 | 3 | **2** |
+| **e** | 5 | 4 | 4 | 3 |
+
+For example, row `h`, column `r`: the letters differ, so it's 1 + min(above 1, left 1, diagonal 0) = 1 (replace h with r).
+
+```js
+function minDistance(word1, word2) {
+    const rows = word1.length + 1;
+    const cols = word2.length + 1;
+    const dp = Array.from({ length: rows }, () => new Array(cols).fill(0));
+
+    // Base cases: delete every letter, or insert every letter.
+    for (let row = 0; row < rows; row++) {
+        dp[row][0] = row;
+    }
+    for (let col = 0; col < cols; col++) {
+        dp[0][col] = col;
+    }
+
+    for (let row = 1; row < rows; row++) {
+        for (let col = 1; col < cols; col++) {
+            if (word1[row - 1] === word2[col - 1]) {
+                // Same letter: no edit needed for it.
+                dp[row][col] = dp[row - 1][col - 1];
+            } else {
+                // Edits still needed after each kind of edit.
+                const ifDelete = dp[row - 1][col];
+                const ifInsert = dp[row][col - 1];
+                const ifReplace = dp[row - 1][col - 1];
+                const cheapest = Math.min(ifDelete, ifInsert, ifReplace);
+
+                // + 1 for the edit we just made.
+                dp[row][col] = cheapest + 1;
+            }
+        }
+    }
+
+    return dp[rows - 1][cols - 1];
+}
+
+console.log(minDistance("horse", "ros")); // 3
+console.log(minDistance("intention", "execution")); // 5
+```
+
+**Time:** O(m × n), one step per cell. **Space:** O(m × n) for the table; O(n) if you keep only two rows.
+
+### 4. Longest Palindromic Substring (brief)
+
+**Problem:** find the longest **substring** (no skipping) that reads the same both ways. `"babad"` → `"bab"` (`"aba"` is also fine).
+
+**Idea:** a piece is a palindrome if its two end letters match **and** the piece inside them is a palindrome. Here the two changing values are the **start** and **end** of the piece.
+
+1. **What `dp[start][end]` means:** is the piece from `start` to `end` (both included) a palindrome?
+2. **Recurrence:** `dp[start][end] = (text[start] === text[end]) && dp[start + 1][end - 1]`
+3. **Base cases:** pieces of length 1 are palindromes. Pieces of length 2 are palindromes if both letters match.
+4. **Order:** by **length**, shortest first. This is the new part: the piece inside is shorter, so all shorter pieces must be done first. Row by row would not work here. **Answer:** the longest piece that is `true`.
+
+```js
+function longestPalindromeDP(text) {
+    const size = text.length;
+    const dp = Array.from({ length: size }, () => new Array(size).fill(false));
+    let bestStart = 0;
+    let bestLength = 1;
+
+    // Shortest pieces first: each piece needs the piece inside it.
+    for (let length = 1; length <= size; length++) {
+        for (let start = 0; start + length <= size; start++) {
+            const end = start + length - 1;
+            const endsMatch = text[start] === text[end];
+
+            if (length <= 2) {
+                dp[start][end] = endsMatch;
+            } else {
+                dp[start][end] = endsMatch && dp[start + 1][end - 1];
+            }
+
+            if (dp[start][end] && length > bestLength) {
+                bestStart = start;
+                bestLength = length;
+            }
+        }
+    }
+
+    return text.slice(bestStart, bestStart + bestLength);
+}
+
+console.log(longestPalindromeDP("babad")); // bab
+console.log(longestPalindromeDP("cbbd")); // bb
+```
+
+**Time:** O(n²) cells · **Space:** O(n²) for the table.
+
+In interviews, many people use **expand around the center** instead: same O(n²) time, but **O(1) space**. Every palindrome has a center (one letter, like `"aba"`, or a gap between two letters, like `"abba"`). From each center, grow outward while the two ends match.
+
+```js
+function longestPalindrome(text) {
+    let bestStart = 0;
+    let bestLength = 0;
+
+    // Grow outward from a center while both ends match.
+    function expand(left, right) {
+        while (left >= 0 && right < text.length && text[left] === text[right]) {
+            left--;
+            right++;
+        }
+
+        // The loop went one step too far on each side.
+        const length = right - left - 1;
+        if (length > bestLength) {
+            bestStart = left + 1;
+            bestLength = length;
+        }
+    }
+
+    for (let center = 0; center < text.length; center++) {
+        // Odd length ("aba") and even length ("abba").
+        expand(center, center);
+        expand(center, center + 1);
+    }
+
+    return text.slice(bestStart, bestStart + bestLength);
+}
+
+console.log(longestPalindrome("babad")); // bab
+console.log(longestPalindrome("cbbd")); // bb
+```
+
+## How to spot it
+
+- **Two strings** to compare: "common subsequence", "edit", "convert one into the other", "interleave". The table is `(m + 1) × (n + 1)`.
+- **A grid** where you move only right and down: "number of paths", "minimum path sum".
+- **One string, but the answer depends on a start and an end**: palindromes. Fill by length.
+- In general: if describing a smaller version needs **two numbers**, the table is 2D.
+
+## Common mistakes
+
+- **`new Array(rows).fill(new Array(cols))`.** Every row is the same array. Use `Array.from({ length: rows }, () => new Array(cols).fill(0))`.
+- **Off by one with the extra row and column.** In string problems, the letter for row `row` is `text1[row - 1]`.
+- **Wrong base cases.** LCS starts with zeros. Edit Distance starts with `0, 1, 2, 3...` along the first row and column.
+- **Wrong answer cell.** With the extra row and column, the answer is `dp[m][n]`. Without them (Unique Paths), it's `dp[rows - 1][cols - 1]`.
+- **Wrong fill order.** Row by row only works if a cell reads above, left and diagonal. For palindromes, the cell reads the piece inside, so fill by length.
+
+## In the interview
+
+- **Draw the table** for the example, with the empty string as row 0 and column 0. Fill a few cells out loud. Interviewers like seeing this.
+- Say the recipe, and say which neighbours each cell reads: "match → diagonal + 1, else the max of above and left."
+- Mention the space saving: "each row only needs the row above, so I can keep two rows."
+
+> "Let `dp[row][col]` be the LCS of the first `row` letters of text1 and the first `col` letters of text2. If the last letters match, it's the diagonal plus 1. Otherwise it's the max of above and left. Row 0 and column 0 are 0. I fill row by row, and the answer is the bottom-right cell. That's m × n cells, O(1) each."
+
+**Likely follow-up:** "Can you print the actual subsequence, not just its length?"
+
+**Answer:** "Yes. I start at the bottom-right cell and walk back. If the two letters match, that letter is in the answer and I move diagonally. If not, I move to whichever neighbour, above or left, has the bigger number. I stop at row 0 or column 0, then reverse the letters I collected."
+
+<Callout title="Remember this" type="success">
+  - 2D DP = **two changing values** (row and column, or a position in each of two strings), so the answers fit in a **table**.
+  - A cell is usually built from **above, left and the diagonal**, so fill **row by row, left to right**.
+  - Two strings → a `(m + 1) × (n + 1)` table. Row 0 and column 0 are the **empty string**.
+  - **Unique Paths:** above + left. **LCS:** match → diagonal + 1, else max(above, left). **Edit Distance:** match → diagonal, else 1 + min(above, left, diagonal).
+  - Make tables with `Array.from({ length: rows }, () => new Array(cols).fill(0))`, never `fill(new Array(...))`.
+  - Each row only needs the row above → keep **one or two rows** for O(n) space.
+</Callout>

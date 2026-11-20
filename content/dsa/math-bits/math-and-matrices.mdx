@@ -2,9 +2,517 @@
 title: "Math and Matrices"
 description: "Matrix moves and number tricks."
 icon: RotateCw
-planned: true
 ---
 
-- Rotate an image
-- Spiral matrix
-- Pow(x, n) and reversing digits
+## The idea
+
+Two kinds of problems live on this page:
+
+- **Matrix problems** move numbers around a grid: rotate it, read it in a spiral, wipe out rows and columns. There's no clever algorithm here, just careful work with indexes.
+- **Number problems** use one small math fact to go faster: halve the exponent, take a number apart digit by digit, spot a loop, or use Euclid's rule for the greatest common divisor.
+
+An everyday example: when you **rotate a photo** on your phone, the app turns a grid of pixels a quarter turn. That is exactly the "Rotate Image" problem below.
+
+## How it works
+
+### A matrix in JavaScript
+
+A matrix is an array of rows, and each row is an array. `matrix[row][col]` reads one cell.
+
+```js
+const matrix = [
+    [1, 2, 3],
+    [4, 5, 6],
+    [7, 8, 9],
+];
+
+const rows = matrix.length;
+const cols = matrix[0].length;
+
+console.log(rows, cols); // 3 3
+console.log(matrix[1][2]); // 6
+```
+
+|  | col 0 | col 1 | col 2 |
+| --- | --- | --- | --- |
+| **row 0** | 1 | 2 | 3 |
+| **row 1** | 4 | 5 | 6 |
+| **row 2** | 7 | 8 | 9 |
+
+- `matrix.length` is the number of **rows**. `matrix[0].length` is the number of **columns**.
+- The **main diagonal** is the cells where `row === col`: 1, 5, 9.
+- Visiting every cell takes two loops, rows outside and columns inside: **O(rows × cols)**.
+- To build a new matrix, see [Making 2D arrays the right way](../js-toolkit/arrays.mdx).
+
+### Taking a number apart
+
+Many number problems take digits off the end, one at a time. `% 10` gives the last digit, and `Math.floor(number / 10)` drops it. More on this in [Numbers and Math](../js-toolkit/numbers-and-math.mdx).
+
+```js
+let number = 472;
+
+while (number > 0) {
+    const lastDigit = number % 10;
+    console.log(lastDigit);
+
+    number = Math.floor(number / 10);
+}
+// 2
+// 7
+// 4
+```
+
+A number n has about log₁₀(n) digits, so a digit loop is **O(log n)**.
+
+## Classic problems: matrices
+
+### 1. Rotate Image
+
+**Problem:** rotate an n × n matrix 90° clockwise, **in place** (don't make a second matrix).
+
+**Idea:** a quarter turn is two simple moves done one after the other.
+
+1. **Transpose:** flip the matrix over its main diagonal, so row 0 becomes column 0. Swap `matrix[row][col]` with `matrix[col][row]`.
+2. **Reverse each row.**
+
+```text
+Start        Transpose     Reverse each row
+1 2 3        1 4 7         7 4 1
+4 5 6        2 5 8         8 5 2
+7 8 9        3 6 9         9 6 3
+```
+
+```js
+function rotate(matrix) {
+    const size = matrix.length;
+
+    // Step 1: transpose. Swap each cell above the diagonal with its mirror.
+    for (let row = 0; row < size; row++) {
+        // col starts at row + 1, so each pair is swapped only once.
+        for (let col = row + 1; col < size; col++) {
+            const temp = matrix[row][col];
+            matrix[row][col] = matrix[col][row];
+            matrix[col][row] = temp;
+        }
+    }
+
+    // Step 2: reverse each row.
+    for (const line of matrix) {
+        line.reverse();
+    }
+}
+
+const image = [
+    [1, 2, 3],
+    [4, 5, 6],
+    [7, 8, 9],
+];
+
+rotate(image);
+console.log(image); // [ [ 7, 4, 1 ], [ 8, 5, 2 ], [ 9, 6, 3 ] ]
+```
+
+**Time:** O(n²) · **Space:** O(1). Every cell is moved a fixed number of times, and the only extra memory is `temp`.
+
+### 2. Spiral Matrix
+
+**Problem:** return every number in the matrix in spiral order: clockwise, starting top left.
+
+```text
+ 1  2  3  4
+ 5  6  7  8
+ 9 10 11 12
+```
+
+→ `[1, 2, 3, 4, 8, 12, 11, 10, 9, 5, 6, 7]`
+
+**Idea:** keep four **walls**: `top`, `bottom`, `left` and `right`. Walk along one side, then move that wall one step in, so the side is never walked again. Go round (top row, right column, bottom row, left column) until the walls cross.
+
+The code comes in three steps. Paste them in order into one file to run it.
+
+**Step 1: walk the top row, then the right column.**
+
+```js
+function walkTopAndRight(matrix, walls, result) {
+    // Top row, left to right. Then move the top wall down.
+    for (let col = walls.left; col <= walls.right; col++) {
+        result.push(matrix[walls.top][col]);
+    }
+    walls.top++;
+
+    // Right column, top to bottom. Then move the right wall left.
+    for (let row = walls.top; row <= walls.bottom; row++) {
+        result.push(matrix[row][walls.right]);
+    }
+    walls.right--;
+}
+```
+
+**Step 2: walk the bottom row, then the left column.** The walls just moved, so first check that a row (or a column) is still left. Without the check, a single middle row would be walked twice.
+
+```js
+function walkBottomAndLeft(matrix, walls, result) {
+    // Bottom row, right to left, if a row is still left.
+    if (walls.top <= walls.bottom) {
+        for (let col = walls.right; col >= walls.left; col--) {
+            result.push(matrix[walls.bottom][col]);
+        }
+        walls.bottom--;
+    }
+
+    // Left column, bottom to top, if a column is still left.
+    if (walls.left <= walls.right) {
+        for (let row = walls.bottom; row >= walls.top; row--) {
+            result.push(matrix[row][walls.left]);
+        }
+        walls.left++;
+    }
+}
+```
+
+**Step 3: go round until the walls cross.**
+
+```js
+function spiralOrder(matrix) {
+    const result = [];
+    const walls = {
+        top: 0,
+        bottom: matrix.length - 1,
+        left: 0,
+        right: matrix[0].length - 1,
+    };
+
+    // Each loop peels off one outer ring.
+    while (walls.top <= walls.bottom && walls.left <= walls.right) {
+        walkTopAndRight(matrix, walls, result);
+        walkBottomAndLeft(matrix, walls, result);
+    }
+
+    return result;
+}
+
+const grid = [
+    [1, 2, 3, 4],
+    [5, 6, 7, 8],
+    [9, 10, 11, 12],
+];
+
+console.log(spiralOrder(grid).join(" ")); // 1 2 3 4 8 12 11 10 9 5 6 7
+```
+
+| Ring | Walk | Numbers added | Wall moved |
+| --- | --- | --- | --- |
+| 1 | top row → | 1 2 3 4 | top: 0 → 1 |
+| 1 | right column ↓ | 8 12 | right: 3 → 2 |
+| 1 | bottom row ← | 11 10 9 | bottom: 2 → 1 |
+| 1 | left column ↑ | 5 | left: 0 → 1 |
+| 2 | top row → | 6 7 | top: 1 → 2 |
+| 2 | right column ↓ | none: top (2) is now past bottom (1) | right: 2 → 1 |
+| 2 | bottom row | skipped: top > bottom | |
+| 2 | left column ↑ | none | left: 1 → 2 |
+
+Now `left` (2) is past `right` (1), so the loop stops.
+
+**Time:** O(rows × cols) · **Space:** O(1). Every cell is visited once. Apart from the answer, we only keep four numbers.
+
+### 3. Set Matrix Zeroes
+
+**Problem:** if a cell is 0, set its whole row and its whole column to 0. Change the matrix in place.
+
+```text
+1 1 1        1 0 1
+1 0 1   →    0 0 0
+1 1 1        1 0 1
+```
+
+**Idea:** don't change anything while you are still looking. If you zero a row right away, the new zeros look like original zeros, and they spread until the whole matrix is 0. So: first **find** the rows and columns that have a zero, then **change** them.
+
+```js
+function setZeroes(matrix) {
+    const zeroRows = new Set();
+    const zeroCols = new Set();
+
+    // Pass 1: find the zeros. Don't change anything yet.
+    for (let row = 0; row < matrix.length; row++) {
+        for (let col = 0; col < matrix[0].length; col++) {
+            if (matrix[row][col] === 0) {
+                zeroRows.add(row);
+                zeroCols.add(col);
+            }
+        }
+    }
+
+    // Pass 2: zero every cell in a marked row or column.
+    for (let row = 0; row < matrix.length; row++) {
+        for (let col = 0; col < matrix[0].length; col++) {
+            if (zeroRows.has(row) || zeroCols.has(col)) {
+                matrix[row][col] = 0;
+            }
+        }
+    }
+}
+
+const grid = [[1, 1, 1], [1, 0, 1], [1, 1, 1]];
+setZeroes(grid);
+console.log(grid); // [ [ 1, 0, 1 ], [ 0, 0, 0 ], [ 1, 0, 1 ] ]
+```
+
+**Time:** O(rows × cols) · **Space:** O(rows + cols). Two passes over the matrix, and the Sets hold at most one entry per row and per column.
+
+**Follow-up: O(1) space.** Use the matrix's own first row and first column as the two lists: `matrix[0][col] = 0` means "zero this column". Keep one extra true/false flag for whether the first row itself had a zero, because its cells are now busy as markers. Fill everything else first, and the first row and column last.
+
+## Classic problems: numbers
+
+### 4. Pow(x, n)
+
+**Problem:** work out `base` to the power `exponent`, without `**` or `Math.pow`. The exponent can be negative. `myPow(2, 10)` → 1024, `myPow(2, -2)` → 0.25.
+
+The recursive version (`fastPower`) is in [Recursion](../foundations/recursion.mdx). Here is the loop version, which needs no call stack.
+
+**Idea:** 13 in binary is `1101`, which is 8 + 4 + 1. So 3¹³ = 3⁸ × 3⁴ × 3¹. Keep squaring the base to get 3, 3², 3⁴, 3⁸, ..., and multiply into the result only the ones whose bit in the exponent is 1. For a negative exponent, x⁻ⁿ = (1/x)ⁿ: flip the base and make the exponent positive.
+
+```js
+function myPow(base, exponent) {
+    // x to the power -n is (1/x) to the power n.
+    if (exponent < 0) {
+        base = 1 / base;
+        exponent = -exponent;
+    }
+
+    let result = 1;
+
+    // power holds base, base², base⁴, base⁸, ...
+    let power = base;
+
+    while (exponent > 0) {
+        // The last bit of the exponent is 1: this power is part of the answer.
+        if (exponent % 2 === 1) {
+            result = result * power;
+        }
+
+        power = power * power;
+
+        // Drop the last bit of the exponent.
+        exponent = Math.floor(exponent / 2);
+    }
+
+    return result;
+}
+
+console.log(myPow(2, 10)); // 1024
+console.log(myPow(3, 13)); // 1594323
+console.log(myPow(2, -2)); // 0.25
+```
+
+How `myPow(3, 13)` runs:
+
+| Step | exponent | Last bit | result | power after |
+| --- | --- | --- | --- | --- |
+| start | 13 (`1101`) | | 1 | 3 |
+| 1 | 13 | 1 | 1 × 3 = 3 | 9 |
+| 2 | 6 (`110`) | 0 | 3 | 81 |
+| 3 | 3 (`11`) | 1 | 3 × 81 = 243 | 6561 |
+| 4 | 1 (`1`) | 1 | 243 × 6561 = **1594323** | 43046721 |
+
+Why `% 2` and `Math.floor(exponent / 2)` instead of `& 1` and `>> 1`? The exponent can be -2³¹. Flipped, that's 2³¹, which doesn't fit in the 32 bits that [bit operators](./bit-manipulation.mdx) use. Plain math works for any size.
+
+**Time:** O(log n) · **Space:** O(1). The exponent halves every loop, so a 32-bit exponent needs at most about 32 loops.
+
+### 5. Reverse Integer
+
+**Problem:** reverse the digits of a 32-bit signed whole number. If the result falls outside the 32-bit range (-2³¹ to 2³¹ - 1), return 0. 123 → 321, -123 → -321, 120 → 21, 1534236469 → 0 (its reverse, 9646324351, is too big).
+
+**Idea:** work with the number without its minus sign. Take digits off the end with `% 10`, and add each one to the reversed number with `reversed * 10 + lastDigit`. Put the sign back at the end, then check the range.
+
+```js
+function reverseInteger(number) {
+    const MAX = 2 ** 31 - 1;
+    const MIN = -(2 ** 31);
+
+    let rest = Math.abs(number);
+    let reversed = 0;
+
+    while (rest > 0) {
+        const lastDigit = rest % 10;
+        reversed = reversed * 10 + lastDigit;
+        rest = Math.floor(rest / 10);
+    }
+
+    if (number < 0) {
+        reversed = -reversed;
+    }
+
+    // Outside the 32-bit range: return 0.
+    if (reversed > MAX || reversed < MIN) {
+        return 0;
+    }
+
+    return reversed;
+}
+
+console.log(reverseInteger(123)); // 321
+console.log(reverseInteger(-123)); // -321
+console.log(reverseInteger(120)); // 21
+console.log(reverseInteger(1534236469)); // 0
+```
+
+This is safe in JavaScript: numbers are exact up to 2⁵³, and a reversed 32-bit number has at most 10 digits.
+
+**The strict version.** The problem also says: pretend you **can't store** a number outside the 32-bit range. In Java or C++, `reversed * 10` itself would overflow before you could check it. So check **before** you multiply. `reversed * 10 + lastDigit > limit` is the same as `reversed > (limit - lastDigit) / 10`, which never builds the big number.
+
+```js
+function reverseIntegerStrict(number) {
+    // The biggest size allowed: 2^31 for negatives, 2^31 - 1 otherwise.
+    let limit = 2 ** 31 - 1;
+    if (number < 0) {
+        limit = 2 ** 31;
+    }
+
+    let rest = Math.abs(number);
+    let reversed = 0;
+
+    while (rest > 0) {
+        const lastDigit = rest % 10;
+
+        // Would reversed * 10 + lastDigit go past the limit? Check first.
+        if (reversed > (limit - lastDigit) / 10) {
+            return 0;
+        }
+
+        reversed = reversed * 10 + lastDigit;
+        rest = Math.floor(rest / 10);
+    }
+
+    if (number < 0) {
+        return -reversed;
+    }
+    return reversed;
+}
+
+console.log(reverseIntegerStrict(-2147483412)); // -2143847412
+console.log(reverseIntegerStrict(1534236469)); // 0
+```
+
+**Time:** O(log n) · **Space:** O(1). One loop per digit, so at most 10 loops.
+
+### 6. Happy Number
+
+**Problem:** replace a number with the sum of the squares of its digits, again and again. If you reach 1, the number is **happy**. If it loops forever without reaching 1, it isn't. 19 → true, 2 → false.
+
+```text
+19 → 1² + 9² = 82 → 8² + 2² = 68 → 6² + 8² = 100 → 1² + 0² + 0² = 1   happy
+2 → 4 → 16 → 37 → 58 → 89 → 145 → 42 → 20 → 4 → ...                  loops
+```
+
+**Idea:** the chain either reaches 1 or falls into a loop. Remember every number you've seen in a Set. Meeting one again means you're in a loop.
+
+```js
+function sumOfSquares(number) {
+    let sum = 0;
+
+    while (number > 0) {
+        const digit = number % 10;
+        sum = sum + digit * digit;
+        number = Math.floor(number / 10);
+    }
+
+    return sum;
+}
+
+function isHappy(number) {
+    const seen = new Set();
+
+    while (number !== 1) {
+        // Seen it before: we are in a loop that never reaches 1.
+        if (seen.has(number)) {
+            return false;
+        }
+
+        seen.add(number);
+        number = sumOfSquares(number);
+    }
+
+    return true;
+}
+
+console.log(isHappy(19)); // true
+console.log(isHappy(2)); // false
+```
+
+**Time:** O(log n) · **Space:** O(log n). Each step costs one loop per digit. The numbers fall fast: even a 3-digit number gives at most 9² + 9² + 9² = 243, so the chain stays short. The Set holds that short chain.
+
+To use O(1) space, treat the chain like a linked list and find the loop with [fast and slow pointers](../linked-lists/fast-slow-pointers.mdx): one moves one step at a time, the other two steps. If they meet at a number other than 1, there's a loop.
+
+### 7. GCD: greatest common divisor
+
+**Problem:** find the biggest number that divides both numbers with nothing left over. `gcd(48, 18)` → 6.
+
+**Idea (Euclid's rule):** `gcd(a, b)` is the same as `gcd(b, a % b)`. Anything that divides both a and b also divides what's left after dividing them. Repeat until the second number is 0. The first number is then the answer.
+
+```js
+function gcd(first, second) {
+    while (second !== 0) {
+        const remainder = first % second;
+        first = second;
+        second = remainder;
+    }
+
+    return first;
+}
+
+// Least common multiple. Divide first, so the number stays small.
+function lcm(first, second) {
+    return (first / gcd(first, second)) * second;
+}
+
+console.log(gcd(48, 18)); // 6
+console.log(gcd(7, 5)); // 1
+console.log(lcm(4, 6)); // 12
+```
+
+| first | second | first % second |
+| --- | --- | --- |
+| 48 | 18 | 12 |
+| 18 | 12 | 6 |
+| 12 | 6 | 0 |
+| **6** | 0 | stop: the answer is 6 |
+
+**Time:** O(log(min(a, b))) · **Space:** O(1). Every two steps, the numbers at least halve, so even huge numbers need only a few dozen steps. It shows up when you simplify a fraction (6/8 → 3/4), in "GCD of Strings", and whenever you need an LCM.
+
+## How to spot it
+
+- **"In place"**, **"rotate"**, **"spiral"**, **"clockwise"**, **"its row and column"** → matrix index work. Draw a 3 × 3 (or 3 × 4) and move a few cells by hand first.
+- **"x to the power n"** with a big n, or powers with a modulo → fast power, O(log n).
+- **"Reverse the digits"**, **"sum of digits"**, **"palindrome number"** → a `% 10` loop.
+- **"Does the process loop forever?"** → find the loop with a Set, or with fast and slow pointers.
+- **"Divides both"**, **"simplify"**, **"smallest common multiple"** → GCD.
+
+## Common mistakes
+
+- **Transposing with `col` starting at 0.** Each pair is swapped twice, so the matrix ends up unchanged. Start at `row + 1`.
+- **Spiral without the `top <= bottom` and `left <= right` checks.** A leftover middle row or column gets added twice: `[[1, 2, 3]]` would give `[1, 2, 3, 2, 1]`.
+- **Set Matrix Zeroes: zeroing during the first scan.** The new zeros spread. Find first, change later.
+- **Mixing up `matrix.length` and `matrix[0].length`** on a matrix that isn't square.
+- **Pow: forgetting negative exponents**, or using `>> 1` on an exponent that can be 2³¹.
+- **Digit loops on negative numbers.** `-123 % 10` is -3, and `Math.floor(-123 / 10)` is -13. Take `Math.abs` first.
+- **Happy Number with no `seen` Set.** An unhappy number loops forever.
+
+## In the interview
+
+- For a matrix, say where **one cell** goes before writing code: "rotating clockwise sends (row, col) to (col, n - 1 - row)".
+- For a number trick, say the math fact first ("x¹³ = x⁸ · x⁴ · x¹"), then the code.
+
+> "Rotating 90° clockwise sends cell (row, col) to (col, n - 1 - row). I can do that in place with two simple passes: transpose the matrix, which swaps rows and columns, then reverse each row. Each cell moves a fixed number of times, so it's O(n²) time and O(1) extra space."
+
+**Likely follow-up:** "And counter-clockwise?"
+
+**Answer:** "Transpose, then reverse each column instead of each row, which is the same as reversing the order of the rows. Or reverse each row first, then transpose."
+
+<Callout title="Remember this" type="success">
+  - A matrix is an array of rows: `matrix[row][col]`. Rows = `matrix.length`, columns = `matrix[0].length`.
+  - Rotate 90° clockwise in place = **transpose, then reverse each row**. O(n²) time, O(1) space.
+  - Spiral = four walls; move a wall after each side, and check `top <= bottom` and `left <= right` before the last two sides.
+  - Set Matrix Zeroes: **find first, change later**.
+  - Fast power: square the base, halve the exponent → O(log n). Negative exponent: use 1 / base.
+  - Digits: `% 10` and `Math.floor(number / 10)` on the absolute value. GCD: `gcd(a, b) = gcd(b, a % b)`.
+</Callout>

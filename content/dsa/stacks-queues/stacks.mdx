@@ -2,10 +2,392 @@
 title: "Stacks"
 description: "Last in, first out: matching brackets and undo."
 icon: Layers2
-planned: true
 ---
 
-- Stack with a JavaScript array
-- Valid parentheses
-- Min stack, evaluate expressions
-- Writing a Stack class
+## The idea
+
+A stack is a list where you add and remove items at **one end only**, called the **top**. The last item you put in is the first one you take out. This is called **LIFO**: Last In, First Out.
+
+Think of a **stack of plates**. You put a clean plate on top, and you take a plate from the top. To reach the bottom plate, you first have to take off every plate above it.
+
+You use stacks every day:
+
+- **Undo** (Ctrl+Z): each change you make is pushed on a stack. Undo takes off the most recent one.
+- The browser **back button**: each page you visit is pushed. Back takes you to the page on top.
+- The **call stack**: JavaScript keeps waiting function calls on a stack (see [Recursion](../foundations/recursion.mdx)).
+
+## How it works
+
+### A stack is an array where you only use the end
+
+A stack needs three operations:
+
+- **push:** add an item to the top.
+- **pop:** remove the top item and give it back.
+- **peek:** look at the top item without removing it.
+
+A JavaScript array already does all three. The **end of the array is the top**.
+
+```js
+const stack = [];
+
+stack.push(10);
+stack.push(20);
+stack.push(30);
+console.log(stack); // [ 10, 20, 30 ]
+
+// Peek: look at the top without removing it.
+console.log(stack[stack.length - 1]); // 30
+
+// Pop: remove the top and get it back.
+console.log(stack.pop()); // 30
+console.log(stack); // [ 10, 20 ]
+
+console.log(stack.length === 0); // false
+```
+
+Step by step:
+
+| Step | Operation | Stack (bottom → top) | Gives back |
+| --- | --- | --- | --- |
+| 1 | push(10) | [10] | |
+| 2 | push(20) | [10, 20] | |
+| 3 | push(30) | [10, 20, 30] | |
+| 4 | peek | [10, 20, 30] | 30 |
+| 5 | pop | [10, 20] | 30 |
+
+Why the end and not the front? `push` and `pop` work at the end, so nothing else moves: **O(1)**. `unshift` and `shift` work at the front, and every other item has to move one place: **O(n)**. See [Arrays](../js-toolkit/arrays.mdx).
+
+| Operation | In JavaScript | Time |
+| --- | --- | --- |
+| push | `stack.push(value)` | O(1) |
+| pop | `stack.pop()` | O(1) |
+| peek | `stack[stack.length - 1]` | O(1) |
+| is it empty? | `stack.length === 0` | O(1) |
+| find an item | a loop | O(n) |
+
+One trap: `pop()` on an **empty** array doesn't throw an error. It quietly gives back `undefined`.
+
+```js
+const empty = [];
+console.log(empty.pop()); // undefined
+```
+
+### Writing a Stack class
+
+In an interview, a plain array is usually enough. But you may be asked to "implement a stack", and a class with clear method names can make your solution easier to read.
+
+```js
+class Stack {
+    constructor() {
+        this.items = [];
+    }
+
+    // Add to the top.
+    push(value) {
+        this.items.push(value);
+    }
+
+    // Remove the top and return it. undefined if empty.
+    pop() {
+        return this.items.pop();
+    }
+
+    // Look at the top without removing it.
+    peek() {
+        return this.items[this.items.length - 1];
+    }
+
+    isEmpty() {
+        return this.items.length === 0;
+    }
+
+    size() {
+        return this.items.length;
+    }
+}
+```
+
+Here it is as a browser history. The page on top is the page you're on.
+
+```js
+const history = new Stack();
+
+history.push("home");
+history.push("search");
+history.push("product");
+
+console.log(history.peek()); // product
+
+// The back button: leave the top page.
+history.pop();
+console.log(history.peek()); // search
+console.log(history.size()); // 2
+```
+
+### A stack reverses the order
+
+Items come out in the opposite order they went in. Push the letters of a word, pop them all, and you get the word backwards.
+
+```js
+function reverseWithStack(text) {
+    const stack = [];
+
+    for (const letter of text) {
+        stack.push(letter);
+    }
+
+    let reversed = "";
+    while (stack.length > 0) {
+        reversed = reversed + stack.pop();
+    }
+
+    return reversed;
+}
+
+console.log(reverseWithStack("hello")); // olleh
+```
+
+**Time:** O(n) · **Space:** O(n). Each letter is pushed once and popped once, and the stack holds all of them.
+
+## Classic problems
+
+### 1. Valid Parentheses
+
+**Problem:** a string has only the characters `( ) [ ] { }`. Return `true` if every bracket is closed by the same type, in the right order. `"({[]})"` is `true`. `"(]"` and `"([)]"` are `false`.
+
+**Idea:** the bracket opened **most recently** must be closed **first**. That is last in, first out, so use a stack.
+
+- An **opening** bracket: push it.
+- A **closing** bracket: pop the top. It must be the matching opener. If not, return `false`.
+- At the end, the stack must be **empty**. If not, some bracket was never closed.
+
+```js
+function isValid(text) {
+    // Each closing bracket, and the opener it needs.
+    const openerFor = {
+        ")": "(",
+        "]": "[",
+        "}": "{",
+    };
+
+    const stack = [];
+
+    for (const bracket of text) {
+        if (bracket === "(" || bracket === "[" || bracket === "{") {
+            stack.push(bracket);
+        } else {
+            // On an empty stack, pop() gives undefined: never a match.
+            const lastOpener = stack.pop();
+
+            if (lastOpener !== openerFor[bracket]) {
+                return false;
+            }
+        }
+    }
+
+    // Every opener must have been closed.
+    return stack.length === 0;
+}
+```
+
+How `"({[]})"` runs:
+
+| Bracket | What happens | Stack after |
+| --- | --- | --- |
+| `(` | opener: push | `(` |
+| `{` | opener: push | `( {` |
+| `[` | opener: push | `( { [` |
+| `]` | pop `[`, it matches | `( {` |
+| `}` | pop `{`, it matches | `(` |
+| `)` | pop `(`, it matches | (empty) |
+
+The stack is empty at the end, so it's `true`. With `"([)]"`, the `)` pops `[`, which doesn't match, so it's `false`.
+
+```js
+console.log(isValid("({[]})")); // true
+console.log(isValid("(]")); // false
+console.log(isValid("([)]")); // false
+console.log(isValid("((")); // false
+console.log(isValid(")")); // false
+```
+
+**Time:** O(n) · **Space:** O(n). We look at each bracket once, and in the worst case (all openers) every bracket waits on the stack.
+
+### 2. Min Stack
+
+**Problem:** build a stack with `push`, `pop`, `top` and `getMin`. All four must be **O(1)**. `getMin` returns the smallest value in the stack.
+
+**Idea:** keeping one `min` variable isn't enough. When you pop the smallest value, what is the new smallest? You'd have to search the whole stack. So keep a **second stack**, `mins`. Each time you push a value, also push "the smallest value so far" onto `mins`. Then the top of `mins` is always the answer, and popping both stacks together keeps them in step.
+
+| Operation | values | mins | getMin() |
+| --- | --- | --- | --- |
+| push(5) | [5] | [5] | 5 |
+| push(3) | [5, 3] | [5, 3] | 3 |
+| push(7) | [5, 3, 7] | [5, 3, 3] | 3 |
+| pop() | [5, 3] | [5, 3] | 3 |
+| pop() | [5] | [5] | 5 |
+
+```js
+class MinStack {
+    constructor() {
+        this.values = [];
+        // mins[i] is the smallest of values[0] to values[i].
+        this.mins = [];
+    }
+
+    push(value) {
+        this.values.push(value);
+
+        if (this.mins.length === 0) {
+            this.mins.push(value);
+        } else {
+            const smallestSoFar = Math.min(value, this.getMin());
+            this.mins.push(smallestSoFar);
+        }
+    }
+
+    pop() {
+        this.mins.pop();
+        return this.values.pop();
+    }
+
+    top() {
+        return this.values[this.values.length - 1];
+    }
+
+    getMin() {
+        return this.mins[this.mins.length - 1];
+    }
+}
+```
+
+The same steps as the table:
+
+```js
+const minStack = new MinStack();
+
+minStack.push(5);
+minStack.push(3);
+minStack.push(7);
+console.log(minStack.getMin()); // 3
+
+minStack.pop();
+console.log(minStack.getMin()); // 3
+
+minStack.pop();
+console.log(minStack.getMin()); // 5
+console.log(minStack.top()); // 5
+```
+
+**Time:** O(1) for every operation, because each one only touches the top of the two arrays. **Space:** O(n), for the second stack.
+
+### 3. Evaluate Reverse Polish Notation
+
+**Problem:** an expression is written with each operator **after** its two numbers. `["2", "1", "+", "3", "*"]` means (2 + 1) × 3 = **9**. The operators are `+ - * /`, and division drops the part after the decimal point (it rounds toward zero). Return the result.
+
+**Idea:** numbers **wait** on a stack. When an operator comes, it uses the two most recent numbers: pop them, work out the result, and push it back. At the end, one number is left: the answer.
+
+Be careful with the order: the **first** pop is the **right** number. For `["4", "2", "-"]`, you pop 2, then 4, and work out 4 - 2.
+
+How `["4", "13", "5", "/", "+"]` runs:
+
+| Token | What happens | Stack after |
+| --- | --- | --- |
+| 4 | number: push | [4] |
+| 13 | number: push | [4, 13] |
+| 5 | number: push | [4, 13, 5] |
+| / | pop 5 (right), pop 13 (left). 13 / 5 = 2.6, drop the decimals: 2 | [4, 2] |
+| + | pop 2 (right), pop 4 (left). 4 + 2 = 6 | [6] |
+
+**Step 1: do one calculation.**
+
+```js
+function calculate(left, operator, right) {
+    if (operator === "+") {
+        return left + right;
+    }
+
+    if (operator === "-") {
+        return left - right;
+    }
+
+    if (operator === "*") {
+        return left * right;
+    }
+
+    // Division drops the decimals, toward zero: -3.5 becomes -3.
+    return Math.trunc(left / right);
+}
+```
+
+**Step 2: walk through the tokens with a stack.**
+
+```js
+function evalRPN(tokens) {
+    const operators = new Set(["+", "-", "*", "/"]);
+    const stack = [];
+
+    for (const token of tokens) {
+        if (operators.has(token)) {
+            // The first pop is the RIGHT number.
+            const right = stack.pop();
+            const left = stack.pop();
+            const result = calculate(left, token, right);
+            stack.push(result);
+        } else {
+            stack.push(Number(token));
+        }
+    }
+
+    return stack.pop();
+}
+
+console.log(evalRPN(["2", "1", "+", "3", "*"])); // 9
+console.log(evalRPN(["4", "13", "5", "/", "+"])); // 6
+console.log(evalRPN(["7", "-2", "/"])); // -3
+```
+
+`Math.trunc` matters for negative numbers: 7 / -2 is -3.5. `Math.trunc` gives -3, which is right. `Math.floor` would give -4.
+
+**Time:** O(n) · **Space:** O(n). Each token is handled once, and at most all the numbers wait on the stack together.
+
+## How to spot it
+
+- **Matching pairs or nesting:** brackets, HTML tags, `"3[a2[c]]"` (Decode String).
+- The **most recent** item is the one that matters: undo, back, "the last thing that is still open".
+- You need to handle things in **reverse order**.
+- **Expressions and calculators:** Reverse Polish Notation, Basic Calculator.
+- Paths with `..`: Simplify Path turns `"/a/./b/../../c"` into `"/c"`. Each `..` pops a folder.
+- "The **next greater** or **next smaller** item": a stack kept in order. See [Monotonic Stack](./monotonic-stack.mdx).
+- Turning a recursive DFS into a loop: keep your own stack. See [Graph BFS and DFS](../graphs/graph-bfs-dfs.mdx).
+
+## Common mistakes
+
+- **Popping or peeking an empty stack.** JavaScript gives back `undefined` with no error, and the bug hides. Check `stack.length` first when it matters.
+- **Not checking that the stack is empty at the end.** `"(("` has no wrong closer, but it's still not valid.
+- **The wrong order for `-` and `/`.** The first pop is the **right** number.
+- **`Math.floor` instead of `Math.trunc`** when the problem says "round toward zero". They differ for negative numbers.
+- **Using `shift` and `unshift` for a stack.** They work at the front and are O(n). Use the end.
+- **One `min` variable in Min Stack.** After you pop the smallest value, you no longer know the next smallest.
+
+## In the interview
+
+- Say why a stack fits: name the "most recent first" part of the problem.
+- Say that an array works as a stack: `push` and `pop` are both O(1).
+- Test with: an empty string, a single closer like `")"`, only openers like `"(("`.
+
+> "The bracket opened most recently has to close first. That's last in, first out, so I'll use a stack. I push every opener. For a closer, I pop and check that it matches. At the end, the stack must be empty. Each bracket is pushed and popped at most once, so it's O(n) time and O(n) space."
+
+**Likely follow-up:** "Can Min Stack use less memory?"
+
+**Answer:** "Yes. Only push onto `mins` when the new value is smaller than or equal to the current min. When popping, only pop `mins` if the popped value equals the current min. The Big O stays the same, but `mins` stays small when most values are bigger than the min."
+
+<Callout title="Remember this" type="success">
+  - **Stack = Last In, First Out.** Add and remove at the top only, like a stack of plates.
+  - In JavaScript, use an **array**: `push`, `pop` and `stack[stack.length - 1]` to peek. All O(1). Never `shift` or `unshift`.
+  - `pop()` on an empty array gives back **`undefined`**, with no error.
+  - **Valid Parentheses:** push openers, pop on each closer and check it matches, and the stack must be **empty** at the end.
+  - **Min Stack:** a second stack holds "the smallest so far" for every level.
+  - **Reverse Polish Notation:** numbers wait on the stack. The **first pop is the right** number.
+</Callout>

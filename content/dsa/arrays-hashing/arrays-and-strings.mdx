@@ -2,9 +2,419 @@
 title: "Arrays and Strings"
 description: "The most common problem input, and the tricks that work on it."
 icon: Brackets
-planned: true
 ---
 
-- In-place changes
-- Reversing, rotating, and building strings
-- Classic problems
+## The idea
+
+Most interview problems hand you an **array** or a **string**. Both are rows of items, and each item sits at a numbered position, its **index**, starting at 0. A few simple moves solve a lot of problems: **walk once** while keeping a value, **swap** two items, **reverse** a part, and **build** a new string from pieces.
+
+Think of a **row of seats in a cinema**, numbered from 0. Two friends can swap seats. The whole row can stand up and sit back down in reverse order. Or everybody can move 3 seats to the right, and the people who fall off the end walk round to the first seats. That last one is a **rotation**, and it's a classic interview problem.
+
+## How it works
+
+### What the data looks like
+
+| Index | 0 | 1 | 2 | 3 | 4 |
+| --- | --- | --- | --- | --- | --- |
+| `numbers` | 4 | 8 | 15 | 16 | 23 |
+| `word` | h | e | l | l | o |
+
+The first index is **0**. The last index is **`length - 1`**. Reading any index is O(1).
+
+```js
+const numbers = [4, 8, 15, 16, 23];
+
+console.log(numbers[0]); // 4
+console.log(numbers[numbers.length - 1]); // 23
+
+const word = "hello";
+
+console.log(word[1]); // e
+console.log(word.length); // 5
+```
+
+Strings **can't be changed** in place (see [Strings in JavaScript](../js-toolkit/strings.mdx)). To change characters, split the string into an array, change the array, and join it back.
+
+```js
+const word = "cat";
+
+const letters = word.split("");
+letters[0] = "b";
+
+console.log(letters.join("")); // bat
+console.log(word); // cat
+```
+
+### Walk once and keep a running value
+
+The most common shape: **one loop**, plus a few variables you update as you go. Here we find the biggest number and where it is.
+
+```js
+function findBiggest(numbers) {
+    let biggest = numbers[0];
+    let biggestIndex = 0;
+
+    for (let i = 1; i < numbers.length; i++) {
+        if (numbers[i] > biggest) {
+            biggest = numbers[i];
+            biggestIndex = i;
+        }
+    }
+
+    return [biggest, biggestIndex];
+}
+
+console.log(findBiggest([4, 8, 15, 16, 2])); // [ 16, 3 ]
+```
+
+**Time:** O(n) · **Space:** O(1). One pass, two variables. Many problems are this shape with a smarter variable, like "the cheapest price so far" in [Best Time to Buy and Sell Stock](../two-pointers/sliding-window.mdx).
+
+### In place, or a new array?
+
+**In place** means you change the input array itself, using only a few extra variables: **O(1) extra space**. A **new array** costs O(n) extra space, but leaves the input alone.
+
+```js
+// A new array: the input stays the same. O(n) extra space.
+function doubledCopy(numbers) {
+    const result = [];
+
+    for (const number of numbers) {
+        result.push(number * 2);
+    }
+
+    return result;
+}
+
+// In place: change the input itself. O(1) extra space.
+function doubleInPlace(numbers) {
+    for (let i = 0; i < numbers.length; i++) {
+        numbers[i] = numbers[i] * 2;
+    }
+}
+
+const prices = [1, 2, 3];
+
+console.log(doubledCopy(prices)); // [ 2, 4, 6 ]
+console.log(prices); // [ 1, 2, 3 ]
+
+doubleInPlace(prices);
+console.log(prices); // [ 2, 4, 6 ]
+```
+
+Before you change the input, ask: "**May I change the input array?**"
+
+The main tool for in-place work is the **swap**:
+
+```js
+function swap(items, first, second) {
+    const temp = items[first];
+    items[first] = items[second];
+    items[second] = temp;
+}
+
+const letters = ["a", "b", "c"];
+swap(letters, 0, 2);
+
+console.log(letters); // [ 'c', 'b', 'a' ]
+```
+
+### Reversing a part of an array
+
+To reverse the items from index `start` to index `end`, swap the two ends and step inward until the indexes meet. That is the [two pointers](../two-pointers/two-pointers.mdx) pattern. We will use this helper again in Rotate Array below.
+
+```js
+function reverseRange(items, start, end) {
+    let left = start;
+    let right = end;
+
+    while (left < right) {
+        const temp = items[left];
+        items[left] = items[right];
+        items[right] = temp;
+
+        left++;
+        right--;
+    }
+}
+
+const numbers = [1, 2, 3, 4, 5, 6];
+
+// Reverse only indexes 1 to 4.
+reverseRange(numbers, 1, 4);
+console.log(numbers); // [ 1, 5, 4, 3, 2, 6 ]
+```
+
+**Time:** O(k) for a part of k items · **Space:** O(1). Each swap fixes two items.
+
+Strings have no `reverse` method. Split, reverse, and join:
+
+```js
+const word = "hello";
+
+const letters = word.split("");
+letters.reverse();
+const reversed = letters.join("");
+
+console.log(reversed); // olleh
+```
+
+### Building strings
+
+Each `result += piece` makes a **new string**, and can copy everything built so far: O(n²) in the worst case. Instead, **push the pieces into an array and join once** at the end: O(n).
+
+**Example:** squeeze runs of the same letter: `"aaabcc"` becomes `"a3b1c2"`.
+
+```js
+function compress(text) {
+    const parts = [];
+    let count = 1;
+
+    for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+
+        // At the last letter, text[i + 1] is undefined, so the run ends.
+        const nextChar = text[i + 1];
+
+        if (char === nextChar) {
+            // Same letter again: the run goes on.
+            count++;
+        } else {
+            // The run ends: save the letter and its count.
+            parts.push(char);
+            parts.push(String(count));
+            count = 1;
+        }
+    }
+
+    return parts.join("");
+}
+
+console.log(compress("aaabcc")); // a3b1c2
+```
+
+| i | char | nextChar | Same? | count after | parts after |
+| --- | --- | --- | --- | --- | --- |
+| 0 | a | a | yes | 2 | `[]` |
+| 1 | a | a | yes | 3 | `[]` |
+| 2 | a | b | no | 1 | `[a, 3]` |
+| 3 | b | c | no | 1 | `[a, 3, b, 1]` |
+| 4 | c | c | yes | 2 | `[a, 3, b, 1]` |
+| 5 | c | undefined | no | 1 | `[a, 3, b, 1, c, 2]` |
+
+**Time:** O(n) · **Space:** O(n). One pass, and one join at the end.
+
+## Classic problems
+
+### 1. Rotate Array
+
+**Problem:** rotate the array to the right by `steps`, **in place**. `[1, 2, 3, 4, 5, 6]` rotated by 2 becomes `[5, 6, 1, 2, 3, 4]`.
+
+First, notice that rotating 6 items by 6 puts everything back where it started. So only `steps % length` matters: rotating by 8 is the same as rotating by 2.
+
+**Way 1: a new array.** The item at index `i` moves to index `(i + steps) % length`. The `%` wraps it round to the start when it falls off the end.
+
+```js
+function rotateWithCopy(numbers, steps) {
+    const length = numbers.length;
+    const rotated = new Array(length);
+
+    for (let i = 0; i < length; i++) {
+        // % wraps around: past the end means back to the start.
+        const newIndex = (i + steps) % length;
+        rotated[newIndex] = numbers[i];
+    }
+
+    // The problem wants the input itself changed, so copy back.
+    for (let i = 0; i < length; i++) {
+        numbers[i] = rotated[i];
+    }
+}
+
+const numbers = [1, 2, 3, 4, 5, 6];
+rotateWithCopy(numbers, 2);
+
+console.log(numbers); // [ 5, 6, 1, 2, 3, 4 ]
+```
+
+**Time:** O(n) · **Space:** O(n) for the copy.
+
+**Way 2: three reverses, O(1) space.** This is the answer interviewers hope for.
+
+| Step | What you do | Array after |
+| --- | --- | --- |
+| Start | | `[1, 2, 3, 4, 5, 6]` |
+| 1 | Reverse everything | `[6, 5, 4, 3, 2, 1]` |
+| 2 | Reverse the first 2 | `[5, 6, 4, 3, 2, 1]` |
+| 3 | Reverse the rest | `[5, 6, 1, 2, 3, 4]` |
+
+Why it works: reversing everything moves the last 2 items to the front, but backwards. The two small reverses put each part back in the right order.
+
+Paste this after `reverseRange` from above:
+
+```js
+function rotate(numbers, steps) {
+    const length = numbers.length;
+
+    // Rotating by length changes nothing, so only the remainder matters.
+    const realSteps = steps % length;
+
+    reverseRange(numbers, 0, length - 1);
+    reverseRange(numbers, 0, realSteps - 1);
+    reverseRange(numbers, realSteps, length - 1);
+}
+
+const numbers = [1, 2, 3, 4, 5, 6];
+rotate(numbers, 2);
+
+console.log(numbers); // [ 5, 6, 1, 2, 3, 4 ]
+```
+
+**Time:** O(n) · **Space:** O(1). Each item is swapped about twice, and we only keep a few index variables.
+
+Avoid `numbers.unshift(numbers.pop())` in a loop. Each `unshift` moves every item, so it costs O(n × steps).
+
+### 2. Reverse Words in a String
+
+**Problem:** reverse the order of the words, and drop the extra spaces. `"  the sky   is  blue "` becomes `"blue is sky the"`.
+
+**Idea:** cut the text into words, reverse the list, and join it with single spaces. `/\s+/` means "one or more spaces", so a run of spaces doesn't make empty words.
+
+```js
+function reverseWords(text) {
+    const words = text.trim().split(/\s+/);
+    words.reverse();
+
+    return words.join(" ");
+}
+
+console.log(reverseWords("  the sky   is  blue ")); // blue is sky the
+```
+
+**Time:** O(n) · **Space:** O(n). Trimming, splitting and joining each walk the text once.
+
+**Follow-up: without `split`.** Walk from the end. Skip spaces, then read back to the start of the word, and save it.
+
+```js
+function reverseWordsByHand(text) {
+    const words = [];
+    let index = text.length - 1;
+
+    while (index >= 0) {
+        // Skip spaces.
+        while (index >= 0 && text[index] === " ") {
+            index--;
+        }
+
+        // Now on the last letter of a word. Walk back to its start.
+        const wordEnd = index;
+        while (index >= 0 && text[index] !== " ") {
+            index--;
+        }
+
+        // wordEnd is -1 when the text started with spaces: no word.
+        if (wordEnd >= 0) {
+            words.push(text.slice(index + 1, wordEnd + 1));
+        }
+    }
+
+    return words.join(" ");
+}
+
+console.log(reverseWordsByHand("  the sky   is  blue ")); // blue is sky the
+```
+
+**Time:** O(n) · **Space:** O(n). `index` visits each character once, and the words take up to n characters.
+
+### 3. Encode and Decode Strings
+
+**Problem:** turn a list of strings into **one string**, and back again. The strings can hold any character, even `#` or `,`. `["hello", "wo#rld", ""]` must come back exactly the same.
+
+**Idea:** joining with a separator like `","` breaks as soon as a word contains a comma. So put each word's **length** in front: `"5#hello6#wo#rld0#"`. To decode, read the digits up to `#`: that's the length. Then take exactly that many characters. The `#` inside `"wo#rld"` is never mistaken for a separator, because we jump over the whole word by its length.
+
+**Step 1: encode.**
+
+```js
+function encode(words) {
+    const parts = [];
+
+    for (const word of words) {
+        // The length first, then "#", then the word itself.
+        parts.push(String(word.length));
+        parts.push("#");
+        parts.push(word);
+    }
+
+    return parts.join("");
+}
+
+console.log(encode(["hello", "wo#rld", ""])); // 5#hello6#wo#rld0#
+```
+
+**Step 2: decode.**
+
+```js
+function decode(encoded) {
+    const words = [];
+    let index = 0;
+
+    while (index < encoded.length) {
+        // The digits up to "#" are the word's length.
+        const hashIndex = encoded.indexOf("#", index);
+        const length = Number(encoded.slice(index, hashIndex));
+
+        // The word is the next `length` characters after "#".
+        const wordStart = hashIndex + 1;
+        const wordEnd = wordStart + length;
+        words.push(encoded.slice(wordStart, wordEnd));
+
+        // Jump to the start of the next length.
+        index = wordEnd;
+    }
+
+    return words;
+}
+
+console.log(decode("5#hello6#wo#rld0#")); // [ 'hello', 'wo#rld', '' ]
+```
+
+| index | Digits before `#` | Length | Word | Next index |
+| --- | --- | --- | --- | --- |
+| 0 | `5` | 5 | `hello` | 7 |
+| 7 | `6` | 6 | `wo#rld` | 15 |
+| 15 | `0` | 0 | `""` | 17 (the end) |
+
+**Time:** O(n) · **Space:** O(n), where n is the total number of characters. Each character is read once while encoding and once while decoding.
+
+## Common mistakes
+
+- **Off by one at the end.** The last index is `length - 1`. Loop with `i < length`, not `i <= length`.
+- **Removing items while you loop over them.** `splice` inside a `for` loop skips the next item, and each `splice` is O(n). Use a slow writer and a fast reader instead (see [Two Pointers](../two-pointers/two-pointers.mdx)).
+- **Forgetting `steps % length`** when rotating. Rotating 6 items by 8 is rotating by 2.
+- **Reassigning instead of changing.** Inside a function, `numbers = rotated` only changes the local variable. The caller's array stays the same. Copy the values back one by one.
+- **`+=` to build a long string in a loop.** Push into an array and `join("")` once.
+- **`split(" ")` with extra spaces.** It gives empty strings. Use `trim().split(/\s+/)`.
+
+## In the interview
+
+Ask before you code:
+
+- "May I change the input, or should I return a new array?"
+- "Can the array be empty? Can `steps` be bigger than the length?"
+- "Only lowercase letters, or any characters? Can there be extra spaces?"
+
+Then say the plan and its cost:
+
+> "Rotating right by k moves the last k items to the front. I'll take k modulo the length, reverse the whole array, then reverse the first k items and the rest. Each item is swapped about twice, so it's O(n) time and O(1) extra space."
+
+**Likely follow-up:** "Your first answer used a second array. Can you do it in O(1) space?"
+
+**Answer:** "Yes, by working in place with swaps. For a rotation, three reverses do it. Each reverse is two pointers swapping from both ends, so there is no copy."
+
+<Callout title="Remember this" type="success">
+  - Indexes go from **0 to `length - 1`**. Most array bugs are off by one at the ends.
+  - **In place** = change the input with a few variables: O(1) extra space. Ask first if you may.
+  - **Swap** and **reverse a range** (two pointers) are the main in-place tools.
+  - **Rotate right by k:** take `k % length`, reverse all, reverse the first k, reverse the rest.
+  - Strings can't be changed: **split → change → join**. Build long strings with an **array + `join("")`**.
+  - To pack a list of strings into one, write **length + `#` + word**.
+</Callout>

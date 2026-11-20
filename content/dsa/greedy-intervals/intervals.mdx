@@ -2,9 +2,414 @@
 title: "Intervals"
 description: "Sort by start time, then merge or count."
 icon: CalendarRange
-planned: true
 ---
 
-- Merge intervals
-- Insert interval
-- Meeting rooms
+## The idea
+
+An **interval** is a range with a start and an end: a meeting from 9 to 10, a hotel booking from day 3 to day 5. Interval problems ask you to merge ranges that overlap, find clashes, or count how many ranges happen at the same time.
+
+Think of your **calendar for the week**. If the meetings are in random order, spotting clashes is hard. Put them in order of start time, and every clash is easy to see: a meeting can only clash with the ones just before it.
+
+That is the trick behind almost every interval problem: **sort by start first**, then walk through the list once.
+
+## How it works
+
+### What an interval looks like in JavaScript
+
+An interval is an array of two numbers: `[start, end]`. A list of intervals is an array of those arrays.
+
+```js
+const meetings = [[1, 3], [8, 10], [2, 6]];
+
+const firstMeeting = meetings[0];
+
+console.log(firstMeeting); // [ 1, 3 ]
+console.log(firstMeeting[0]); // 1
+console.log(firstMeeting[1]); // 3
+```
+
+- `meetings[0]` is the first interval, `[1, 3]`.
+- `meetings[0][0]` is its **start** (1). `meetings[0][1]` is its **end** (3).
+
+### Do two intervals overlap?
+
+Here are three intervals drawn on a number line:
+
+```text
+           0   1   2   3   4   5   6   7
+A [1, 3]       [=======]
+B [2, 6]           [===============]
+C [5, 7]                       [=======]
+```
+
+- **A and B overlap.** B starts at 2, before A ends at 3.
+- **A and C don't overlap.** C starts at 5, after A has already ended at 3. There is a gap.
+- **B and C overlap.** C starts at 5, before B ends at 6.
+
+| First | Second | Overlap? | Why |
+| --- | --- | --- | --- |
+| [1, 3] | [2, 6] | yes | the second starts (2) before the first ends (3) |
+| [1, 3] | [5, 7] | no | the second starts (5) after the first ends (3) |
+| [1, 6] | [2, 4] | yes | the second sits fully inside the first |
+| [1, 3] | [3, 5] | **ask** | they only touch at 3 |
+
+**The rule:** two intervals overlap when **each one starts before the other one ends**.
+
+```js
+function overlaps(first, second) {
+    const firstStartsBeforeSecondEnds = first[0] <= second[1];
+    const secondStartsBeforeFirstEnds = second[0] <= first[1];
+
+    return firstStartsBeforeSecondEnds && secondStartsBeforeFirstEnds;
+}
+
+console.log(overlaps([1, 3], [2, 6])); // true
+console.log(overlaps([1, 3], [5, 7])); // false
+console.log(overlaps([1, 6], [2, 4])); // true
+console.log(overlaps([1, 3], [3, 5])); // true
+```
+
+**Touching intervals** like `[1, 3]` and `[3, 5]` count as overlapping here, because of `<=`. That is right for "merge intervals". For meetings, a meeting that ends at 3 doesn't clash with one that starts at 3, so you would use `<`. Always ask the interviewer which one they want.
+
+### Sort by start first
+
+If the list is sorted by start, then `first[0] <= second[0]` is already true. So the check gets shorter: **the next interval overlaps when it starts before the current one ends**, `second[0] <= first[1]`.
+
+Sort with a compare function. `a` and `b` are two intervals, and `a[0]` is the start of `a`.
+
+```js
+const intervals = [[8, 10], [1, 3], [15, 18], [2, 6]];
+
+intervals.sort((a, b) => a[0] - b[0]);
+
+console.log(intervals); // [ [ 1, 3 ], [ 2, 6 ], [ 8, 10 ], [ 15, 18 ] ]
+```
+
+Don't forget the compare function. Without it, `sort()` compares the intervals as **text**, so `"10,12"` comes before `"2,6"`.
+
+```js
+const broken = [[1, 3], [10, 12], [2, 6]];
+
+broken.sort();
+
+console.log(broken); // [ [ 1, 3 ], [ 10, 12 ], [ 2, 6 ] ]
+```
+
+After sorting, intervals that overlap sit **next to each other**. So one pass from left to right is enough. Sorting costs **O(n log n)**, and that is usually the slowest part of the whole solution. More on sorting in [Sorting](../searching-sorting/sorting.mdx).
+
+## Classic problems
+
+### 1. Merge Intervals
+
+**Problem:** merge all the intervals that overlap. `[[1, 3], [2, 6], [8, 10], [15, 18]]` → `[[1, 6], [8, 10], [15, 18]]`.
+
+**Idea:** sort by start. Keep a `merged` list. For each interval, look at the **last** interval in `merged`:
+
+- If the new one starts **after** the last one ends, there is a gap. Add it as a new interval.
+- Otherwise they overlap. **Stretch** the last interval's end to cover the new one.
+
+```js
+function merge(intervals) {
+    // Copy, then sort by start, so the input is not changed.
+    const sorted = [...intervals].sort((a, b) => a[0] - b[0]);
+    const merged = [];
+
+    for (const interval of sorted) {
+        const start = interval[0];
+        const end = interval[1];
+        const last = merged[merged.length - 1];
+
+        if (merged.length === 0 || start > last[1]) {
+            // Nothing yet, or a gap: start a new interval.
+            merged.push([start, end]);
+        } else {
+            // Overlap: stretch the last interval.
+            last[1] = Math.max(last[1], end);
+        }
+    }
+
+    return merged;
+}
+
+console.log(merge([[1, 3], [2, 6], [8, 10], [15, 18]]));
+// [ [ 1, 6 ], [ 8, 10 ], [ 15, 18 ] ]
+
+console.log(merge([[1, 10], [2, 3]])); // [ [ 1, 10 ] ]
+```
+
+How the first example runs:
+
+| Interval | Last in merged | Starts after last ends? | Action | merged |
+| --- | --- | --- | --- | --- |
+| [1, 3] | none | - | add | [[1, 3]] |
+| [2, 6] | [1, 3] | 2 > 3? no | end = max(3, 6) = 6 | [[1, 6]] |
+| [8, 10] | [1, 6] | 8 > 6? yes | add | [[1, 6], [8, 10]] |
+| [15, 18] | [8, 10] | 15 > 10? yes | add | [[1, 6], [8, 10], [15, 18]] |
+
+Why `Math.max`? In the second example, `[2, 3]` sits inside `[1, 10]`. Writing `last[1] = end` would shrink it to `[1, 3]`.
+
+**Time:** O(n log n) · **Space:** O(n). The sort costs n log n and the loop is one pass. The sorted copy and the result can hold n intervals.
+
+### 2. Insert Interval
+
+**Problem:** the intervals are already **sorted and don't overlap**. Insert one new interval, and merge where needed. `[[1, 2], [3, 5], [6, 7], [8, 10], [12, 16]]` plus `[4, 8]` → `[[1, 2], [3, 10], [12, 16]]`.
+
+**Idea:** the list is already sorted, so no sort is needed. Walk through it in **three parts**:
+
+1. Intervals that **end before** the new one starts: copy them as they are.
+2. Intervals that **overlap** the new one: merge them into it. Then add the merged interval.
+3. Intervals that **start after** it ends: copy them as they are.
+
+In the code, `intervals[i][0]` is the start of interval `i`, and `intervals[i][1]` is its end.
+
+```js
+function insert(intervals, newInterval) {
+    const result = [];
+    let i = 0;
+
+    // Part 1: intervals that end before the new one starts.
+    while (i < intervals.length && intervals[i][1] < newInterval[0]) {
+        result.push(intervals[i]);
+        i++;
+    }
+
+    // Part 2: intervals that overlap the new one. Merge them into it.
+    let start = newInterval[0];
+    let end = newInterval[1];
+
+    while (i < intervals.length && intervals[i][0] <= end) {
+        start = Math.min(start, intervals[i][0]);
+        end = Math.max(end, intervals[i][1]);
+        i++;
+    }
+
+    result.push([start, end]);
+
+    // Part 3: intervals that start after the new one ends.
+    while (i < intervals.length) {
+        result.push(intervals[i]);
+        i++;
+    }
+
+    return result;
+}
+```
+
+Let's run it.
+
+```js
+console.log(insert([[1, 3], [6, 9]], [2, 5])); // [ [ 1, 5 ], [ 6, 9 ] ]
+
+console.log(insert([[1, 2], [3, 5], [6, 7], [8, 10], [12, 16]], [4, 8]));
+// [ [ 1, 2 ], [ 3, 10 ], [ 12, 16 ] ]
+```
+
+How the second example runs. The new interval starts as `[4, 8]`:
+
+| Interval | Part | Why | start, end after |
+| --- | --- | --- | --- |
+| [1, 2] | 1: copy | it ends at 2, before 4 | 4, 8 |
+| [3, 5] | 2: merge | it starts at 3, not after 8 | 3, 8 |
+| [6, 7] | 2: merge | 6 is not after 8 | 3, 8 |
+| [8, 10] | 2: merge | 8 is not after 8 (they touch) | 3, 10 |
+| [12, 16] | 3: copy | 12 is after 10, so add [3, 10] first | 3, 10 |
+
+**Time:** O(n) · **Space:** O(n). Each interval is looked at once. The result holds up to n + 1 intervals.
+
+### 3. Non-overlapping Intervals
+
+**Problem:** what is the **fewest** intervals you must remove so the rest don't overlap? Touching is fine here: `[1, 2]` and `[2, 3]` don't overlap. `[[1, 2], [2, 3], [3, 4], [1, 3]]` → `1` (remove `[1, 3]`).
+
+**Idea:** this one sorts by **end**, not by start. Removing the fewest is the same as **keeping the most**. Keep the interval that **ends first**, because it leaves the most room for the rest. Then skip everything that clashes with it, and repeat.
+
+This is a [greedy](./greedy.mdx) choice, and the exchange argument shows it is safe. Take any best answer. Swap its first interval for the one that ends earliest. That one ends at the same time or sooner, so it can't clash with anything new.
+
+```js
+function eraseOverlapIntervals(intervals) {
+    // Sort by END: the interval that ends first leaves the most room.
+    const sorted = [...intervals].sort((a, b) => a[1] - b[1]);
+
+    let removed = 0;
+    let lastEnd = -Infinity;
+
+    for (const interval of sorted) {
+        const start = interval[0];
+        const end = interval[1];
+
+        if (start >= lastEnd) {
+            // No clash with the last one we kept: keep this one.
+            lastEnd = end;
+        } else {
+            // Clash: remove this one. It ends later than the one we kept.
+            removed++;
+        }
+    }
+
+    return removed;
+}
+
+console.log(eraseOverlapIntervals([[1, 2], [2, 3], [3, 4], [1, 3]])); // 1
+console.log(eraseOverlapIntervals([[1, 2], [1, 2], [1, 2]])); // 2
+```
+
+`lastEnd` starts at `-Infinity`, so the first interval is always kept. Sorted by end, the first example is `[[1, 2], [2, 3], [1, 3], [3, 4]]`:
+
+| Interval | lastEnd before | start >= lastEnd? | Action |
+| --- | --- | --- | --- |
+| [1, 2] | -Infinity | yes | keep, lastEnd = 2 |
+| [2, 3] | 2 | yes | keep, lastEnd = 3 |
+| [1, 3] | 3 | no (1 < 3) | **remove** (removed = 1) |
+| [3, 4] | 3 | yes | keep, lastEnd = 4 |
+
+**Time:** O(n log n) · **Space:** O(n). The sort is the slow part; the loop is one pass. The sorted copy holds n intervals.
+
+### 4. Meeting Rooms
+
+**Problem:** can one person go to **every** meeting? `[[0, 30], [5, 10], [15, 20]]` → `false`. `[[7, 10], [2, 4]]` → `true`.
+
+**Idea:** sort by start. If any meeting starts **before** the previous one ends, there is a clash. A meeting that starts exactly when the last one ends is fine, so use `<`.
+
+```js
+function canAttendMeetings(intervals) {
+    const sorted = [...intervals].sort((a, b) => a[0] - b[0]);
+
+    for (let i = 1; i < sorted.length; i++) {
+        const previousEnd = sorted[i - 1][1];
+        const currentStart = sorted[i][0];
+
+        // This meeting starts before the last one is over.
+        if (currentStart < previousEnd) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+console.log(canAttendMeetings([[0, 30], [5, 10], [15, 20]])); // false
+console.log(canAttendMeetings([[7, 10], [2, 4]])); // true
+console.log(canAttendMeetings([[1, 5], [5, 8]])); // true
+```
+
+**Time:** O(n log n) · **Space:** O(n). Sorting costs n log n. After sorting we only compare neighbours, in one pass.
+
+### 5. Meeting Rooms II
+
+**Problem:** what is the **fewest rooms** needed so every meeting gets one? `[[0, 30], [5, 10], [15, 20]]` → `2`.
+
+```text
+            0    5    10   15   20   25   30
+A [0, 30]   [=============================]
+B [5, 10]        [====]
+C [15, 20]                 [====]
+```
+
+Between 5 and 10, two meetings run at once (A and B). At no time do three run together. So the answer is **2**.
+
+**Idea:** you don't care **which** meeting is which. You only care about **when** meetings start and end. So put all the start times in one sorted array, and all the end times in another. Walk through the starts in order:
+
+- If some meeting has **already ended** by this start time, its room is free. Reuse it, and move on to the next end time.
+- If not, every room is busy. **Open a new room.**
+
+**Step 1: split and sort the times.**
+
+```js
+function splitTimes(intervals) {
+    const starts = [];
+    const ends = [];
+
+    for (const interval of intervals) {
+        starts.push(interval[0]);
+        ends.push(interval[1]);
+    }
+
+    starts.sort((a, b) => a - b);
+    ends.sort((a, b) => a - b);
+
+    return { starts, ends };
+}
+```
+
+**Step 2: walk through the starts.** `endIndex` points at the earliest end time we haven't used yet.
+
+```js
+function minMeetingRooms(intervals) {
+    const times = splitTimes(intervals);
+
+    let rooms = 0;
+    let endIndex = 0;
+
+    for (const start of times.starts) {
+        if (start >= times.ends[endIndex]) {
+            // A meeting is over by now: reuse its room.
+            endIndex++;
+        } else {
+            // Every room is busy: open a new one.
+            rooms++;
+        }
+    }
+
+    return rooms;
+}
+
+console.log(minMeetingRooms([[0, 30], [5, 10], [15, 20]])); // 2
+console.log(minMeetingRooms([[7, 10], [2, 4]])); // 1
+console.log(minMeetingRooms([[1, 5], [2, 6], [3, 7]])); // 3
+```
+
+How the first example runs. `starts` is `[0, 5, 15]` and `ends` is `[10, 20, 30]`:
+
+| start | ends[endIndex] | Already ended? | Action | rooms | endIndex after |
+| --- | --- | --- | --- | --- | --- |
+| 0 | 10 | no (0 < 10) | open a new room | 1 | 0 |
+| 5 | 10 | no (5 < 10) | open a new room | 2 | 0 |
+| 15 | 10 | yes (15 ≥ 10) | reuse the room freed at 10 | 2 | 1 |
+
+`>=` means a meeting that starts exactly when another ends can reuse its room.
+
+**Another way: a min-heap.** Sort the meetings by start, and keep a [min-heap](../heaps/heaps.mdx) of end times for the rooms in use. For each meeting, if the earliest end is not after its start, pop it (that room is free). Then push this meeting's end. The answer is the biggest the heap ever gets. It is also O(n log n), but JavaScript has no built-in heap, so you would have to write one. The two arrays are simpler in an interview.
+
+**Time:** O(n log n) · **Space:** O(n). Two sorts of n numbers cost n log n; the walk is one pass. The two arrays hold n numbers each.
+
+## How to spot it
+
+- The input is a list of **pairs** `[start, end]`: meetings, bookings, time slots, ranges of numbers.
+- Words like **overlap**, **merge**, **conflict**, **schedule**, **rooms**, **free time**, "**at the same time**".
+- A string problem where each letter covers a range from its first to its last index, like [Partition Labels](./greedy.mdx).
+
+| The question | Sort by | Then |
+| --- | --- | --- |
+| Merge, or insert one | start | compare with the last merged interval |
+| Can one person attend all? | start | compare each one with the one before |
+| Remove the fewest, or keep the most | **end** | keep the one that ends first |
+| Most at the same time, or how many rooms | starts and ends **separately** | walk both with two indexes |
+
+## Common mistakes
+
+- **`sort()` with no compare function.** It sorts intervals as text, so `[10, 12]` lands before `[2, 6]`. Write `(a, b) => a[0] - b[0]`.
+- **`last[1] = end` instead of `Math.max(last[1], end)`.** When one interval sits inside another, like `[2, 3]` inside `[1, 10]`, it shrinks the merged interval.
+- **Not asking about touching intervals.** Do `[1, 3]` and `[3, 5]` overlap? It decides `<` or `<=`. Merge Intervals says yes; meetings say no.
+- **Sorting by start when you should sort by end.** For "remove the fewest", sorting by start can keep one long interval that blocks many short ones.
+- **Changing the input.** `sort()` changes the caller's array, and `last[1] = ...` changes an inner array if you pushed the original one. Copy the list, and push new `[start, end]` arrays.
+- **Insert Interval: forgetting to add the merged interval** when it belongs at the very end. The three-part loop always adds it after part 2.
+
+## In the interview
+
+- Ask first: "Is the input sorted? Do touching intervals count as overlapping? Can the list be empty? Can I change the input?"
+- Say the plan before you code: what you sort by, and what you compare.
+- Give the time as **O(n log n) because of the sort**. Say that the walk after it is only O(n).
+
+> "I'll sort the intervals by start time, so any intervals that overlap end up next to each other. Then I walk through once. If the next interval starts after the last merged one ends, I add it. Otherwise I stretch the last one's end with Math.max. The sort makes it O(n log n) time, and the output is O(n) space."
+
+**Likely follow-up:** "Can you solve Meeting Rooms II with a heap instead?"
+
+**Answer:** "Yes. I'd sort the meetings by start and keep a min-heap of end times, one for each room in use. For each meeting, if the earliest end time is not after its start, that room is free, so I pop it. Then I push this meeting's end. The biggest size the heap reaches is the number of rooms. It's still O(n log n), but the two sorted arrays do the same job without writing a heap."
+
+<Callout title="Remember this" type="success">
+  - An interval is `[start, end]`. **Sort by start first:** `intervals.sort((a, b) => a[0] - b[0])`. Never call `sort()` with no compare function.
+  - Two intervals overlap when **each starts before the other ends**. After sorting, just check `next[0] <= last[1]`.
+  - **Merge:** compare with the last merged interval. Gap → add it. Overlap → `last[1] = Math.max(last[1], end)`.
+  - **Insert:** three parts, no sort: copy the ones before, merge the ones that overlap, copy the ones after. O(n).
+  - **Remove the fewest:** sort by **end** and keep the one that ends first (greedy).
+  - **Meeting rooms:** sort starts and ends separately. If a start is at or after the earliest unused end, reuse that room; otherwise open a new one.
+</Callout>

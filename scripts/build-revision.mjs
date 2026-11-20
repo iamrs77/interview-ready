@@ -4,7 +4,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, dirname, relative, resolve, posix } from 'node:path';
 
-const TRACKS = ['system-design', 'low-level-design'];
+const TRACKS = ['system-design', 'low-level-design', 'dsa'];
 const PAGE_NAME = 'revision';
 
 // Pages with no lesson of their own to revise.

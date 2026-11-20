@@ -2,10 +2,311 @@
 title: "How Arrays Work in Memory"
 description: "Why array lookups are fast, and what really happens when an array grows."
 icon: MemoryStick
-planned: true
 ---
 
-- RAM as a long row of numbered boxes
-- Why reading arr[i] is O(1)
-- Dynamic arrays: doubling when full, and why push is still O(1) on average
-- Strings as arrays of characters
+## The idea
+
+Your computer's memory (RAM) is a very long row of **numbered boxes**. An array is a group of boxes that sit **side by side**, with no gaps. Because the computer knows where the array starts, it can work out where any item lives with one small sum, and jump straight there.
+
+Think of **hotel rooms**. If you know your room is number 305, you walk straight to it. You don't knock on every door from room 1. That is why `arr[i]` is fast. But if the hotel wants to give room 1 to a new guest, everyone has to move one room down the hall. That is why adding to the **front** of an array is slow.
+
+## How it works
+
+### RAM: a long row of numbered boxes
+
+- Each box holds a tiny piece of data: **8 bits**, also called **1 byte**. A bit is just a 0 or a 1.
+- Each box has a number, called its **address**.
+- The computer can read any address **directly**. It does not walk past the boxes before it. That is why it is called **random access** memory.
+
+| Address | 100 | 101 | 102 | 103 | 104 | ... |
+| --- | --- | --- | --- | --- | --- | --- |
+| Value | 01001000 | 00000000 | 11110010 | 00000001 | 00000000 | ... |
+
+One more detail that helps arrays: when the CPU reads a box, it also copies the **nearby** boxes into its own small, very fast memory (the **cache**). So when you walk through an array in order, the next items are usually already waiting there.
+
+### An array is one unbroken block
+
+A number in JavaScript takes **8 bytes**, so it needs 8 boxes. Say we store `[10, 20, 30, 40]` and the computer finds a free block starting at address 200:
+
+| Index | 0 | 1 | 2 | 3 |
+| --- | --- | --- | --- | --- |
+| Starts at address | 200 | 208 | 216 | 224 |
+| Value | 10 | 20 | 30 | 40 |
+
+Two rules make this work:
+
+- **Every item is the same size** (here, 8 boxes).
+- **The items sit next to each other**, in one unbroken block. To make a big array, the computer must find enough free boxes **in a row**.
+
+What about arrays of strings or objects, which have different sizes? Each box then holds the **address** of the real value, and every address is the same size. So the rules still hold.
+
+### Why `arr[i]` is O(1)
+
+To find item `i`, the computer does one sum:
+
+**address = start + i × size**
+
+For `arr[3]`: 200 + 3 × 8 = **224**. One multiplication, one addition, one read. It costs the same whether the array has 4 items or 4 million. That is **O(1)**.
+
+Here is the same sum in JavaScript.
+
+```js
+function addressOf(startAddress, index, itemSize) {
+    return startAddress + index * itemSize;
+}
+
+console.log(addressOf(200, 3, 8)); // 224
+console.log(addressOf(200, 999999, 8)); // 8000192
+```
+
+Item 999,999 takes exactly the same work as item 3. No searching, no loop.
+
+### Dynamic arrays: growing when the block is full
+
+A plain block has a **fixed size**. The boxes right after it may already be used by something else, so it cannot just stretch.
+
+A **dynamic array** solves this. It keeps a hidden block with some spare room, and two numbers:
+
+- **length**: how many boxes are in use;
+- **capacity**: how many boxes the block has.
+
+When the block is full and you add one more item, it:
+
+1. makes a **new block twice as big**;
+2. **copies** every item into the new block;
+3. adds the new item, and lets the old block go.
+
+JavaScript arrays do this for you every time you call `push`. Let's build a small one by hand to see it.
+
+**Step 1: the dynamic array object.** It starts with room for one item.
+
+```js
+function createDynamicArray() {
+    return {
+        capacity: 1,
+        length: 0,
+        block: new Array(1),
+    };
+}
+```
+
+**Step 2: grow when full.** Make a block twice as big and copy every item over.
+
+```js
+function grow(list) {
+    const newCapacity = list.capacity * 2;
+    const newBlock = new Array(newCapacity);
+
+    // Copy every item: this is the slow part, O(n).
+    for (let i = 0; i < list.length; i++) {
+        newBlock[i] = list.block[i];
+    }
+
+    console.log(`Grow ${list.capacity} to ${newCapacity}, copy ${list.length}`);
+
+    list.block = newBlock;
+    list.capacity = newCapacity;
+}
+```
+
+**Step 3: push.** Grow only if there is no free box, then write the item into the next box.
+
+```js
+function push(list, value) {
+    if (list.length === list.capacity) {
+        grow(list);
+    }
+
+    list.block[list.length] = value;
+    list.length++;
+}
+```
+
+**Step 4: use it.** Paste the steps together and push five items.
+
+```js
+const list = createDynamicArray();
+
+push(list, "a");
+push(list, "b");
+// Grow 1 to 2, copy 1
+push(list, "c");
+// Grow 2 to 4, copy 2
+push(list, "d");
+push(list, "e");
+// Grow 4 to 8, copy 4
+
+console.log(list.length); // 5
+console.log(list.capacity); // 8
+```
+
+Here is what happens over nine pushes:
+
+| Push | Full before it? | What happens | Length | Capacity | Items copied |
+| --- | --- | --- | --- | --- | --- |
+| 1st | no | write to box 0 | 1 | 1 | 0 |
+| 2nd | yes | grow 1 → 2, copy 1, write | 2 | 2 | 1 |
+| 3rd | yes | grow 2 → 4, copy 2, write | 3 | 4 | 2 |
+| 4th | no | write | 4 | 4 | 0 |
+| 5th | yes | grow 4 → 8, copy 4, write | 5 | 8 | 4 |
+| 6th | no | write | 6 | 8 | 0 |
+| 7th | no | write | 7 | 8 | 0 |
+| 8th | no | write | 8 | 8 | 0 |
+| 9th | yes | grow 8 → 16, copy 8, write | 9 | 16 | 8 |
+
+Real engines may grow by a different amount (for example 1.5 times instead of 2), but the idea is the same.
+
+### Why `push` is still O(1) on average
+
+Look at the "Items copied" column: 1, 2, 4, 8. Each big copy is **twice as far apart** as the one before, so copies get rarer as the array grows.
+
+- After 9 pushes: 1 + 2 + 4 + 8 = **15 copies**, less than 2 × 9.
+- After `n` pushes the copies always add up to **less than 2n**.
+- Add the `n` normal writes, and the total work is **less than 3n**.
+
+So `n` pushes cost O(n) in total, which is **O(1) per push on average**. This is called **amortized O(1)**. A single push can still be slow (the 9th push copied 8 items), but over many pushes it evens out. See [Big O Notation](./big-o.mdx) for more.
+
+### Strings are arrays of character codes
+
+Memory only stores numbers, so every character gets a **number code**. `"a"` is 97, `"b"` is 98, `"A"` is 65, `"0"` is 48. A string is an array of these codes, one after another:
+
+| Index | 0 | 1 | 2 |
+| --- | --- | --- | --- |
+| Character | c | a | t |
+| Code | 99 | 97 | 116 |
+
+`charCodeAt(i)` shows you the code at index `i`, and `String.fromCharCode` turns a code back into a character.
+
+```js
+const word = "cat";
+
+console.log(word.charCodeAt(0)); // 99
+console.log(word.charCodeAt(1)); // 97
+console.log(word.charCodeAt(2)); // 116
+
+console.log(String.fromCharCode(99)); // c
+```
+
+Since a string is an array underneath, `word[i]` and `word.length` are **O(1)**, just like an array.
+
+One big difference: JavaScript strings **cannot be changed** after they are made. Writing to an index does nothing (in strict mode it throws an error). To "change" a string you build a new one, which copies every character: **O(n)**.
+
+```js
+let word = "cat";
+
+word[0] = "b";
+console.log(word); // cat
+
+// Build a new string instead. This copies the characters: O(n).
+word = "b" + word.slice(1);
+console.log(word); // bat
+```
+
+Character codes give a handy interview trick. Letters `a` to `z` have codes 97 to 122, so `code - 97` turns a letter into a box number from 0 to 25. An array of 26 counters can then count letters, for example to check if two words are anagrams.
+
+```js
+// Counts each letter a-z in an array of 26 boxes.
+function countLetters(word) {
+    const counts = new Array(26).fill(0);
+
+    for (let i = 0; i < word.length; i++) {
+        // "a" is 97, so "a" goes to box 0, "b" to box 1, and so on.
+        const box = word.charCodeAt(i) - 97;
+        counts[box]++;
+    }
+
+    return counts;
+}
+
+const counts = countLetters("banana");
+
+// Box 0 is "a", box 1 is "b", box 13 is "n".
+console.log(counts[0]); // 3
+console.log(counts[1]); // 1
+console.log(counts[13]); // 2
+```
+
+More string methods are in [Strings in JavaScript](../js-toolkit/strings.mdx).
+
+### Why inserting at the front is O(n)
+
+Now put it together. The items must stay **side by side**, with item 0 in the first box. To put a new item in front, every item has to **move one box to the right** first. We move them from the back, so nothing gets written over.
+
+Here we insert 5 at the front of `[10, 20, 30, 40]`:
+
+| Step | Box 0 | Box 1 | Box 2 | Box 3 | Box 4 |
+| --- | --- | --- | --- | --- | --- |
+| Start | 10 | 20 | 30 | 40 | (free) |
+| 1. Copy 40 one box right | 10 | 20 | 30 | 40 | 40 |
+| 2. Copy 30 one box right | 10 | 20 | 30 | 30 | 40 |
+| 3. Copy 20 one box right | 10 | 20 | 20 | 30 | 40 |
+| 4. Copy 10 one box right | 10 | 10 | 20 | 30 | 40 |
+| 5. Write 5 into box 0 | 5 | 10 | 20 | 30 | 40 |
+
+4 items needed 4 moves. With `n` items, it takes `n` moves: **O(n)**. Here are the same moves in code.
+
+```js
+function insertAtFront(items, value) {
+    // Walk from the back, so no item gets written over.
+    for (let i = items.length; i > 0; i--) {
+        items[i] = items[i - 1];
+    }
+
+    items[0] = value;
+}
+
+const numbers = [10, 20, 30, 40];
+insertAtFront(numbers, 5);
+
+console.log(numbers); // [ 5, 10, 20, 30, 40 ]
+```
+
+The same reason explains the rest:
+
+- `unshift` (add to the front) and `shift` (remove from the front) are **O(n)**. Every item shifts by one box.
+- `splice` in the middle is **O(n)**. Every item after that spot shifts.
+- `push` and `pop` work at the **end**. Nothing else moves, so they are **O(1)**.
+- Adding a letter to a string, at the front or anywhere, builds a new string: **O(n)**.
+
+If you need to take items off the front many times (like a queue in BFS), don't call `shift()` again and again. Keep a **head index** and move it forward instead.
+
+```js
+const queue = [1, 2, 3];
+let head = 0;
+
+// Read the front item and move head forward. No items move: O(1).
+const front = queue[head];
+head++;
+
+console.log(front); // 1
+console.log(queue[head]); // 2
+```
+
+More in [Queues and Deques](../stacks-queues/queues-and-deques.mdx). A [linked list](../linked-lists/linked-lists.mdx) is the other way out: adding to the front is O(1), but you lose the O(1) `arr[i]` lookup.
+
+## Common mistakes
+
+- **`shift()` or `unshift()` inside a loop.** Each call is O(n), so the loop becomes O(n²). Use a head index, or `push` everything and `reverse()` once at the end.
+- **Saying every `push` is O(1).** One push can be O(n) when the array grows. Say "amortized O(1)", or "O(1) on average".
+- **Thinking `word[0] = "b"` changes a string.** It doesn't. Strings never change; build a new one.
+- **Using `charCodeAt(i) - 97` on uppercase letters.** `"A"` is 65, so `"A".charCodeAt(0) - 97` is -32. Lowercase the word first, or check the problem says "lowercase letters only".
+- **Using `splice` to insert or delete inside a loop.** That is O(n) work inside an O(n) loop.
+
+## In the interview
+
+When you pick an array, say why the operations you need are fast or slow:
+
+> "An array sits in one unbroken block of memory, so reading by index is O(1). The address is just start plus index times the item size. Adding or removing at the end is O(1), but at the front it's O(n), because every item has to shift by one. So for this queue I'll keep a head index instead of calling shift."
+
+**Likely follow-up:** "If `push` sometimes copies the whole array, why do you call it O(1)?"
+
+**Answer:** "It's amortized O(1). When the array is full, it doubles its capacity, so the big copies get rarer and rarer. Over `n` pushes the copies add up to less than 2n, so the total work is O(n), which is O(1) per push on average."
+
+<Callout title="Remember this" type="success">
+  - **Memory is a row of numbered boxes.** An array is one unbroken block of same-size boxes.
+  - **`arr[i]` is O(1):** address = start + i × size. One sum, no searching.
+  - **Insert or remove at the front or middle is O(n):** every item after it shifts. At the end (`push`, `pop`) it is O(1).
+  - **A full dynamic array doubles and copies everything.** The big copies are rare, so `push` is **amortized O(1)**.
+  - **Strings are arrays of character codes** (`"a"` is 97). They can't change; every edit builds a new string.
+  - Taking from the front a lot? Use a **head index**, not `shift()`.
+</Callout>

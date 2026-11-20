@@ -2,9 +2,256 @@
 title: "Prefix Sum"
 description: "Answer \"sum of a range\" questions in O(1)."
 icon: Sigma
-planned: true
 ---
 
-- Building a prefix sum array
-- Subarray sum equals K
-- Product of array except self
+## The idea
+
+A **prefix sum** array stores **running totals**: slot `i` holds the sum of the first `i` numbers. You build it once in O(n). After that, the sum of **any range** is one subtraction: O(1).
+
+Think of the **odometer in a car**, the number that shows how far the car has driven since it was new. To know how far you drove on Tuesday, you don't add up every trip. You take Tuesday night's reading and subtract Monday night's reading. A prefix sum array is a list of those readings.
+
+## How it works
+
+### Running totals
+
+Take `numbers = [3, 1, 4, 1, 5]`. Each slot of `prefix` is the total of everything **before** that index:
+
+| i | 0 | 1 | 2 | 3 | 4 | 5 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `numbers[i]` | 3 | 1 | 4 | 1 | 5 | |
+| `prefix[i]` | 0 | 3 | 4 | 8 | 9 | 14 |
+
+- `prefix[0]` is 0: the sum of no numbers at all.
+- `prefix[3]` is 3 + 1 + 4 = 8: the first 3 numbers.
+- `prefix` is **one slot longer** than `numbers`.
+
+Each total is the total before it, plus one more number:
+
+```js
+function buildPrefix(numbers) {
+    // prefix[0] is 0: the sum of no numbers at all.
+    const prefix = [0];
+
+    for (let i = 0; i < numbers.length; i++) {
+        // Total so far = the total before + this number.
+        const total = prefix[i] + numbers[i];
+        prefix.push(total);
+    }
+
+    return prefix;
+}
+
+console.log(buildPrefix([3, 1, 4, 1, 5])); // [ 0, 3, 4, 8, 9, 14 ]
+```
+
+**Time:** O(n) · **Space:** O(n). One pass, and one new slot per number.
+
+### The sum of a range in O(1)
+
+The sum of the numbers from index `left` to index `right`, **both included**, is:
+
+**`prefix[right + 1] - prefix[left]`**
+
+Why? `prefix[right + 1]` is the total of everything **up to and including** `right`. `prefix[left]` is the total of everything **before** `left`. Subtract, and only the part from `left` to `right` is left.
+
+Example: from index 1 to index 3 is 1 + 4 + 1 = 6.
+
+| | 3 | 1 | 4 | 1 | 5 |
+| --- | --- | --- | --- | --- | --- |
+| `prefix[4]` = 9 | ✓ | ✓ | ✓ | ✓ | |
+| `prefix[1]` = 3 | ✓ | | | | |
+| 9 - 3 = **6** | | ✓ | ✓ | ✓ | |
+
+Paste this after `buildPrefix`:
+
+```js
+function rangeSum(prefix, left, right) {
+    // Everything up to right, minus everything before left.
+    return prefix[right + 1] - prefix[left];
+}
+
+const prefix = buildPrefix([3, 1, 4, 1, 5]);
+
+console.log(rangeSum(prefix, 1, 3)); // 6
+console.log(rangeSum(prefix, 0, 4)); // 14
+console.log(rangeSum(prefix, 2, 2)); // 4
+```
+
+**Time:** O(1) per question. Without a prefix array, each question loops over the range: O(n). With q questions, that's O(n · q) against O(n + q). This is LeetCode 303, "Range Sum Query - Immutable".
+
+**Why the 0 at the front?** Without it, a range that starts at index 0 would need `prefix[-1]`, which is `undefined`, so you'd need an extra `if`. The 0 means "the total before the first number", and the formula just works.
+
+A prefix sum is for an array that **doesn't change** between questions. If the numbers change often, you'd have to rebuild it, and other structures (a Fenwick tree or a segment tree) are used instead.
+
+## Classic problems
+
+### 1. Subarray Sum Equals K
+
+**Problem:** count the subarrays (runs of items in a row) whose sum equals `target` (LeetCode calls it k). The numbers **can be negative**. `[1, 2, 3]` with target 3 gives 2: `[1, 2]` and `[3]`. `[1, -1, 1]` with target 1 gives 3.
+
+**Brute force:** try every start and every end, keeping a running sum: O(n²). A [sliding window](../two-pointers/sliding-window.mdx) doesn't work here, because of the negative numbers.
+
+**Idea, step by step:**
+
+1. The sum from index `i` to index `j` is `prefix[j + 1] - prefix[i]`.
+2. We want that to equal `target`. Move things around: `prefix[i] = prefix[j + 1] - target`.
+3. Walk the array once, keeping a **running sum** (that is `prefix[j + 1]`). At each step ask: "**How many earlier running sums were equal to `runningSum - target`?**" Each one is a place where a subarray starts that ends right here and adds up to `target`.
+4. Keep a Map: **running sum → how many times we have seen it**. Start it with `0 → 1`: the empty start, before any number. That lets a subarray that starts at index 0 count.
+
+It's the [Two Sum](./hash-maps-and-sets.mdx) trick again: look up the partner you need, then store what you have.
+
+```js
+function subarraySum(numbers, target) {
+    // running sum -> how many times we have seen it
+    const seenSums = new Map();
+
+    // The empty start: a sum of 0 before any number.
+    seenSums.set(0, 1);
+
+    let runningSum = 0;
+    let count = 0;
+
+    for (const number of numbers) {
+        runningSum = runningSum + number;
+
+        // Each earlier sum equal to needed starts a subarray ending here.
+        const needed = runningSum - target;
+        const matches = seenSums.get(needed) || 0;
+        count = count + matches;
+
+        // Remember this running sum for the numbers that come later.
+        const timesSeen = seenSums.get(runningSum) || 0;
+        seenSums.set(runningSum, timesSeen + 1);
+    }
+
+    return count;
+}
+
+console.log(subarraySum([1, 2, 3], 3)); // 2
+console.log(subarraySum([1, -1, 1], 1)); // 3
+```
+
+How it runs on `[1, 2, 3]` with target 3:
+
+| Number | runningSum | needed (runningSum - 3) | Seen before? | count | Map after |
+| --- | --- | --- | --- | --- | --- |
+| (start) | 0 | | | 0 | `0 → 1` |
+| 1 | 1 | -2 | 0 times | 0 | `0 → 1, 1 → 1` |
+| 2 | 3 | 0 | 1 time → `[1, 2]` | 1 | `0 → 1, 1 → 1, 3 → 1` |
+| 3 | 6 | 3 | 1 time → `[3]` | 2 | `0 → 1, 1 → 1, 3 → 1, 6 → 1` |
+
+Look at the last row. `needed` is 3, and the running sum was 3 right after `[1, 2]`. So the part after that point, `[3]`, adds up to 6 - 3 = 3.
+
+**Time:** O(n) · **Space:** O(n). One pass with O(1) Map lookups, and the Map can hold up to n different running sums.
+
+### 2. Product of Array Except Self
+
+**Problem:** return an array where `answer[i]` is the product of every number **except** `numbers[i]`. Don't use division, and do it in O(n). `[1, 2, 3, 4]` gives `[24, 12, 8, 6]`.
+
+**Idea:** the product of everything except `i` is **(the product of everything left of `i`) × (the product of everything right of `i`)**. That's a prefix sum, but with × instead of +, done once from the left and once from the right. Start each one at **1**, because 1 is "nothing yet" for multiplying, like 0 is for adding.
+
+| i | 0 | 1 | 2 | 3 |
+| --- | --- | --- | --- | --- |
+| `numbers[i]` | 1 | 2 | 3 | 4 |
+| Product of everything left of i | 1 | 1 | 1 × 2 = 2 | 1 × 2 × 3 = 6 |
+| Product of everything right of i | 2 × 3 × 4 = 24 | 3 × 4 = 12 | 4 | 1 |
+| Left × right | **24** | **12** | **8** | **6** |
+
+**Step 1: with two helper arrays.**
+
+```js
+function productExceptSelf(numbers) {
+    const length = numbers.length;
+
+    // leftProducts[i] = product of everything before i.
+    const leftProducts = new Array(length).fill(1);
+    for (let i = 1; i < length; i++) {
+        leftProducts[i] = leftProducts[i - 1] * numbers[i - 1];
+    }
+
+    // rightProducts[i] = product of everything after i.
+    const rightProducts = new Array(length).fill(1);
+    for (let i = length - 2; i >= 0; i--) {
+        rightProducts[i] = rightProducts[i + 1] * numbers[i + 1];
+    }
+
+    const answer = [];
+    for (let i = 0; i < length; i++) {
+        answer.push(leftProducts[i] * rightProducts[i]);
+    }
+
+    return answer;
+}
+
+console.log(productExceptSelf([1, 2, 3, 4])); // [ 24, 12, 8, 6 ]
+```
+
+**Time:** O(n) · **Space:** O(n). Three passes, and two helper arrays of size n.
+
+**Step 2: with O(1) extra space.** A common follow-up. Write the left products straight into `answer`. Then walk from the right with **one variable**, `rightProduct`, and multiply it in.
+
+```js
+function productExceptSelfLessMemory(numbers) {
+    const length = numbers.length;
+    const answer = new Array(length).fill(1);
+
+    // Pass 1: answer[i] = product of everything before i.
+    for (let i = 1; i < length; i++) {
+        answer[i] = answer[i - 1] * numbers[i - 1];
+    }
+
+    // Pass 2: multiply in the product of everything after i.
+    let rightProduct = 1;
+    for (let i = length - 1; i >= 0; i--) {
+        answer[i] = answer[i] * rightProduct;
+        rightProduct = rightProduct * numbers[i];
+    }
+
+    return answer;
+}
+
+console.log(productExceptSelfLessMemory([1, 2, 3, 4])); // [ 24, 12, 8, 6 ]
+console.log(productExceptSelfLessMemory([2, 3, 0, 4])); // [ 0, 0, 24, 0 ]
+```
+
+**Time:** O(n) · **Space:** O(1) extra. Two passes, and only one extra variable. The problem says the `answer` array doesn't count as extra space.
+
+**Why not divide?** "Multiply everything, then divide by `numbers[i]`" breaks when a number is 0: you can't divide by 0. The problem also forbids it.
+
+## How to spot it
+
+- "**Sum of a range**", "sum from i to j", many range questions on an array that **doesn't change**.
+- "**Subarray sum equals k**", "count the subarrays with sum...", especially when numbers **can be negative**.
+- "**Product of all except**", or anything that needs "everything to the left" and "everything to the right".
+- Running totals of other things work too: a **prefix count** (how many vowels from i to j), or a 2D prefix sum for a grid.
+
+## Common mistakes
+
+- **Off by one in the formula.** `prefix[right] - prefix[left]` misses the item at `right`. It's `prefix[right + 1] - prefix[left]`.
+- **Forgetting the starting 0.** Without `prefix[0] = 0`, or `seenSums.set(0, 1)`, you miss every subarray that starts at index 0.
+- **Storing the running sum before counting matches.** With target 0, the current sum would match itself and count an empty subarray. Count first, then store.
+- **Using a sliding window when numbers can be negative.** Use a prefix sum and a Map.
+- **Starting a product at 0.** Everything times 0 is 0. Start products at 1.
+- **Rebuilding the prefix array for every question.** Build it once.
+
+## In the interview
+
+Say the formula, and why it is O(1):
+
+> "I'll build a prefix sum array once, in O(n), with a 0 at the front. Then the sum from left to right is prefix of right plus 1, minus prefix of left. That's O(1) per question."
+
+For Subarray Sum Equals K:
+
+> "A subarray from i to j sums to k when prefix[j + 1] minus prefix[i] equals k. So as I walk, I count how many earlier running sums equal the current sum minus k, with a Map. It starts with 0 seen once. One pass: O(n) time and O(n) space."
+
+**Likely follow-up:** "Why not a sliding window?"
+
+**Answer:** "The numbers can be negative. A window needs the sum to grow when I add an item and to drop when I remove one. With negative numbers that isn't true, so I can't tell which pointer to move."
+
+<Callout title="Remember this" type="success">
+  - `prefix[i]` = the sum of the **first i numbers**, and `prefix[0] = 0`. Build it once in O(n).
+  - The sum from `left` to `right` = **`prefix[right + 1] - prefix[left]`**: O(1).
+  - **Subarray Sum Equals K:** running sum + a Map of sums seen. Look up `runningSum - k`. Start with `0 → 1`.
+  - Prefix sums work with **negative numbers**; a sliding window doesn't.
+  - **Product except self:** products from the left × products from the right. Start at 1, no division.
+</Callout>

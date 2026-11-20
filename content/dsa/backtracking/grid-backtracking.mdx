@@ -2,9 +2,400 @@
 title: "Backtracking on Grids"
 description: "Search a board cell by cell."
 icon: Grid2x2
-planned: true
 ---
 
-- Word search
-- N-Queens
-- Pruning to cut the search
+## The idea
+
+Some backtracking problems happen on a **board**: a grid of letters, or a chessboard. You move from cell to cell, building an answer as you go. If you get stuck, you step back to the cell before and try a different way.
+
+Think of a **word search puzzle**. To find "CAT", you put your finger on a C. Then you look at the letters around it for an A, and around the A for a T. If that A has no T next to it, you move your finger back to the C and try another A. And you can't use the same letter twice in one word.
+
+It is the same template as in [Backtracking](./backtracking.mdx): **choose, explore, undo**. The choice is now "which cell do I step into?", and the undo is "un-mark that cell".
+
+## How it works
+
+### A grid in JavaScript
+
+A grid is an array of rows. `board[row][col]` reads one cell. Rows go down, columns go across.
+
+```js
+const board = [
+    ["C", "A", "T"],
+    ["X", "B", "S"],
+];
+
+const rows = board.length;
+const cols = board[0].length;
+
+console.log(rows, cols); // 2 3
+console.log(board[0][1]); // A
+console.log(board[1][2]); // S
+```
+
+|  | col 0 | col 1 | col 2 |
+| --- | --- | --- | --- |
+| **row 0** | C | A | T |
+| **row 1** | X | B | S |
+
+### Step 1: the four neighbours
+
+From a cell you can move up, down, left or right. A `directions` list holds how much the row and the column change for each move. Cells outside the board are skipped.
+
+```js
+const rows = 2;
+const cols = 3;
+
+// up, down, left, right
+const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
+// Neighbours of the cell at row 0, col 1.
+const row = 0;
+const col = 1;
+
+for (const [rowStep, colStep] of directions) {
+    const nextRow = row + rowStep;
+    const nextCol = col + colStep;
+
+    const insideRows = nextRow >= 0 && nextRow < rows;
+    const insideCols = nextCol >= 0 && nextCol < cols;
+
+    if (insideRows && insideCols) {
+        console.log(nextRow, nextCol);
+    }
+}
+// 1 1
+// 0 0
+// 0 2
+```
+
+"Up" from row 0 would be row -1, which is outside, so only 3 neighbours print. More on grids: [Arrays](../js-toolkit/arrays.mdx).
+
+### Step 2: mark a cell, then put it back
+
+In one path, each cell may be used only once. The easy way to remember "I'm using this cell" is to **change the cell itself** to `"#"`. `"#"` is not a letter, so it never matches the letter we look for next. When we step back, we **put the letter back**. That is the undo.
+
+```js
+const board = [["C", "A", "T"]];
+
+// Choose: remember the letter, then mark the cell as used.
+const letter = board[0][0];
+board[0][0] = "#";
+console.log(board[0]); // [ '#', 'A', 'T' ]
+
+// (explore the neighbours here)
+
+// Undo: put the letter back.
+board[0][0] = letter;
+console.log(board[0]); // [ 'C', 'A', 'T' ]
+```
+
+You could keep a separate `visited` Set of `"row,col"` keys instead. Marking the board saves that extra memory. It does change the input for a moment, but we always put it back before we return.
+
+## Classic problems
+
+### 1. Word Search
+
+**Problem:** given a grid of letters and a word, return `true` if the word can be traced through cells that touch up, down, left or right. A cell can be used only once in the word.
+
+```text
+A B C E
+S F C S
+A D E E
+```
+
+`"ABCCED"` → true. `"SEE"` → true. `"ABCB"` → false (it would need the same B twice).
+
+**Idea:** try every cell as the start. From a cell, check that it is on the board and holds the right letter. Then mark it, look for the next letter in its four neighbours, and un-mark it.
+
+The code comes in two steps. Paste both into one file to run them.
+
+**Step 1: search from one cell.** `index` is the position in the word we are looking for.
+
+```js
+function searchFrom(board, word, row, col, index) {
+    // Every letter is matched: found it.
+    if (index === word.length) {
+        return true;
+    }
+
+    // Off the board, or the wrong letter: dead end.
+    const insideRows = row >= 0 && row < board.length;
+    const insideCols = col >= 0 && col < board[0].length;
+    if (!insideRows || !insideCols || board[row][col] !== word[index]) {
+        return false;
+    }
+
+    // Choose: use this cell, and mark it so this path can't reuse it.
+    const letter = board[row][col];
+    board[row][col] = "#";
+
+    // Explore: look for the next letter in the 4 neighbours.
+    // || stops at the first search that returns true.
+    const found =
+        searchFrom(board, word, row + 1, col, index + 1) ||
+        searchFrom(board, word, row - 1, col, index + 1) ||
+        searchFrom(board, word, row, col + 1, index + 1) ||
+        searchFrom(board, word, row, col - 1, index + 1);
+
+    // Undo: put the letter back before returning.
+    board[row][col] = letter;
+
+    return found;
+}
+```
+
+**Step 2: try every cell as the start.**
+
+```js
+function exist(board, word) {
+    for (let row = 0; row < board.length; row++) {
+        for (let col = 0; col < board[0].length; col++) {
+            if (searchFrom(board, word, row, col, 0)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+const board = [
+    ["A", "B", "C", "E"],
+    ["S", "F", "C", "S"],
+    ["A", "D", "E", "E"],
+];
+
+console.log(exist(board, "ABCCED")); // true
+console.log(exist(board, "SEE")); // true
+console.log(exist(board, "ABCB")); // false
+```
+
+Why `"ABCB"` fails, step by step:
+
+| Step | Path so far | Looking for | What happens |
+| --- | --- | --- | --- |
+| 1 | A at (0, 0) | B | the B to the right matches: choose it |
+| 2 | A B | C | the C to the right matches: choose it |
+| 3 | A B C | B | neighbours are C, E and `#` (the B we used). No match |
+| 4 | A B | C | undo C. No other C next to this B |
+| 5 | A | B | undo B. No other B next to this A |
+| 6 | (empty) | A | undo A. Next start: the A at (2, 0). Its neighbours are S and D, no B |
+| 7 | | | no start works: return `false` |
+
+Step 3 is where marking matters: without the `#`, the search would happily step back onto the B it already used.
+
+**Time:** O(rows × cols × 3^L) · **Space:** O(L). L is the length of the word. Any cell can be the start. After the first letter, each step has at most 3 new neighbours (the 4th is the cell we came from, which is marked). The call stack goes at most L deep, and marking in place needs no extra memory.
+
+### 2. N-Queens
+
+**Problem:** place n queens on an n × n chessboard so that no two attack each other. A queen attacks along its row, its column and both diagonals. Return every board. For n = 4 there are 2:
+
+```text
+. Q . .      . . Q .
+. . . Q      Q . . .
+Q . . .      . . . Q
+. . Q .      . Q . .
+```
+
+**Idea:** two queens in one row would attack each other, so put **exactly one queen in each row**. Go row by row. In each row, try every column. Skip a column if a queen already placed attacks it. Place the queen, move on to the next row, then remove the queen (undo) and try the next column. Reaching the row after the last means all n queens are placed: save the board.
+
+**How to check "attacked" quickly.** Keep three Sets:
+
+- `cols`: the columns that already have a queen.
+- `diagonals`: on a ↘ diagonal, every cell has the same `row - col`.
+- `antiDiagonals`: on a ↙ diagonal, every cell has the same `row + col`.
+
+Here is `row - col` on a 4 × 4 board. The 0s form one ↘ diagonal, the 1s another, and so on.
+
+|  | col 0 | col 1 | col 2 | col 3 |
+| --- | --- | --- | --- | --- |
+| **row 0** | 0 | -1 | -2 | -3 |
+| **row 1** | 1 | 0 | -1 | -2 |
+| **row 2** | 2 | 1 | 0 | -1 |
+| **row 3** | 3 | 2 | 1 | 0 |
+
+And `row + col`. Each ↙ diagonal has one number.
+
+|  | col 0 | col 1 | col 2 | col 3 |
+| --- | --- | --- | --- | --- |
+| **row 0** | 0 | 1 | 2 | 3 |
+| **row 1** | 1 | 2 | 3 | 4 |
+| **row 2** | 2 | 3 | 4 | 5 |
+| **row 3** | 3 | 4 | 5 | 6 |
+
+The code comes in four steps. Paste them in order into one file to run it.
+
+**Step 1: the state, and the safety check.** One object holds the board and the three Sets.
+
+```js
+function createState(boardSize) {
+    // Each row is its own new array of "." (see Arrays: 2D arrays).
+    const board = Array.from({ length: boardSize }, () => {
+        return new Array(boardSize).fill(".");
+    });
+
+    return {
+        boardSize: boardSize,
+        board: board,
+        cols: new Set(),
+        diagonals: new Set(),
+        antiDiagonals: new Set(),
+    };
+}
+
+// Is this cell safe from every queen placed so far?
+function isSafe(state, row, col) {
+    const columnTaken = state.cols.has(col);
+    const diagonalTaken = state.diagonals.has(row - col);
+    const antiDiagonalTaken = state.antiDiagonals.has(row + col);
+
+    return !columnTaken && !diagonalTaken && !antiDiagonalTaken;
+}
+```
+
+**Step 2: place a queen, and remove it.** These are the "choose" and the "undo".
+
+```js
+function placeQueen(state, row, col) {
+    state.board[row][col] = "Q";
+    state.cols.add(col);
+    state.diagonals.add(row - col);
+    state.antiDiagonals.add(row + col);
+}
+
+function removeQueen(state, row, col) {
+    state.board[row][col] = ".";
+    state.cols.delete(col);
+    state.diagonals.delete(row - col);
+    state.antiDiagonals.delete(row + col);
+}
+```
+
+**Step 3: the backtracking, row by row.**
+
+```js
+function solveRow(state, row, result) {
+    // A queen in every row: save the board as strings.
+    if (row === state.boardSize) {
+        const rowsAsText = state.board.map((cells) => cells.join(""));
+        result.push(rowsAsText);
+        return;
+    }
+
+    for (let col = 0; col < state.boardSize; col++) {
+        // Skip cells that another queen attacks.
+        if (!isSafe(state, row, col)) {
+            continue;
+        }
+
+        placeQueen(state, row, col);
+        solveRow(state, row + 1, result);
+        removeQueen(state, row, col);
+    }
+}
+```
+
+**Step 4: start at row 0, and run it.**
+
+```js
+function solveNQueens(boardSize) {
+    const state = createState(boardSize);
+    const result = [];
+
+    solveRow(state, 0, result);
+    return result;
+}
+
+const solutions = solveNQueens(4);
+
+console.log(solutions.length); // 2
+console.log(solutions[0]); // [ '.Q..', '...Q', 'Q...', '..Q.' ]
+console.log(solutions[1]); // [ '..Q.', 'Q...', '...Q', '.Q..' ]
+console.log(solveNQueens(8).length); // 92
+```
+
+`map` with `join("")` builds **new** strings, so the saved board is a copy. Later changes to `state.board` don't touch it.
+
+**Time:** O(n!) · **Space:** O(n²). The first row has n columns to try, the second at most n - 1 safe ones, the third at most n - 2, and so on. The board takes n² cells; the Sets and the call stack are only size n.
+
+## Pruning: cut the search early
+
+**Pruning** means stopping a path as soon as you know it can't lead to an answer. The tree gets much smaller, and the answers stay the same. You have already seen it:
+
+- **N-Queens:** `isSafe` skips attacked cells right away. Without it, you would fill all 8 rows any way you like and check only at the end: 8⁸ = 16,777,216 boards for n = 8. With it, the code makes just 2,057 calls.
+- **Word Search:** a wrong letter ends the path at once, instead of after the whole word.
+
+**Pruning Combination Sum.** In [Combination Sum](./backtracking.mdx), sort the candidates first. Once a candidate is bigger than what is left, every candidate after it is bigger too, so `break` out of the loop instead of trying each one.
+
+```js
+function combinationSum(candidates, target) {
+    const sorted = candidates.toSorted((first, second) => first - second);
+    const result = [];
+    const path = [];
+
+    function backtrack(start, remaining) {
+        if (remaining === 0) {
+            result.push([...path]);
+            return;
+        }
+
+        for (let i = start; i < sorted.length; i++) {
+            // Pruning: sorted, so this number and all after it are too big.
+            if (sorted[i] > remaining) {
+                break;
+            }
+
+            path.push(sorted[i]);
+            backtrack(i, remaining - sorted[i]);
+            path.pop();
+        }
+    }
+
+    backtrack(0, target);
+    return result;
+}
+
+console.log(combinationSum([7, 3, 2, 6], 7)); // [ [ 2, 2, 3 ], [ 7 ] ]
+```
+
+The `remaining < 0` check is gone: we never step past the target now. With the first 10 prime numbers and a target of 40, this version makes about **2,700** calls instead of about **14,000**, and finds the same 297 answers.
+
+Other prunes worth knowing:
+
+- **Combinations:** if there aren't enough numbers left to fill the path, stop.
+- **Word Search:** before searching, count the letters on the board. If the word needs three Es and the board has two, return `false` at once.
+
+## How to spot it
+
+- A **grid or board** and "find a path / a word", "place pieces so none attack", or "fill the board" (Sudoku).
+- **"Each cell may be used once"** in a path → mark it, explore, then put it back.
+- If a cell should stay visited **for good** (like counting islands), there is nothing to undo. That's plain DFS or flood fill, not backtracking; see [BFS and DFS on Graphs](../graphs/graph-bfs-dfs.mdx). Backtracking is for when a cell used in one path must be free again for the next path.
+
+## Common mistakes
+
+- **Not putting the letter back.** Later searches see `#` and miss words that are really there.
+- **Returning before the undo.** `if (searchFrom(...)) { return true; }` placed before `board[row][col] = letter` leaves a `#` in the caller's board. Restore first, then return.
+- **Reading the cell before the bounds check.** `board[-1][0]` throws a `TypeError`, because `board[-1]` is `undefined`. Check the bounds first.
+- **Mixing up rows and columns.** `board.length` is the number of rows, `board[0].length` the number of columns. On a non-square board, mixing them up crashes or misses cells.
+- **N-Queens: checking only one kind of diagonal.** You need both: `row - col` for ↘ and `row + col` for ↙.
+- **Building the board with `new Array(n).fill(new Array(n).fill("."))`.** Every row is the same array. Use `Array.from` (see [Arrays](../js-toolkit/arrays.mdx)).
+
+## In the interview
+
+- Say how you **mark** a cell and that you **restore** it.
+- Mention one prune before you are asked.
+
+> "I'll try every cell as the start. From a cell I check the bounds and the letter, mark the cell with `#` so this path can't reuse it, search the four neighbours for the next letter, and put the letter back before returning. That's O(rows × cols × 3^L) time, and O(L) space for the call stack."
+
+**Likely follow-up:** "Can you make it faster?"
+
+**Answer:** "I can prune before searching at all. I count the letters on the board, and return false if the word needs more of some letter than the board has. And if the word's last letter is rarer on the board than its first letter, I search for the reversed word, so dead ends show up sooner."
+
+<Callout title="Remember this" type="success">
+  - Grid backtracking: from a cell, **choose** a neighbour, **explore**, **undo**. Check the bounds first, then the cell.
+  - Mark a used cell (`board[row][col] = "#"`) and **always put it back** before returning.
+  - Word Search: O(rows × cols × 3^L) time, O(L) space.
+  - N-Queens: one queen per row; Sets for used columns, `row - col` and `row + col`. O(n!) time.
+  - **Pruning** = stop a path as soon as it can't work (attacked cell, wrong letter, sorted and too big). Same answers, far fewer calls.
+  - Cells stay visited for good, with no undo? That's plain DFS or flood fill, not backtracking.
+</Callout>

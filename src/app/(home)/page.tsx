@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowRight, Boxes, Network, type LucideIcon } from 'lucide-react';
+import { ArrowRight, Binary, Boxes, Network, type LucideIcon } from 'lucide-react';
 import { source, type Track } from '@/lib/source';
 import { TrackProgress } from '@/components/track-progress';
 import { ResetProgressButton } from '@/components/reset-progress-button';
@@ -8,6 +8,7 @@ import { ResetProgressButton } from '@/components/reset-progress-button';
 const TRACK_CARDS: { track: Track; title: string; icon: LucideIcon; iconClass: string }[] = [
   { track: 'system-design', title: 'System Design', icon: Network, iconClass: 'bg-indigo-500/10 text-indigo-600' },
   { track: 'low-level-design', title: 'Low-Level Design', icon: Boxes, iconClass: 'bg-teal-500/10 text-teal-700' },
+  { track: 'dsa', title: 'DSA', icon: Binary, iconClass: 'bg-amber-500/10 text-amber-700' },
 ];
 
 export default function HomePage() {

@@ -2,11 +2,640 @@
 title: "Top K and Merge K"
 description: "The heap patterns interviewers ask most."
 icon: Trophy
-planned: true
 ---
 
-- Top K frequent elements
-- Kth largest element
-- Merge K sorted lists
-- Median of a data stream
-- Merge K sorted arrays
+## The idea
+
+Most heap questions are one of three patterns:
+
+- **Top K:** keep a small heap of only **k items**. Every new item tries to get in. When the heap holds too many, the weakest one leaves.
+- **Merge K:** you have **k sorted lists**. Look at the front item of each, take the smallest, and repeat.
+- **Two heaps:** keep the smaller half and the bigger half of the numbers apart, to find the **median** fast.
+
+Think of the **top 3 scores board** on an arcade machine. A new score gets on the board only if it beats the **lowest** score on the board, and that lowest score drops off. The machine never needs to remember every game ever played, and it only ever looks at the lowest score on the board. That is Top K with a min-heap.
+
+For Merge K, think of **sorted piles of exam papers**, one pile per classroom, each sorted by student number. To make one sorted pile, look at the top paper of every pile and take the lowest number. A heap holds those top papers, so finding the lowest is fast even with many piles.
+
+## The heap we use
+
+JavaScript has no built-in heap, so here is one. It's the heap from [Heaps and Priority Queues](./heaps.mdx), but it takes a **compare function**, so it can hold numbers, pairs or list nodes. The compare function works like the one in `sort`: `compare(a, b) < 0` means `a` comes out first.
+
+| Compare function | What comes out first |
+| --- | --- |
+| `(a, b) => a - b` | the smallest number (min-heap) |
+| `(a, b) => b - a` | the biggest number (max-heap) |
+| `(a, b) => a[1] - b[1]` | the pair with the smallest second item |
+| `(a, b) => a.val - b.val` | the list node with the smallest value |
+
+**Paste these three blocks first**, then paste one problem below them.
+
+**Heap, part 1: swap and bubble up.** Move an item up while it should come out before its parent.
+
+```js
+function swap(items, indexA, indexB) {
+    const temp = items[indexA];
+    items[indexA] = items[indexB];
+    items[indexB] = temp;
+}
+
+// Move an item up while it should come out before its parent.
+function bubbleUp(items, index, compare) {
+    while (index > 0) {
+        const parentIndex = Math.floor((index - 1) / 2);
+
+        if (compare(items[parentIndex], items[index]) <= 0) {
+            break;
+        }
+
+        swap(items, parentIndex, index);
+        index = parentIndex;
+    }
+}
+```
+
+**Heap, part 2: bubble down.** Move an item down while one of its children should come out before it. `best` is whichever of the three (the item and its two children) should come out first.
+
+```js
+function bubbleDown(items, index, compare) {
+    while (true) {
+        const left = 2 * index + 1;
+        const right = 2 * index + 2;
+        let best = index;
+
+        if (left < items.length && compare(items[left], items[best]) < 0) {
+            best = left;
+        }
+
+        if (right < items.length && compare(items[right], items[best]) < 0) {
+            best = right;
+        }
+
+        // The item comes before both children: it's in place.
+        if (best === index) {
+            break;
+        }
+
+        swap(items, index, best);
+        index = best;
+    }
+}
+```
+
+**Heap, part 3: the class.**
+
+```js
+class Heap {
+    // compare(a, b) < 0 means a comes out before b.
+    constructor(compare) {
+        this.items = [];
+        this.compare = compare;
+    }
+
+    size() {
+        return this.items.length;
+    }
+
+    // The top item, or undefined if the heap is empty.
+    peek() {
+        return this.items[0];
+    }
+
+    push(value) {
+        this.items.push(value);
+        bubbleUp(this.items, this.items.length - 1, this.compare);
+    }
+
+    pop() {
+        const top = this.items[0];
+        const last = this.items.pop();
+
+        // Move the last item to the top, then let it sink.
+        if (this.items.length > 0) {
+            this.items[0] = last;
+            bubbleDown(this.items, 0, this.compare);
+        }
+
+        return top;
+    }
+}
+```
+
+A quick test: the same numbers come out smallest first from one heap and biggest first from the other.
+
+```js
+const minHeap = new Heap((a, b) => a - b);
+const maxHeap = new Heap((a, b) => b - a);
+
+for (const value of [5, 2, 8, 1]) {
+    minHeap.push(value);
+    maxHeap.push(value);
+}
+
+console.log(minHeap.pop()); // 1
+console.log(maxHeap.pop()); // 8
+```
+
+In an interview, writing this takes time. Ask first: "Can I assume a heap class with a compare function?"
+
+## How Top K works
+
+To find the **k largest** numbers, keep a **min-heap of size k**. That sounds backwards, so here is why:
+
+- The heap holds the k biggest numbers **seen so far**.
+- Its top is the **smallest of those k**: the weakest member, the first to be kicked out when a bigger number comes along.
+- For each number: push it. If the heap now has more than k items, pop the top.
+- At the end, the heap holds the k largest, and its top is the **kth largest**.
+
+Here it is on `[3, 2, 1, 5, 6, 4]` with k = 2:
+
+| Number | Heap after push | More than 2? | Heap after | Top |
+| --- | --- | --- | --- | --- |
+| 3 | 3 | no | 3 | 3 |
+| 2 | 2, 3 | no | 2, 3 | 2 |
+| 1 | 1, 2, 3 | yes: pop 1 | 2, 3 | 2 |
+| 5 | 2, 3, 5 | yes: pop 2 | 3, 5 | 3 |
+| 6 | 3, 5, 6 | yes: pop 3 | 5, 6 | 5 |
+| 4 | 4, 5, 6 | yes: pop 4 | 5, 6 | 5 |
+
+The heap ends with 5 and 6, the two largest. The top, 5, is the 2nd largest.
+
+The heap never holds more than k + 1 items, so each push and pop costs **O(log k)**, not O(log n). For n numbers that's **O(n log k)**. With a million numbers and k = 10, log k is about 3 while log n is about 20.
+
+The rule to remember: the top of the heap is always **the item you'd throw out next**.
+
+| You want | Use | It throws out |
+| --- | --- | --- |
+| the k **largest** | a **min**-heap of size k | the smallest |
+| the k **smallest** (or closest) | a **max**-heap of size k | the biggest |
+
+## Classic problems
+
+### 1. Kth Largest Element in an Array (LeetCode 215)
+
+**Problem:** return the kth largest number. `[3, 2, 1, 5, 6, 4]` with k = 2 gives 5.
+
+**Idea:** a min-heap of size k, exactly as in the table above.
+
+```js
+function findKthLargest(nums, k) {
+    const heap = new Heap((a, b) => a - b);
+
+    for (const num of nums) {
+        heap.push(num);
+
+        // Keep only the k biggest numbers seen so far.
+        if (heap.size() > k) {
+            heap.pop();
+        }
+    }
+
+    // The smallest of the k biggest is the kth biggest.
+    return heap.peek();
+}
+
+console.log(findKthLargest([3, 2, 1, 5, 6, 4], 2)); // 5
+console.log(findKthLargest([3, 2, 3, 1, 2, 4, 5, 5, 6], 4)); // 4
+```
+
+**Time:** O(n log k) · **Space:** O(k). Each of the n numbers is pushed (and maybe popped) on a heap of at most k + 1 items.
+
+The simple answer to say first: sort from biggest to smallest and return `nums[k - 1]`. That's O(n log n).
+
+### 2. Top K Frequent Elements (LeetCode 347)
+
+**Problem:** return the k numbers that appear most often. `[1, 1, 1, 2, 2, 3]` with k = 2 gives `[1, 2]`.
+
+**Idea:** first count each number with a Map. Then it's Top K again, but by **count**: a min-heap of `[number, count]` pairs, compared by count, kept at size k.
+
+**Step 1: count.** Both solutions below use this helper.
+
+```js
+// Count how many times each number appears.
+function countEach(nums) {
+    const counts = new Map();
+
+    for (const num of nums) {
+        if (counts.has(num)) {
+            counts.set(num, counts.get(num) + 1);
+        } else {
+            counts.set(num, 1);
+        }
+    }
+
+    return counts;
+}
+
+const counts = countEach([1, 1, 1, 2, 2, 3]);
+console.log(counts); // Map(3) { 1 => 3, 2 => 2, 3 => 1 }
+```
+
+**Step 2: a heap of size k, by count.**
+
+```js
+function topKFrequent(nums, k) {
+    const counts = countEach(nums);
+
+    // Pairs of [num, count]. The smallest count is on top.
+    const heap = new Heap((pairA, pairB) => pairA[1] - pairB[1]);
+
+    for (const [num, count] of counts) {
+        heap.push([num, count]);
+
+        // Too many: drop the least frequent.
+        if (heap.size() > k) {
+            heap.pop();
+        }
+    }
+
+    // Pops come out least frequent first.
+    const result = [];
+    while (heap.size() > 0) {
+        const pair = heap.pop();
+        result.push(pair[0]);
+    }
+
+    // Most frequent first.
+    result.reverse();
+    return result;
+}
+
+console.log(topKFrequent([1, 1, 1, 2, 2, 3], 2)); // [ 1, 2 ]
+```
+
+**Time:** O(n log k) · **Space:** O(n). Counting is O(n). Then each distinct number (at most n) goes through a heap of size k. The Map holds up to n numbers.
+
+**Faster: bucket sort, O(n).** A count can only be between 1 and n (the length of `nums`). So make an array of "buckets", where `buckets[c]` holds every number that appears exactly c times. Then walk the buckets from the highest count down.
+
+For `[1, 1, 1, 2, 2, 3]`:
+
+| Count | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Numbers | | 3 | 2 | 1 | | | |
+
+Walking from count 6 down: 1 (count 3), then 2 (count 2). With k = 2 we stop there.
+
+```js
+function topKFrequentBuckets(nums, k) {
+    const counts = countEach(nums);
+
+    // buckets[c] = the numbers that appear exactly c times.
+    // A count can be as big as nums.length, so we need that many + 1.
+    const buckets = [];
+    for (let i = 0; i <= nums.length; i++) {
+        buckets.push([]);
+    }
+
+    for (const [num, count] of counts) {
+        buckets[count].push(num);
+    }
+
+    // Walk from the highest count down until we have k numbers.
+    const result = [];
+    for (let count = nums.length; count >= 1; count--) {
+        for (const num of buckets[count]) {
+            result.push(num);
+
+            if (result.length === k) {
+                return result;
+            }
+        }
+    }
+
+    return result;
+}
+
+console.log(topKFrequentBuckets([1, 1, 1, 2, 2, 3], 2)); // [ 1, 2 ]
+```
+
+**Time:** O(n) · **Space:** O(n). Counting, filling the buckets and walking them are each one pass over at most n things. No sorting and no heap.
+
+### 3. K Closest Points to Origin (LeetCode 973)
+
+**Problem:** given points `[x, y]`, return the k closest to `(0, 0)`, in any order. `[[1, 3], [-2, 2]]` with k = 1 gives `[[-2, 2]]`.
+
+**Idea:** the k **smallest** distances, so a **max**-heap of size k: the farthest point is on top, and it's the one we throw out.
+
+The distance is `Math.sqrt(x * x + y * y)`, but we can skip the square root. If one distance is smaller, its square is smaller too, so the order is the same.
+
+```js
+function squaredDistance(point) {
+    const x = point[0];
+    const y = point[1];
+
+    return x * x + y * y;
+}
+
+function kClosest(points, k) {
+    // Max-heap by distance: the farthest point is on top.
+    const heap = new Heap((pointA, pointB) => {
+        return squaredDistance(pointB) - squaredDistance(pointA);
+    });
+
+    for (const point of points) {
+        heap.push(point);
+
+        // Too many: drop the farthest.
+        if (heap.size() > k) {
+            heap.pop();
+        }
+    }
+
+    // The k points left in the heap, in heap order.
+    return heap.items;
+}
+
+console.log(kClosest([[1, 3], [-2, 2]], 1)); // [ [ -2, 2 ] ]
+const points = [[3, 3], [5, -1], [-2, 4]];
+console.log(kClosest(points, 2)); // [ [ -2, 4 ], [ 3, 3 ] ]
+```
+
+In the second example, the squared distances are 18, 26 and 20. The point `[5, -1]` (26) is the farthest, so it gets thrown out.
+
+**Time:** O(n log k) · **Space:** O(k). Each point goes through a heap of at most k + 1 items.
+
+### 4. Merge K Sorted Arrays
+
+**Problem:** merge k sorted arrays into one sorted array. `[[1, 4, 7], [2, 5], [3, 6, 9]]` gives `[1, 2, 3, 4, 5, 6, 7, 9]`.
+
+**Idea:** the smallest item overall is always the front item of **one** of the arrays. So:
+
+1. Put the first item of every array into a min-heap.
+2. Pop the smallest and add it to the result.
+3. Push the **next item from the same array** in its place.
+
+To know where the next item is, each heap entry remembers `[value, arrayIndex, position]`: the value, which array it came from, and its position in that array.
+
+```js
+function mergeKSortedArrays(arrays) {
+    // Each entry: [value, arrayIndex, position]. Smallest value on top.
+    const heap = new Heap((entryA, entryB) => entryA[0] - entryB[0]);
+
+    // 1. The first item of every array.
+    for (let arrayIndex = 0; arrayIndex < arrays.length; arrayIndex++) {
+        if (arrays[arrayIndex].length > 0) {
+            heap.push([arrays[arrayIndex][0], arrayIndex, 0]);
+        }
+    }
+
+    const result = [];
+    while (heap.size() > 0) {
+        // 2. Take the smallest. (This unpacks the 3 parts of the entry.)
+        const [value, arrayIndex, position] = heap.pop();
+        result.push(value);
+
+        // 3. The next item from the same array takes its place.
+        const nextPosition = position + 1;
+        if (nextPosition < arrays[arrayIndex].length) {
+            const nextValue = arrays[arrayIndex][nextPosition];
+            heap.push([nextValue, arrayIndex, nextPosition]);
+        }
+    }
+
+    return result;
+}
+```
+
+Try it (paste below the function):
+
+```js
+const arrays = [[1, 4, 7], [2, 5], [3, 6, 9]];
+
+console.log(mergeKSortedArrays(arrays));
+// [
+//   1, 2, 3, 4,
+//   5, 6, 7, 9
+// ]
+```
+
+(Node prints arrays of more than 6 numbers over several lines. It's still one array.)
+
+| Step | Heap holds (value from array) | Pop | Push next | Result |
+| --- | --- | --- | --- | --- |
+| Start | 1 (A), 2 (B), 3 (C) | | | |
+| 1 | 1 (A), 2 (B), 3 (C) | 1 (A) | 4 (A) | 1 |
+| 2 | 2 (B), 3 (C), 4 (A) | 2 (B) | 5 (B) | 1, 2 |
+| 3 | 3 (C), 4 (A), 5 (B) | 3 (C) | 6 (C) | 1, 2, 3 |
+| 4 | 4 (A), 5 (B), 6 (C) | 4 (A) | 7 (A) | 1, 2, 3, 4 |
+| ... | | | | |
+
+The heap never holds more than k entries: one per array.
+
+**Time:** O(N log k) · **Space:** O(k). N is the total number of items. Each one is pushed and popped once, on a heap of at most k entries. (Plus O(N) for the result.)
+
+Compare that with joining everything and sorting: O(N log N). The heap wins because it uses the fact that each array is already sorted.
+
+### 5. Merge K Sorted Lists (LeetCode 23)
+
+**Problem:** the same, but with k sorted **linked lists**. `1 -> 4 -> 5`, `1 -> 3 -> 4` and `2 -> 6` give `1 -> 1 -> 2 -> 3 -> 4 -> 4 -> 5 -> 6`.
+
+**Idea:** the same as the arrays, and simpler: a node already knows where its list continues (`node.next`). So the heap holds **nodes**, compared by `val`, and there's no position to track. A [dummy node](../linked-lists/linked-lists.mdx) starts the result list.
+
+This problem also needs the list helpers from Linked Lists. Paste them below the heap blocks.
+
+```js
+class ListNode {
+    constructor(val) {
+        this.val = val;
+        this.next = null;
+    }
+}
+
+function buildList(values) {
+    let head = null;
+
+    for (let i = values.length - 1; i >= 0; i--) {
+        const node = new ListNode(values[i]);
+        node.next = head;
+        head = node;
+    }
+
+    return head;
+}
+
+function printList(head) {
+    let text = "";
+    let current = head;
+
+    while (current !== null) {
+        text = text + current.val + " -> ";
+        current = current.next;
+    }
+
+    console.log(text + "null");
+}
+```
+
+Now the solution:
+
+```js
+function mergeKLists(lists) {
+    const heap = new Heap((nodeA, nodeB) => nodeA.val - nodeB.val);
+
+    // Start with the head of every list. Skip empty lists.
+    for (const head of lists) {
+        if (head !== null) {
+            heap.push(head);
+        }
+    }
+
+    const dummy = new ListNode(0);
+    let tail = dummy;
+
+    while (heap.size() > 0) {
+        const smallest = heap.pop();
+        tail.next = smallest;
+        tail = tail.next;
+
+        // The next node of the same list takes its place.
+        if (smallest.next !== null) {
+            heap.push(smallest.next);
+        }
+    }
+
+    return dummy.next;
+}
+```
+
+Try it (paste below the solution):
+
+```js
+const lists = [
+    buildList([1, 4, 5]),
+    buildList([1, 3, 4]),
+    buildList([2, 6]),
+];
+
+printList(mergeKLists(lists)); // 1 -> 1 -> 2 -> 3 -> 4 -> 4 -> 5 -> 6 -> null
+```
+
+**Time:** O(N log k) · **Space:** O(k). N is the total number of nodes; each goes into and out of a heap of at most k nodes. We relink the existing nodes, so the only extra memory is the heap.
+
+### 6. Find Median from Data Stream (LeetCode 295)
+
+**Problem:** numbers arrive one at a time. At any moment, return the **median**: the middle number, or the average of the two middle numbers if the count is even. Add 5, 2, 8 and the median is 5. Add 1 too, and it's (2 + 5) / 2 = 3.5.
+
+**Idea:** split the numbers into two halves:
+
+- `small`: a **max**-heap with the **smaller half**. Its top is the biggest of the small numbers.
+- `large`: a **min**-heap with the **bigger half**. Its top is the smallest of the big numbers.
+
+The two tops are the numbers in the middle. Keep the halves balanced: `small` has the same number of items as `large`, or one more. Then:
+
+- Odd count: the median is the top of `small`.
+- Even count: the median is the average of the two tops.
+
+To add a number, in three moves:
+
+1. Push it into `small`.
+2. Move the top of `small` into `large`. Now every number in `small` is ≤ every number in `large`.
+3. If `large` now has more items than `small`, move the top of `large` back to `small`.
+
+```js
+class MedianFinder {
+    constructor() {
+        // The smaller half. Max-heap: the top is the biggest small number.
+        this.small = new Heap((a, b) => b - a);
+
+        // The bigger half. Min-heap: the top is the smallest big number.
+        this.large = new Heap((a, b) => a - b);
+    }
+
+    addNum(num) {
+        // 1. Put the number in the small half.
+        this.small.push(num);
+
+        // 2. Send the biggest small number over to the large half.
+        this.large.push(this.small.pop());
+
+        // 3. Keep small the same size as large, or one bigger.
+        if (this.large.size() > this.small.size()) {
+            this.small.push(this.large.pop());
+        }
+    }
+
+    findMedian() {
+        // Odd count: small holds the extra number, the middle one.
+        if (this.small.size() > this.large.size()) {
+            return this.small.peek();
+        }
+
+        // Even count: the average of the two middle numbers.
+        return (this.small.peek() + this.large.peek()) / 2;
+    }
+}
+```
+
+Use it (paste below the class):
+
+```js
+const finder = new MedianFinder();
+
+finder.addNum(5);
+console.log(finder.findMedian()); // 5
+
+finder.addNum(2);
+console.log(finder.findMedian()); // 3.5
+
+finder.addNum(8);
+console.log(finder.findMedian()); // 5
+
+finder.addNum(1);
+console.log(finder.findMedian()); // 3.5
+```
+
+| Add | small (max-heap) | large (min-heap) | Median |
+| --- | --- | --- | --- |
+| 5 | 5 | | 5 |
+| 2 | 2 | 5 | (2 + 5) / 2 = 3.5 |
+| 8 | 2, 5 | 8 | 5 (the top of small) |
+| 1 | 1, 2 | 5, 8 | (2 + 5) / 2 = 3.5 |
+
+**Time:** `addNum` O(log n), `findMedian` O(1) · **Space:** O(n). Adding does at most three pushes and two pops; finding the median only peeks at the two tops. The heaps hold every number.
+
+The simple answer to mention first: keep a sorted array and insert each number in its place. Finding the median is then O(1), but each insert shifts items over: O(n).
+
+## How to spot it
+
+| Words in the problem | Pattern |
+| --- | --- |
+| "kth largest", "k largest", "top k" | min-heap of size k |
+| "kth smallest", "k closest", "k cheapest" | max-heap of size k |
+| "k most frequent" | count with a Map, then a heap of size k (or buckets) |
+| "merge k sorted" lists or arrays | min-heap of the k front items |
+| "median", "data stream", "numbers keep arriving" | two heaps |
+| a small k and a huge n, or items that arrive one by one | a heap beats sorting everything |
+
+## Common mistakes
+
+- **The wrong heap for Top K.** For the k largest, a max-heap with every number in it works, but it's O(n log n) time and O(n) space. A min-heap of size k is O(n log k) time and O(k) space.
+- **Off by one on the size.** Push first, then pop when `size() > k`. Popping at `size() >= k`, or before pushing, leaves k - 1 items.
+- **No compare function for pairs.** `[1, 2] - [3, 4]` is `NaN`, so the heap order breaks without any error. Always compare by one part: `pairA[1] - pairB[1]`.
+- **Forgetting to push the next item** in Merge K, or pushing `null` nodes into the heap.
+- **Losing track of where an item came from** when merging arrays. Store `[value, arrayIndex, position]`.
+- **Expecting `heap.items` to be sorted.** It's in heap order. To get sorted order, pop again and again.
+- **Skipping the balance step** in Find Median. Without moving the top of `small` to `large`, the halves overlap and the median is wrong.
+
+## In the interview
+
+- Say the simple answer first: "Sort, then take the first k: O(n log n)."
+- Then improve it: "With a heap of size k, it's O(n log k) time and O(k) space."
+- JavaScript has no heap: ask if you can assume one, and be ready to write it.
+
+> "I'll keep a min-heap of size k. Each number goes in, and when the heap has more than k items, I pop the smallest. At the end it holds the k largest, and its top is the kth largest. Each push and pop is O(log k), so it's O(n log k) time and O(k) space."
+
+**Likely follow-up:** "Can you beat O(n log k) for the kth largest?"
+
+**Answer:** "Yes, with **Quickselect**. It's like quicksort, but after splitting around a pivot, it only goes into the side that holds the kth item. That's O(n) on average, but O(n²) in the worst case, and it changes the array. For Top K Frequent, bucket sort gives O(n)."
+
+**Another follow-up:** "For the median, what if every number is between 0 and 100?"
+
+**Answer:** "Then I'd skip the heaps and keep an array of 101 counters. Adding a number is O(1). Finding the median means walking the counters until I've passed half the numbers: at most 101 steps, so O(1) too."
+
+<Callout title="Remember this" type="success">
+  - **k largest → min-heap of size k. k smallest or closest → max-heap of size k.** The top is the item you'd throw out next.
+  - Push, then pop when `size() > k`. **O(n log k)** time, **O(k)** space.
+  - **Top K Frequent:** count with a Map, then a heap by count, or **bucket sort** for O(n).
+  - **Merge K sorted:** a heap of the k front items. Pop the smallest, push the next one from the same list. **O(N log k)**.
+  - **Median of a stream:** max-heap for the small half, min-heap for the big half; sizes equal, or small has one more.
+  - JavaScript has no heap: write a `Heap` with a compare function, or ask to assume one.
+</Callout>
