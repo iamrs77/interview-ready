@@ -50,10 +50,15 @@ export function useDonePages(): Set<string> {
   return useMemo(() => new Set(parse(raw)), [raw]);
 }
 
-/** Marks every lesson as not done. */
-export function resetAllPages() {
+/** Marks these lessons as not done (one track's pages). Marks for other tracks stay. */
+export function resetPages(pageUrls: string[]) {
+  const pages = new Set(parse(readRaw()));
+  for (const url of pageUrls) {
+    pages.delete(url);
+  }
+
   try {
-    localStorage.setItem(STORAGE_KEY, '[]');
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([...pages]));
   } catch {
     // Storage can be blocked (private mode).
   }
