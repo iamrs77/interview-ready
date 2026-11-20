@@ -1,0 +1,495 @@
+---
+title: "Design a Vending Machine"
+description: "A small machine with clear states: idle, has money, dispensing, out of stock."
+icon: CupSoda
+---
+
+<Callout title="About this question">
+  - **Difficulty:** Easy.
+  - **Patterns used:** [State](../design-patterns/state.mdx) (the heart of it), [Strategy](../design-patterns/strategy.mdx) (for payment, as an extension).
+  - **Also asked as:** "Design a coffee machine", "Design a ticket machine", "Design a snack machine".
+</Callout>
+
+## Understand the problem
+
+Think of the snack machine at an office. You put in coins or notes, press a button, a snack drops, and you get your change. Press "cancel" and your money comes back.
+
+What makes it interesting is that **the same button does different things at different times**:
+
+- Press "A1" with no money in: "Insert money first".
+- Press "A1" with enough money: a snack drops.
+- Put money in while a snack is dropping: refused.
+- Put money in when the machine is empty: refused, money returned.
+
+The machine has a few clear **states** (situations it can be in), and the rules depend on the state. That is exactly what the [State](../design-patterns/state.mdx) pattern is for.
+
+## Step 1: Requirements
+
+### Functional requirements
+
+1. Users should be able to insert coins (1, 2, 5) and notes (10, 20), one at a time. Other money is rejected.
+2. Users should be able to select a product by its code, like `A1`.
+3. Users should get the product and the right change when they paid enough.
+4. Users should be able to cancel and get back exactly the money they put in.
+5. The machine should refuse money when it is completely sold out.
+6. An operator should be able to restock products.
+
+### Out of scope
+
+- Card and phone payments (we add them as an extension).
+- The hardware: motors, coin sensors, the display.
+- Sales reports and remote monitoring.
+
+### Questions to ask the interviewer
+
+| Question | What we assume |
+| --- | --- |
+| One product per selection? | Yes. One item per sale. |
+| What if the machine can't make change? | Refuse the sale. The customer can use exact money or cancel. |
+| Does cancel return the same coins? | Yes. Money stays separate until the sale happens. |
+| Can a customer buy again without taking change first? | No. Each sale ends with the product and the change. |
+| Is there a time limit before auto-cancel? | Not now. It is an easy extension. |
+
+## Step 2: Core classes
+
+| Class | What it is | Key data | Key actions |
+| --- | --- | --- | --- |
+| `Product` | A snack and its price | `code`, `name`, `price` | — |
+| `Inventory` | The slots and how many items each has | code → `{ product, count }` | `add`, `find`, `inStock`, `take` |
+| `CashBox` | The money inside the machine | count of each coin and note | `load`, `pay(paid, changeDue)` |
+| `MachineState` (abstract) | One situation the machine can be in | — | `insert`, `select`, `cancel`, `dispense` |
+| `IdleState`, `HasMoneyState`, `DispensingState`, `OutOfStockState` | The four states | — | the actions they allow |
+| `VendingMachine` | The main service. The buttons and slot call it. | the current state, the money put in | `insert`, `select`, `cancel`, `restock` |
+
+**Enum:** `Money`: `ONE`, `TWO`, `FIVE` (coins) and `TEN`, `TWENTY` (notes). Its values are the amounts, so they can be added up.
+
+## Step 3: Class diagram
+
+```mermaid
+classDiagram
+  direction TB
+  class VendingMachine:::concrete {
+    -state MachineState
+    -inserted Money[]
+    +insert(money) string
+    +select(code) Sale
+    +cancel() Money[]
+    +restock(product, count)
+  }
+  class MachineState:::abstract {
+    <<abstract>>
+    +insert(machine, money)
+    +select(machine, code)
+    +cancel(machine)
+    +dispense(machine, code, change)
+  }
+  class IdleState:::concrete
+  class HasMoneyState:::concrete
+  class DispensingState:::concrete
+  class OutOfStockState:::concrete
+  class Inventory:::concrete {
+    +find(code) Product
+    +inStock(code) bool
+    +take(code) Product
+  }
+  class Product:::concrete {
+    +code string
+    +price number
+  }
+  class CashBox:::concrete {
+    +load(money[])
+    +pay(paid, changeDue) Money[]
+  }
+  class Money:::enum {
+    <<enumeration>>
+    ONE
+    TWO
+    FIVE
+    TEN
+    TWENTY
+  }
+  VendingMachine "1" *-- "1" Inventory
+  VendingMachine "1" *-- "1" CashBox
+  VendingMachine --> MachineState : current
+  MachineState <|-- IdleState
+  MachineState <|-- HasMoneyState
+  MachineState <|-- DispensingState
+  MachineState <|-- OutOfStockState
+  Inventory "1" o-- "many" Product
+  CashBox ..> Money
+```
+
+And the states, with what moves the machine from one to the next:
+
+```mermaid
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> HasMoney : insert money
+  HasMoney --> HasMoney : insert more
+  HasMoney --> Idle : cancel, refund
+  HasMoney --> Dispensing : select, paid enough
+  Dispensing --> Idle : item dropped
+  Dispensing --> OutOfStock : last item sold
+  OutOfStock --> Idle : restock
+```
+
+- **One class per state.** Each state holds its own rules. `IdleState.select()` says "Insert money first". `HasMoneyState.select()` sells. There is no big `switch (state)` inside every method.
+- **`MachineState` is an abstract class, not a pure interface.** Its default for every action is "refuse". Each state overrides only what it allows, so `OutOfStockState` is just two lines.
+- **Composition for `Inventory` and `CashBox`.** They are parts of this one machine and live and die with it. Products are only aggregated: the same `Product` object can sit in many machines.
+- **`CashBox.pay()` is all or nothing.** It either keeps the money and returns change, or changes nothing. A sale never ends half done.
+
+## Step 4: Main methods
+
+- `VendingMachine.insert(money)` → the new balance. Rejects money that isn't a `Money` value.
+- `VendingMachine.select(code)` → `{ product, change }`. Throws with a clear message if the sale can't happen.
+- `VendingMachine.cancel()` → the exact money put in, as an array.
+- `VendingMachine.restock(product, count)` → for the operator. Moves `OutOfStock` back to `Idle`.
+- `CashBox.pay(paid, changeDue)` → the change, or `null` if exact change is impossible.
+
+Each public action just asks the current state: `insert(money)` runs `this.#state.insert(this, money)`. The main flow, one sale:
+
+```mermaid
+sequenceDiagram
+  participant C as Customer
+  participant M as VendingMachine
+  participant S as Current state
+  participant B as CashBox
+  participant I as Inventory
+  C->>M: insert(20)
+  M->>S: Idle: insert
+  S-->>M: state = HasMoney
+  C->>M: select("A1")
+  M->>S: HasMoney: select
+  S->>I: find, inStock
+  S->>B: pay([20], 5)
+  B-->>S: change [5]
+  S-->>M: state = Dispensing
+  M->>S: Dispensing: dispense
+  S->>I: take("A1")
+  M-->>C: Chips + change [5]
+```
+
+## Step 5: Code
+
+**Part 1: the enum and the small classes.** `CashBox` makes change with the biggest coins first (a "greedy" method).
+
+```js
+const Money = Object.freeze({ ONE: 1, TWO: 2, FIVE: 5, TEN: 10, TWENTY: 20 }); // coins: 1, 2, 5. Notes: 10, 20.
+const ACCEPTED = new Set(Object.values(Money));
+
+class Product {
+  constructor(code, name, price) {
+    this.code = code;
+    this.name = name;
+    this.price = price;
+  }
+}
+
+class Inventory {
+  #slots = new Map(); // code -> { product, count }
+  add(product, count) {
+    const slot = this.#slots.get(product.code) ?? { product, count: 0 };
+    slot.count += count;
+    this.#slots.set(product.code, slot);
+  }
+  find(code) { return this.#slots.get(code)?.product ?? null; }
+  inStock(code) { return (this.#slots.get(code)?.count ?? 0) > 0; }
+  take(code) {
+    this.#slots.get(code).count -= 1;
+    return this.#slots.get(code).product;
+  }
+  get isEmpty() { return [...this.#slots.values()].every((slot) => slot.count === 0); }
+}
+
+class CashBox {
+  #counts = new Map(); // money value -> how many the machine holds
+  load(values) {
+    for (const v of values) this.#counts.set(v, (this.#counts.get(v) ?? 0) + 1);
+  }
+  // Keep the paid money and hand back change. All or nothing: if exact change is impossible,
+  // nothing changes and it returns null.
+  pay(paid, changeDue) {
+    this.load(paid);
+    const change = this.#pickChange(changeDue);
+    if (change === null) {
+      this.#remove(paid);
+      return null;
+    }
+    this.#remove(change);
+    return change;
+  }
+  #pickChange(amount) { // greedy: biggest first
+    const change = [];
+    for (const value of [...this.#counts.keys()].sort((a, b) => b - a)) {
+      let left = this.#counts.get(value);
+      while (amount >= value && left > 0) {
+        change.push(value);
+        amount -= value;
+        left--;
+      }
+    }
+    return amount === 0 ? change : null;
+  }
+  #remove(values) {
+    for (const v of values) this.#counts.set(v, this.#counts.get(v) - 1);
+  }
+}
+```
+
+**Part 2: the states.** The abstract base refuses everything. Each state allows only what makes sense, and decides the next state.
+
+```js
+class MachineState { // abstract: every action is refused, unless a state allows it
+  constructor() {
+    if (new.target === MachineState) throw new Error('MachineState is abstract');
+  }
+  insert(machine, money) { throw new Error(`${this.name}: can't take money now`); }
+  select(machine, code) { throw new Error(`${this.name}: can't select now`); }
+  cancel(machine) { return []; } // nothing to give back
+  dispense(machine, code, change) { throw new Error(`${this.name}: can't dispense now`); }
+  get name() { return this.constructor.name; }
+}
+
+class IdleState extends MachineState {
+  insert(machine, money) {
+    machine.addMoney(money);
+    machine.setState(machine.states.hasMoney);
+    return `Balance: ${machine.balance}`;
+  }
+  select() { throw new Error('Insert money first'); }
+}
+
+class HasMoneyState extends MachineState {
+  insert(machine, money) {
+    machine.addMoney(money);
+    return `Balance: ${machine.balance}`;
+  }
+  select(machine, code) {
+    const product = machine.inventory.find(code);
+    if (!product) throw new Error(`No product ${code}`);
+    if (!machine.inventory.inStock(code)) throw new Error(`${product.name} is sold out. Pick another or cancel`);
+    const balance = machine.balance;
+    if (balance < product.price) throw new Error(`${product.name} costs ${product.price}. Insert ${product.price - balance} more`);
+    const change = machine.cashBox.pay(machine.inserted, balance - product.price);
+    if (change === null) throw new Error('No change available. Use exact money or cancel');
+    machine.setState(machine.states.dispensing);
+    return machine.dispense(code, change);
+  }
+  cancel(machine) {
+    const refund = machine.takeInsertedMoney();
+    machine.setState(machine.states.idle);
+    return refund;
+  }
+}
+
+class DispensingState extends MachineState { // the motor is running: everything else is refused
+  dispense(machine, code, change) {
+    const product = machine.inventory.take(code);
+    machine.takeInsertedMoney(); // the money is now in the cash box
+    machine.setState(machine.inventory.isEmpty ? machine.states.outOfStock : machine.states.idle);
+    return { product: product.name, change };
+  }
+}
+
+class OutOfStockState extends MachineState {
+  insert() { throw new Error('Sold out. Money returned'); }
+  select() { throw new Error('Sold out'); }
+}
+```
+
+**Part 3: the machine.** It keeps the current state and passes every action to it. The money put in stays separate until a sale, so cancel can return the same coins.
+
+```js
+class VendingMachine {
+  #state;
+  #inserted = [];
+  states = {
+    idle: new IdleState(),
+    hasMoney: new HasMoneyState(),
+    dispensing: new DispensingState(),
+    outOfStock: new OutOfStockState(),
+  };
+  constructor(inventory, cashBox) {
+    this.inventory = inventory;
+    this.cashBox = cashBox;
+    this.#state = inventory.isEmpty ? this.states.outOfStock : this.states.idle;
+  }
+
+  // What a customer can do. Each action asks the current state what to do.
+  insert(money) {
+    if (!ACCEPTED.has(money)) throw new Error(`Rejected: ${money} is not a coin or note we take`);
+    return this.#state.insert(this, money);
+  }
+  select(code) { return this.#state.select(this, code); }
+  cancel() { return this.#state.cancel(this); }
+
+  // What the operator can do.
+  restock(product, count) {
+    this.inventory.add(product, count);
+    if (this.#state === this.states.outOfStock) this.setState(this.states.idle);
+  }
+
+  // Helpers for the states.
+  get stateName() { return this.#state.name; }
+  setState(state) { this.#state = state; }
+  dispense(code, change) { return this.#state.dispense(this, code, change); }
+  addMoney(money) { this.#inserted.push(money); }
+  get inserted() { return [...this.#inserted]; }
+  get balance() { return this.#inserted.reduce((sum, m) => sum + m, 0); }
+  takeInsertedMoney() {
+    const money = this.#inserted;
+    this.#inserted = [];
+    return money;
+  }
+}
+```
+
+**Part 4: try it.** `show` prints the error message instead of stopping the program.
+
+```js
+const show = (action) => { try { return action(); } catch (e) { return e.message; } };
+
+const chips = new Product('A1', 'Chips', 15);
+const soda = new Product('A2', 'Soda', 25);
+const inventory = new Inventory();
+inventory.add(chips, 2);
+inventory.add(soda, 1);
+const cashBox = new CashBox();
+cashBox.load([Money.FIVE, Money.TWO, Money.ONE]); // a little change to start with
+const vm = new VendingMachine(inventory, cashBox);
+
+console.log(vm.stateName); // IdleState
+console.log(show(() => vm.select('A1'))); // Insert money first
+console.log(vm.insert(Money.TEN)); // Balance: 10
+console.log(vm.stateName); // HasMoneyState
+console.log(show(() => vm.select('A2'))); // Soda costs 25. Insert 15 more
+console.log(vm.insert(Money.TWENTY)); // Balance: 30
+console.log(vm.select('A2')); // { product: 'Soda', change: [ 5 ] }
+console.log(vm.stateName); // IdleState
+
+console.log(show(() => vm.insert(3))); // Rejected: 3 is not a coin or note we take
+console.log(vm.insert(Money.TWENTY)); // Balance: 20
+console.log(show(() => vm.select('A1'))); // No change available. Use exact money or cancel
+console.log(vm.cancel()); // [ 20 ]
+
+vm.insert(Money.TEN);
+vm.insert(Money.FIVE);
+console.log(vm.select('A1')); // { product: 'Chips', change: [] }
+vm.insert(Money.TWENTY);
+console.log(vm.select('A1')); // { product: 'Chips', change: [ 5 ] }
+console.log(vm.stateName); // OutOfStockState
+console.log(show(() => vm.insert(Money.TEN))); // Sold out. Money returned
+
+vm.restock(chips, 5);
+console.log(vm.stateName); // IdleState
+```
+
+Why "No change available" the second time? The only 5 went out with the soda. The box has one 2 and one 1, which make 3, not 5. So the sale is refused, and cancel returns the same 20 note. After the next sale adds a 5 to the box, change works again.
+
+## Step 6: Edge cases and extensions
+
+### Edge cases
+
+| Case | What happens |
+| --- | --- |
+| A fake coin or a 3-coin | Rejected at the slot, before any state sees it. |
+| Not enough money | The sale is refused with "Insert N more". The state stays `HasMoney`. |
+| One product is sold out | "Sold out. Pick another or cancel". The money stays in. |
+| The machine can't make change | The sale is refused, and nothing in the cash box changes. The customer can cancel. |
+| Cancel with no money in | Returns an empty array. Nothing happens. |
+| Everything is sold out | `OutOfStock`: money is refused until the operator restocks. |
+| Greedy change misses an answer | Owing 6 with one 5 and three 2s: greedy takes the 5, then fails. 2 + 2 + 2 works. A small search ("coin change" in DSA) fixes this. |
+| The item gets stuck | A real machine has a drop sensor. If no item falls, refund the money and mark the slot as broken. |
+
+### Two requests at once
+
+A machine serves one customer, but the coin slot, the buttons and a phone app all send events. In JavaScript they arrive one at a time, and each runs to the end, so the checks and the state change in `select` can't be split.
+
+The danger comes when dispensing takes time. The motor needs a second or two, so real code would `await` it. **Set the state to `Dispensing` before the `await`.** Then a second press in that time hits `DispensingState` and is refused.
+
+```js
+// A fragment, not runnable on its own.
+async select(machine, code) {
+  // ...checks and payment as before...
+  machine.setState(machine.states.dispensing); // first: close the door to other presses
+  await machine.motor.drop(code);              // slow: a second or two
+  machine.setState(machine.states.idle);
+}
+```
+
+If the state changed only after the `await`, two quick presses could both pass the checks and sell one paid item twice. More on this in [Race Conditions and Locks](../concurrency/race-conditions-locks.mdx).
+
+### Adding features
+
+- **Card and phone payment:** add a `PaymentMethod` interface with `pay(amount)`, and classes `CashPayment` and `CardPayment`. The states call the interface. This is [Strategy](../design-patterns/strategy.mdx).
+- **A maintenance mode** (the operator opens the door): add a `MaintenanceState` that refuses everything. The other states stay the same. This is [State](../design-patterns/state.mdx) plus the [Open-Closed Principle](../design-principles/open-closed.mdx).
+- **Low-stock alerts:** the machine sends a "sold" event, and a stock monitor listens. This is [Observer](../design-patterns/observer.mdx).
+
+## Patterns used
+
+| Pattern | Where | Why |
+| --- | --- | --- |
+| [State](../design-patterns/state.mdx) | `MachineState` and its four states | The same button does different things in different states, with no `switch` everywhere. |
+| [Strategy](../design-patterns/strategy.mdx) | `PaymentMethod` (extension) | New ways to pay without changing the states. |
+| [Facade](../design-patterns/facade.mdx) | `VendingMachine` | The buttons talk to one simple object, not to the inventory, cash box and states. |
+
+The State pattern is common in real code. A JavaScript `Promise` is a tiny state machine: pending, then fulfilled or rejected, and it never goes back. Libraries like XState help you build bigger state machines in JavaScript.
+
+## Follow-up questions
+
+<Accordions>
+<Accordion title="Why the State pattern and not a switch?">
+
+With a `switch`, every action (`insert`, `select`, `cancel`) has its own `switch (state)`. A new state means editing every one of them. With State, each state's rules sit in one class, and a new state is a new class. For two or three tiny states, a `switch` is fine. Keep it simple until it hurts.
+
+</Accordion>
+<Accordion title="Who should change the state: the state or the machine?">
+
+Here, each state picks the next one, because it knows what comes next. The cost is that states know about each other. The other way is a transition table in the machine, like `{ Idle: { insert: 'HasMoney' } }`. It keeps all moves in one place, which helps when there are many states.
+
+</Accordion>
+<Accordion title="How do you make change when coins run low?">
+
+Greedy (biggest coin first) is simple and works for normal coin sets when the box is full. With few coins it can fail, as in the 6 = 2 + 2 + 2 case. Try combinations instead (a small coin-change search). Also turn on an "exact money only" light when the box is low.
+
+</Accordion>
+<Accordion title="How would you add a timeout that cancels after 60 seconds?">
+
+When the machine enters `HasMoney`, start a timer. When the timer fires, call `cancel()` and refund. Any new action restarts the timer. Leaving `HasMoney` clears it.
+
+</Accordion>
+</Accordions>
+
+## What the interviewer expects
+
+<Tabs items={['Mid-level', 'Senior', 'Staff']}>
+<Tab value="Mid-level">
+
+- Clear states, and the moves between them.
+- A working sale: insert, select, product, change.
+- Cancel that returns the money.
+
+</Tab>
+<Tab value="Senior">
+
+- The State pattern, with a clear reason why it beats a `switch` here.
+- Change-making that is all or nothing, and what happens when change is impossible.
+- Edge cases: sold out, stuck item, fake coin, a press while dispensing.
+
+</Tab>
+<Tab value="Staff">
+
+- Everything from senior, but faster.
+- Trade-offs: states that pick the next state vs a transition table.
+- How the design grows: card payment, many machines reporting stock to one server.
+
+</Tab>
+</Tabs>
+
+<Callout title="Remember this" type="success">
+  - The same button does different things in different states. That is the State pattern.
+  - Four states: Idle, HasMoney, Dispensing, OutOfStock. Draw the moves between them first.
+  - The base state refuses everything. Each state allows only what makes sense.
+  - Paying and making change is all or nothing. If change is impossible, refuse the sale and keep the money separate.
+  - Switch to `Dispensing` before any `await`, so a second press is refused.
+</Callout>

@@ -1,0 +1,153 @@
+---
+title: "Cheat Sheet"
+description: "All of low-level design on one page, for the last look before an interview."
+icon: ClipboardList
+---
+
+## The interview in 6 steps
+
+Full lesson: [The LLD Interview Framework](./interview-framework.mdx).
+
+| Step | Time | What you do |
+| --- | --- | --- |
+| 1. Requirements | about 5 min | Ask questions. List what it must do, what is out of scope, and your assumptions. Say them out loud. |
+| 2. Core classes | about 5 min | Nouns → classes, verbs → methods, fixed choices → enums. |
+| 3. Class diagram | 5–10 min | Draw the key classes and how they relate: is-a, has-a, uses. Add multiplicity. |
+| 4. Main methods | about 5 min | The public methods of the key classes, and the main flow. |
+| 5. Code | 15–20 min | The core classes and the main flow first. Clean, runnable code. |
+| 6. Edge cases and extensions | 5–10 min | Wrong input, two requests at once, and new features without changing old code. |
+
+## OOP, one line each
+
+| Idea | One line | In JavaScript |
+| --- | --- | --- |
+| [Class and object](./oop-basics/classes-and-objects.mdx) | A class is the blueprint, an object is one thing made from it. | `class`, `new`, `constructor`, `this`, `static` |
+| [Encapsulation](./oop-basics/encapsulation.mdx) | Keep data inside; change it only through methods that keep the rules. | `#field` is truly private; `_field` is only a habit |
+| [Abstraction](./oop-basics/abstraction.mdx) | Show what it does, hide how it does it. | A few public methods, private inside steps |
+| [Inheritance](./oop-basics/inheritance.mdx) | A child gets the parent's data and methods ("is-a"). | `extends`, and `super(...)` before any `this` |
+| [Polymorphism](./oop-basics/polymorphism.mdx) | One call, and each object does it its own way. | Overriding. No overloading: check the arguments instead |
+| [Composition](./oop-basics/composition-vs-inheritance.mdx) | Build objects from swappable parts ("has-a"). | Prefer it over deep inheritance trees |
+
+Abstraction hides **complexity**. Encapsulation hides and guards **data**.
+
+## JavaScript stand-ins for Java features
+
+Full lesson: [Interfaces and Abstract Classes in JavaScript](./oop-basics/interfaces-abstract-classes.mdx).
+
+| Java has | In JavaScript |
+| --- | --- |
+| `interface` | A base class marked `// interface` whose methods throw "not implemented" |
+| `abstract class` | `if (new.target === Vehicle) throw …` in the constructor |
+| `private` | `#field` and `#method()` |
+| `protected` | Nothing. Children use the parent's public methods |
+| `enum` | `Object.freeze({ SMALL: 'SMALL', LARGE: 'LARGE' })` |
+| Overloading | One method that checks its arguments, or default values |
+| Threads and `synchronized` | One thread, but `await` can still cause races |
+
+## Design principles, one line each
+
+| Principle | Remember it as | The smell |
+| --- | --- | --- |
+| [Single Responsibility](./design-principles/single-responsibility.mdx) | One class, one job, one reason to change. | You need "and" to describe the class |
+| [Open/Closed](./design-principles/open-closed.mdx) | Add new code, don't edit old code. | A growing `if/else` or `switch` on a type |
+| [Liskov Substitution](./design-principles/liskov-substitution.mdx) | A child keeps the parent's promises. | A child that throws or does nothing; `instanceof` checks |
+| [Interface Segregation](./design-principles/interface-segregation.mdx) | Small interfaces. Only promise what you can do. | Methods that throw "not supported" |
+| [Dependency Inversion](./design-principles/dependency-inversion.mdx) | Depend on the socket, not the power station. | `new SomeDatabase()` inside business code |
+| [Dependency Injection](./design-principles/dependency-injection.mdx) | Don't build it, receive it. | Code you can't test without the network |
+| [DRY, KISS, YAGNI](./design-principles/dry-kiss-yagni.mdx) | Say it once. Keep it plain. Build it when it's needed. | Clever code, unused "just in case" classes |
+| [Coupling and Cohesion](./design-principles/coupling-cohesion.mdx) | Tight inside, loose between. | Chains like `a.b.c.d()`; `Utils` classes |
+
+## UML at a glance
+
+Full lessons: [Class Diagrams](./modeling-uml/class-diagrams.mdx) and [Association, Aggregation and Composition](./modeling-uml/relationships.mdx).
+
+| Relationship | Arrow | Means | Example |
+| --- | --- | --- | --- |
+| Inheritance | `<\|--` solid, triangle | is a kind of | `Car` is a `Vehicle` |
+| Implements | `<\|..` dashed, triangle | plays an interface's role | `Card` is a `PaymentMethod` |
+| Composition | `*--` filled diamond | owns; the part dies with the whole | `ParkingLot` and its `Level`s |
+| Aggregation | `o--` hollow diamond | has; the part lives on | `Team` and its `Player`s |
+| Association | `-->` | keeps it in a field | `Loan` knows its `Member` |
+| Dependency | `..>` | uses it for a moment | `Gate` uses a `FeeRule` |
+
+- Visibility: `+` public, `-` private, `#` protected.
+- The test: **does the part die with the whole?** Yes = composition. No = aggregation.
+- In an interview, draw **key classes and main methods only**.
+
+## Which pattern for which problem
+
+| You see this | Use | One line |
+| --- | --- | --- |
+| Callers name concrete classes when they create things | [Factory](./design-patterns/factory.mdx) | Ask for "what", get an object |
+| A constructor with too many arguments | [Builder](./design-patterns/builder.mdx) | Build step by step, check in `build()` |
+| Exactly one shared object (config, logger) | [Singleton](./design-patterns/singleton.mdx) | Usually better: create one and pass it in |
+| An outside class with the wrong interface | [Adapter](./design-patterns/adapter.mdx) | A travel plug for code |
+| Add extras without a subclass for every mix | [Decorator](./design-patterns/decorator.mdx) | Wrap with the same interface |
+| Many classes, callers want one easy call | [Facade](./design-patterns/facade.mdx) | A front desk |
+| Control access: lazy, cache, permission | [Proxy](./design-patterns/proxy.mdx) | A stand-in with the same interface |
+| A tree where a group and an item act the same | [Composite](./design-patterns/composite.mdx) | Files and folders |
+| A growing `if/else` on a rule or type | [Strategy](./design-patterns/strategy.mdx) | One class (or function) per rule |
+| Many objects must hear about a change | [Observer](./design-patterns/observer.mdx) | Subscribe, unsubscribe, notify |
+| Undo, redo, queue or log actions | [Command](./design-patterns/command.mdx) | A request as an object |
+| The same button does different things by mode | [State](./design-patterns/state.mdx) | One class per state |
+| Fixed steps, some steps vary | [Template Method](./design-patterns/template-method.mdx) | One recipe, filled-in steps |
+| Pass a request along until someone handles it | [Chain of Responsibility](./design-patterns/chain-of-responsibility.mdx) | Middleware, support desk, cash notes |
+
+**Lookalikes:**
+- **Strategy vs State:** the **caller** picks a strategy; a state **switches itself**.
+- **Decorator vs Proxy:** same shape. Decorator **adds behavior**, Proxy **controls access**.
+- **Adapter vs Facade:** Adapter fits **one** thing to an existing interface. Facade makes a **new, simpler** front for many.
+- **Factory vs Builder:** Factory picks **which** class. Builder decides **how** one object is put together.
+
+## Two requests at once
+
+Full lessons: [Race Conditions and Locks](./concurrency/race-conditions-locks.mdx) and [Making a Design Thread-Safe](./concurrency/thread-safe-design.mdx).
+
+- JavaScript runs one task at a time, but other code can run at **every `await`**.
+- The danger shape: **check → `await` → write**. Two requests both pass the check.
+- Fixes, simplest first:
+  - **Don't share** the data.
+  - **Don't change** it (immutable).
+  - **Atomic step:** check and write with no `await` between them.
+  - **Lock:** a mutex, released in `finally`.
+  - **Database rule:** a conditional update or a unique index, when there are many servers.
+- Deadlocks: lock in the **same order**, hold locks **briefly**, use **timeouts**.
+- In Java, a thread can be paused at **any line**. That is why Java interviews talk so much about locks.
+
+## Each problem in one line
+
+| Problem | The key idea |
+| --- | --- |
+| [Parking Lot](./problems/parking-lot.mdx) | A vehicle knows its size, a spot knows what fits. Fee and spot choice are Strategies. |
+| [Vending Machine](./problems/vending-machine.mdx) | State pattern: Idle, HasMoney, Dispensing, OutOfStock. Change-making is all or nothing. |
+| [Tic-Tac-Toe](./problems/tic-tac-toe.mdx) | O(1) win check with a counter per row, column and diagonal. `Player` is an interface. |
+| [LRU Cache](./problems/lru-cache.mdx) | Map for O(1) find, doubly linked list for O(1) move. Fake head and tail nodes. |
+| [Logger](./problems/logger.mdx) | Drop low levels first. Appenders (where) and Formatters (how) are separate. |
+| [Elevator](./problems/elevator.mdx) | The controller picks the car (Strategy), each car picks its stop order (LOOK), car modes are States. |
+| [Library Management](./problems/library-management.mdx) | `Book` is the title, `BookCopy` is on the shelf. Reservations notify (Observer). Pass the clock in. |
+| [Snake and Ladder](./problems/snake-and-ladder.mdx) | Snakes and ladders are both a `Jump`. Pass the dice in for repeatable games. |
+| [ATM](./problems/atm.mdx) | States for the steps, a chain for the notes. Check notes, debit, dispense, reverse on failure. |
+| [Splitwise](./problems/splitwise.mdx) | Money in whole paise. One Strategy per split type. Simplify debts greedily. |
+| [Movie Ticket Booking](./problems/movie-ticket-booking.mdx) | Hold first, pay second. `holdSeats` is all or nothing, with no `await` inside. |
+| [Hotel Booking](./problems/hotel-booking.mdx) | Stays are date ranges; they clash if `a.start < b.end && b.start < a.end`. Refund rules are a Strategy. |
+| [Ride Sharing](./problems/ride-sharing.mdx) | A ride is a state machine. Matching and fare are Strategies, notifications are Observers. |
+| [Chess](./problems/chess.mdx) | Ask each piece `canMove` (polymorphism). A legal move must not leave your king in check. `Move` is a Command. |
+| [In-Memory File System](./problems/in-memory-file-system.mdx) | Composite: `File` and `Directory` share `Entry`. A folder's size is the sum of its children. |
+
+## Before you walk in
+
+- Ask questions first. Never start with code.
+- Name classes after real things. Give each class **one job**.
+- Put each method on the class that **has the data** it needs.
+- Prefer **composition** and **interfaces**. A new feature should be a **new class**, not an edit.
+- Use an **enum** for fixed choices, and **pass in** the clock, the dice and outside services.
+- Write the **main flow** first, then edge cases.
+- Say where two requests could clash, and how you would make it safe.
+- Name the patterns you use, and say **why** you used each one.
+
+<Callout title="Remember this" type="success">
+  - **Requirements → classes → diagram → methods → code → edge cases.**
+  - **One job per class.** New features are new classes.
+  - **Strategy** for rules, **State** for modes, **Observer** for "tell everyone", **Factory** for "make the right one".
+  - **check → `await` → write** is a race. Make it atomic, lock it, or let the database decide.
+</Callout>

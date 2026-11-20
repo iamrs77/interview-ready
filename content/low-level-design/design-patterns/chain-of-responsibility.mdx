@@ -1,0 +1,227 @@
+---
+title: "Chain of Responsibility"
+description: "Pass a request along a chain until someone handles it."
+icon: ListChecks
+---
+
+**Intent:** pass a request along a line of handlers; each one either handles it or passes it to the next.
+**Group:** Behavioral (patterns about how objects share work).
+
+## The idea
+
+Think of calling **customer support**. A bot answers first. If it can't help, it passes you to a support agent. If the agent can't fix it, they pass you to a manager. You don't pick who helps you. You just call, and your request moves along the line until someone handles it.
+
+An **airport** works in a similar way: ID check, then bag scan, then body scan. Each station can stop you, or let you move on to the next.
+
+So the pattern comes in two forms:
+
+1. **The first one that can, handles it** (the support desk). The request stops at the first handler that takes it.
+2. **Every step runs, and any step can stop it** (the airport, web middleware). Each handler does its part, then calls the next one or stops the request.
+
+## The problem
+
+The first version puts every level in one function:
+
+```js
+function handleTicket(ticket) {
+  if (ticket.issue === 'password reset') {
+    return 'Bot: sent a reset link';
+  } else if (ticket.severity <= 2) {
+    return `Agent: fixed "${ticket.issue}"`;
+  } else if (ticket.severity <= 4) {
+    return `Manager: fixed "${ticket.issue}"`;
+  }
+  return `Nobody could handle "${ticket.issue}"`;
+}
+
+console.log(handleTicket({ issue: 'double charge', severity: 2 }));
+// Agent: fixed "double charge"
+```
+
+Why it hurts:
+
+- The sender **knows every handler and the order**.
+- A new level, like a specialist between the agent and the manager, means **editing this function**.
+- You can't **change the order** for some customers. For example, VIP customers should skip the bot.
+
+## The pattern
+
+Each level becomes a handler object that knows only **the next handler**. The chain is built outside, by linking handlers together.
+
+```mermaid
+classDiagram
+  direction TB
+  class SupportHandler:::abstract {
+    <<abstract>>
+    -next SupportHandler
+    +setNext(handler) SupportHandler
+    +handle(ticket) string
+    +canHandle(ticket) boolean
+  }
+  class Bot:::concrete {
+    +canHandle(ticket) boolean
+  }
+  class Agent:::concrete {
+    +canHandle(ticket) boolean
+  }
+  class Manager:::concrete {
+    +canHandle(ticket) boolean
+  }
+  SupportHandler --> SupportHandler : next
+  SupportHandler <|-- Bot
+  SupportHandler <|-- Agent
+  SupportHandler <|-- Manager
+```
+
+```js
+class SupportHandler { // abstract
+  #next = null;
+  constructor() {
+    if (new.target === SupportHandler) throw new Error('SupportHandler is abstract');
+  }
+  setNext(handler) {
+    this.#next = handler;
+    return handler; // so calls can be chained: a.setNext(b).setNext(c)
+  }
+  handle(ticket) {
+    if (this.canHandle(ticket)) return `${this.constructor.name}: fixed "${ticket.issue}"`;
+    if (this.#next) return this.#next.handle(ticket); // not mine: pass it on
+    return `Nobody could handle "${ticket.issue}"`; // end of the chain
+  }
+  canHandle(ticket) { throw new Error('not implemented'); }
+}
+
+class Bot extends SupportHandler {
+  canHandle(ticket) { return ticket.issue === 'password reset'; }
+}
+class Agent extends SupportHandler {
+  canHandle(ticket) { return ticket.severity <= 2; }
+}
+class Manager extends SupportHandler {
+  canHandle(ticket) { return ticket.severity <= 4; }
+}
+
+const support = new Bot();
+support.setNext(new Agent()).setNext(new Manager());
+
+console.log(support.handle({ issue: 'password reset', severity: 1 }));
+// Bot: fixed "password reset"
+console.log(support.handle({ issue: 'double charge', severity: 2 }));
+// Agent: fixed "double charge"
+console.log(support.handle({ issue: 'account hacked', severity: 4 }));
+// Manager: fixed "account hacked"
+console.log(support.handle({ issue: 'data center fire', severity: 5 }));
+// Nobody could handle "data center fire"
+```
+
+How the "account hacked" ticket travels:
+
+```mermaid
+sequenceDiagram
+  participant C as Customer
+  participant B as Bot
+  participant A as Agent
+  participant M as Manager
+  C->>B: handle(account hacked, severity 4)
+  Note over B: not a password reset
+  B->>A: handle(ticket)
+  Note over A: severity too high
+  A->>M: handle(ticket)
+  M-->>C: fixed by Manager
+```
+
+What changed:
+
+- Each handler knows only **the next one**, not the whole chain.
+- The chain is **built outside**, so you can reorder it, or build a different chain for VIP customers that starts with `new Agent()`.
+- The base class has the "pass it on" logic, so each handler only says **what it can handle**.
+- The chain always ends with a **clear answer**, even when nobody handles the request.
+
+### The JavaScript way: middleware with next()
+
+Web servers in Node use the second form. Each handler is a function that gets the request and a `next` function. It calls `next()` to pass the request on, or stops by not calling it. Here is a tiny runner, like the one inside Express:
+
+```js
+// A tiny middleware runner, like the one inside Express.
+function chain(...handlers) {
+  return (req) => {
+    let i = 0;
+    const next = () => handlers[i++]?.(req, next); // call the next handler, if any
+    next();
+  };
+}
+
+const logger = (req, next) => { console.log(`${req.method} ${req.path}`); next(); };
+const auth = (req, next) => {
+  if (!req.user) return console.log('401: please log in'); // stop here: no next()
+  next();
+};
+const profile = (req) => console.log(`200: hello ${req.user}`);
+
+const app = chain(logger, auth, profile);
+app({ method: 'GET', path: '/me', user: 'asha' });
+// GET /me
+// 200: hello asha
+app({ method: 'GET', path: '/me' });
+// GET /me
+// 401: please log in
+```
+
+The same chain in Express. Each Express middleware gets `(req, res, next)`:
+
+```js
+// Not run here: it needs the express package. Shown to compare.
+app.use(logger);         // every request goes through logger,
+app.use(auth);           // then auth,
+app.get('/me', profile); // then the route.
+```
+
+Java web apps do the same with servlet filters: each filter calls `chain.doFilter(request, response)` to pass the request on.
+
+## When to use it
+
+- **More than one object might handle** a request, and the sender shouldn't need to know which.
+- A request goes through **steps that can each stop it**: logging, login checks, rate limits, input checks.
+- The order or the set of handlers **changes**, per customer type or per route.
+- **Approval limits:** a team lead approves up to $1,000, a manager up to $10,000, a director anything above.
+
+## When not to use it
+
+- There is **always exactly one** handler. Call it directly.
+- A request that falls off the end unhandled would be **dangerous**, and you can't add a safe final handler.
+- The chain gets so long that nobody can tell **which handler took the request**. Add logging, or rethink it.
+
+## Common mistakes
+
+- **No end to the chain.** If nobody handles a request, return a clear "not handled" result or throw an error. Never let it vanish quietly.
+- **Forgetting `next()`.** In Express, a middleware that neither sends a response nor calls `next()` leaves the request hanging until it times out.
+- **The wrong order.** The login check must come before the route it protects.
+
+## In the real world
+
+- **Express and Koa middleware:** `app.use(...)` adds a handler to the chain, and each one calls `next()`.
+- **DOM event bubbling:** a click on a button goes to the button, then its parent, then up to the document. Any handler can call `event.stopPropagation()` to end the trip.
+- **Java servlet filters:** each filter passes the request on with `FilterChain.doFilter()`.
+- **`try`/`catch`:** a thrown error moves up the call stack until some `catch` handles it.
+
+## In the interview
+
+Chain of Responsibility shows up in:
+
+- **[ATM](../problems/atm.mdx) cash dispensing:** the 100-note handler gives as many 100s as it can, then passes the rest to the 50-note handler, then the 20-note handler. Each handler does part of the work and passes on the rest.
+- **[Logger](../problems/logger.mdx) levels:** DEBUG, INFO and ERROR handlers, each deciding whether to write the message.
+- Support ticket escalation, approval flows, and request filters (login check, rate limit).
+
+> "To dispense cash, I'll chain note handlers from the largest note down. Each one gives as many of its notes as it can and passes the amount that is left to the next one. If anything is still left at the end, the ATM can't make that amount and cancels. A new 200 note is one new handler in the chain, with no change to the others."
+
+**Likely follow-up:** "What happens if no handler can process the request?"
+
+**Answer:** "The end of the chain returns a clear 'not handled' result, or I add a final default handler that rejects and logs the request. A request should never just disappear."
+
+<Callout title="Remember this" type="success">
+  - **Chain of Responsibility = the support desk.** Handlers stand in a line; each handles the request or passes it on.
+  - The sender knows only the **first handler**; the chain is built outside and easy to reorder.
+  - Two forms: **"the first one that can"** (support desk) and **"every step, any can stop"** (middleware).
+  - Always **end the chain** with a clear answer, and never forget `next()`.
+  - Seen in **Express middleware**, **DOM event bubbling**, ATM cash dispensers and log levels.
+</Callout>

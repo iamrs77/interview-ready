@@ -1,0 +1,207 @@
+---
+title: "Composition vs Inheritance"
+description: "Build objects from parts instead of long family trees."
+icon: Puzzle
+---
+
+## The idea
+
+Think of two toy robots:
+
+- A **plastic robot from a mold**. Want a robot that flies? You need a whole new mold.
+- A **LEGO robot**. Want it to fly? Take off the legs and click on a jetpack. You can even swap parts while you play.
+
+**Inheritance** is the mold: a new kind of thing means a new child class. **Composition** is LEGO: you build an object from **small parts**, and each part does one job. The object **has** its parts and asks them to do the work.
+
+## "Is-a" vs "has-a"
+
+| Sentence | Relationship | In code |
+| --- | --- | --- |
+| A Car **is a** Vehicle | is-a: inheritance | `class Car extends Vehicle` |
+| A Car **has an** Engine | has-a: composition | `this.engine = new Engine()` |
+| A Duck **has a** way of flying | has-a: composition | `this.flyer = new FlyWithWings()` |
+
+If "is a" sounds wrong, or only half true, the answer is composition.
+
+## The problem with family trees
+
+Let's model ducks with inheritance. A normal duck flies and quacks. A rubber duck squeaks and can't fly. A wooden duck can't do either.
+
+```js
+class Duck {
+  fly() { return 'flaps its wings'; }
+  quack() { return 'Quack!'; }
+}
+
+class RubberDuck extends Duck {
+  fly() { return "can't fly"; } // override just to switch it off
+  quack() { return 'Squeak!'; }
+}
+
+class WoodenDuck extends Duck {
+  fly() { return "can't fly"; } // the same code, copied again
+  quack() { return '...'; }
+}
+
+console.log(new RubberDuck().fly()); // can't fly
+```
+
+```mermaid
+classDiagram
+  direction TB
+  class Duck:::concrete {
+    +fly()
+    +quack()
+  }
+  class MallardDuck:::concrete
+  class RubberDuck:::concrete
+  class WoodenDuck:::concrete
+  class RobotDuck:::concrete
+  Duck <|-- MallardDuck
+  Duck <|-- RubberDuck
+  Duck <|-- WoodenDuck
+  Duck <|-- RobotDuck
+```
+
+It gets worse quickly:
+
+- **Copied code.** "can't fly" is written in two classes already.
+- **Too many classes.** 3 ways to fly × 3 ways to quack = 9 possible classes, one for each mix.
+- **Fixed forever.** A rubber duck can never get a rocket while the program runs. Its class was decided when the code was written.
+
+## The fix: a duck that has parts
+
+Pull each behavior out into its own small part, behind an interface. The duck **has** a fly part and a quack part, and asks them to do the work:
+
+```js
+class FlyBehavior { // interface
+  fly() { throw new Error('not implemented'); }
+}
+class FlyWithWings extends FlyBehavior { fly() { return 'flaps its wings'; } }
+class NoFly extends FlyBehavior { fly() { return "can't fly"; } }
+class RocketFly extends FlyBehavior { fly() { return 'zooms with a rocket!'; } }
+
+class QuackBehavior { // interface
+  quack() { throw new Error('not implemented'); }
+}
+class Quack extends QuackBehavior { quack() { return 'Quack!'; } }
+class Squeak extends QuackBehavior { quack() { return 'Squeak!'; } }
+
+class Duck {
+  #flyer;
+  #quacker;
+
+  constructor(name, flyer, quacker) {
+    this.name = name;
+    this.#flyer = flyer; // the duck HAS a way of flying
+    this.#quacker = quacker; // and a way of quacking
+  }
+
+  fly() { console.log(`${this.name} ${this.#flyer.fly()}`); }
+  quack() { console.log(`${this.name} says ${this.#quacker.quack()}`); }
+  setFlyBehavior(flyer) { this.#flyer = flyer; } // swap a part while running
+}
+
+const mallard = new Duck('Mallard', new FlyWithWings(), new Quack());
+const rubber = new Duck('Rubber duck', new NoFly(), new Squeak());
+mallard.fly(); // Mallard flaps its wings
+rubber.fly(); // Rubber duck can't fly
+rubber.quack(); // Rubber duck says Squeak!
+rubber.setFlyBehavior(new RocketFly());
+rubber.fly(); // Rubber duck zooms with a rocket!
+```
+
+```mermaid
+classDiagram
+  direction TB
+  class Duck:::concrete {
+    +name string
+    -flyer FlyBehavior
+    -quacker QuackBehavior
+    +fly()
+    +quack()
+    +setFlyBehavior(flyer)
+  }
+  class FlyBehavior:::iface {
+    <<interface>>
+    +fly() string
+  }
+  class QuackBehavior:::iface {
+    <<interface>>
+    +quack() string
+  }
+  class FlyWithWings:::concrete
+  class NoFly:::concrete
+  class RocketFly:::concrete
+  class Quack:::concrete
+  class Squeak:::concrete
+  Duck o-- FlyBehavior : has
+  Duck o-- QuackBehavior : has
+  FlyBehavior <|.. FlyWithWings
+  FlyBehavior <|.. NoFly
+  FlyBehavior <|.. RocketFly
+  QuackBehavior <|.. Quack
+  QuackBehavior <|.. Squeak
+```
+
+Now there is **one** `Duck` class. A new way of flying is one small new class, and any duck can use it. With 3 ways to fly and 3 ways to quack, you need 6 small part classes instead of 9 duck classes. Each behavior here is a [Strategy](../design-patterns/strategy.mdx).
+
+<Callout title="Two meanings of 'composition'" type="info">
+  "Composition over inheritance" means building objects from parts, in general. In UML class diagrams,
+  "composition" (`*--`) is a stricter has-a, where the part lives and dies with its owner. Here the ducks get
+  their parts from outside, so the diagram uses the looser has-a, aggregation (`o--`). See
+  [Association, Aggregation and Composition](../modeling-uml/relationships.mdx).
+</Callout>
+
+## Why interviewers like composition
+
+| | Inheritance | Composition |
+| --- | --- | --- |
+| Relationship | is-a | has-a |
+| Decided | When you write the code | Can change while the program runs |
+| Many mixes | One class per mix (they multiply) | One class per part (they add up) |
+| Coupling | The child depends on the parent's insides | The object depends only on the part's public methods |
+| Testing | Hard to test a child without its parent | Swap in a fake part for the test |
+
+**Coupling** means how much one class depends on another. Less is better. See [Coupling and Cohesion](../design-principles/coupling-cohesion.mdx).
+
+The famous *Design Patterns* book (1994) put it in one line: "Favor object composition over class inheritance."
+
+## When inheritance is still right
+
+"Favor" means "prefer", not "never". Inheritance is a good fit when:
+
+- it's a true **is-a**, and the child can be used anywhere the parent is;
+- the tree stays **shallow**, one or two levels;
+- there is **real shared code**, like an abstract `Vehicle` with a shared `receipt()`;
+- the platform asks for it: `class NotFoundError extends Error`, `class MyButton extends HTMLElement`.
+
+A quick rule: **is-a, and it will stay that way?** Inheritance. **Has-a, or the behavior may change or mix?** Composition.
+
+## Common mistakes
+
+- **Inheriting just to reuse code.** `class Stack extends Array` gives your stack `splice()` and `shift()`, which break the stack's rules. Hold an array instead: `#items = [];`.
+- **Overriding a method to switch it off,** like `fly()` that does nothing. It's a sign that this should be a part, not a parent.
+- **Splitting everything into parts,** even when there is only one way to do it. Start simple, and pull out a part when a second way appears. See [DRY, KISS and YAGNI](../design-principles/dry-kiss-yagni.mdx).
+
+## In the real world
+
+- **React** is built on composition. The original React docs recommend composition instead of inheritance to reuse code between components. The React team wrote that across thousands of components, they had not found a case where they'd recommend component inheritance trees. A `Dialog` is built by putting other components inside it (`children`), not by extending a base class.
+- **Unity**, the game engine, builds game objects from parts called components: add a `Rigidbody` for physics, a `Collider` for hits.
+- **Express** builds an app by adding middleware functions with `app.use()`, not by extending a base app class.
+
+## In the interview
+
+> "I'll give `Duck` a `FlyBehavior` part instead of making a subclass for each kind of duck. A new way of flying is one new small class, and I can even swap it while the program runs. That's composition, and here it's the Strategy pattern."
+
+**Likely follow-up:** "So should you never use inheritance?"
+
+No. Use it for a true, stable is-a with real shared code and a shallow tree, like `Car extends Vehicle`, or custom `Error` classes. Use composition when the behavior varies, mixes, or might change at runtime.
+
+<Callout title="Remember this" type="success">
+  - **Inheritance = is-a. Composition = has-a.**
+  - Composition builds an object from small parts that can be swapped, even while the program runs.
+  - Inheritance trees grow fast: every mix needs a class, and parent changes break children.
+  - **"Favor composition over inheritance"**: prefer it, but inheritance is fine for a true, shallow is-a.
+  - A swappable part behind an interface, like `FlyBehavior`, is the **Strategy** pattern.
+</Callout>

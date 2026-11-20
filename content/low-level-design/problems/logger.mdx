@@ -1,0 +1,451 @@
+---
+title: "Design a Logger"
+description: "Log levels, many outputs, formats, and writes that never slow the app."
+icon: ScrollText
+---
+
+<Callout title="About this question">
+  - **Difficulty:** Easy.
+  - **Patterns used:** [Observer](../design-patterns/observer.mdx) (one log goes to every output), [Strategy](../design-patterns/strategy.mdx) (formatters), [Template Method](../design-patterns/template-method.mdx) (appenders), [Singleton](../design-patterns/singleton.mdx) vs [Dependency Injection](../design-principles/dependency-injection.mdx), and [Chain of Responsibility](../design-patterns/chain-of-responsibility.mdx) as the classic textbook answer.
+  - **Also asked as:** "Design a logging library", "Design Log4j", "Design a logging framework".
+</Callout>
+
+## Understand the problem
+
+Think of a ship's logbook. The crew writes down what happens: "09:00, left port", "14:30, storm warning". Some notes are routine, some are urgent. Copies can go to the captain, to the office on shore, and into the book.
+
+A **logger** does the same for a program. The code calls `log.info('Server started')`, and the line goes to the screen, a file, or a log server. What makes it interesting:
+
+- **Levels.** In production you want warnings and errors, not every debug note. Filtering must be cheap.
+- **Many outputs, many formats.** Short text for people, JSON for machines. New outputs must be easy to add.
+- **Speed.** A slow disk must never slow down a user's request.
+- **One logger for the whole app.** A Singleton, or pass it in? Interviewers love this trade-off.
+
+## Step 1: Requirements
+
+### Functional requirements
+
+1. Users should be able to log a message at a level: DEBUG, INFO, WARN or ERROR, with optional extra data (`{ orderId: 42 }`).
+2. Users should be able to set a minimum level. Messages below it are dropped.
+3. Users should be able to send logs to many outputs at once: the console, memory (for tests) and a file.
+4. Each output should be able to have its own format (text or JSON) and its own minimum level.
+5. Logging should not slow the caller. File writes happen in the background.
+6. Parts of the app should be able to use named loggers, like `[orders]`, that share the same outputs.
+
+### Out of scope
+
+- Log rotation (starting a new file every day) and deleting old files.
+- Searching logs, dashboards and alerts.
+- Sending logs over the network (it is just one more output).
+
+### Questions to ask the interviewer
+
+| Question | What we assume |
+| --- | --- |
+| Which levels? | DEBUG, INFO, WARN, ERROR, from least to most serious. |
+| Can each output filter on its own? | Yes. For example, the console shows INFO and up, an alert output only ERROR. |
+| Can we lose a log line? | Rarely, in a crash. Speed matters more. ERROR lines can be written at once if needed. |
+| One logger or many? | One setup for the app, with named child loggers for its parts. |
+| Is it used by many threads? | Node.js has one main thread. We discuss Java threads in the edge cases. |
+
+## Step 2: Core classes
+
+| Class | What it is | Key data | Key actions |
+| --- | --- | --- | --- |
+| `LogRecord` | One log event | `level`, `message`, `loggerName`, `time`, `fields` | — |
+| `Formatter` (interface) | Turns a record into a line | — | `format(record)` |
+| `TextFormatter`, `JsonFormatter` | Text for people, JSON for machines | — | `format(record)` |
+| `Appender` (abstract) | One output | `formatter`, `minLevel` | `append(record)`, `write(line)` |
+| `ConsoleAppender`, `MemoryAppender`, `FileAppender` | The screen, an array, a file | `FileAppender`: a buffer | `write(line)`, `flush()` |
+| `Logger` | What the app calls | `name`, `level`, `appenders`, `clock` | `debug`, `info`, `warn`, `error`, `child` |
+
+**Enum:** `LogLevel`: `DEBUG`, `INFO`, `WARN`, `ERROR`. A list keeps their order, so "WARN and up" is one comparison.
+
+## Step 3: Class diagram
+
+```mermaid
+classDiagram
+  direction TB
+  class Logger:::concrete {
+    +name string
+    +level LogLevel
+    +info(message, fields)
+    +error(message, fields)
+    +addAppender(appender)
+    +child(name) Logger
+  }
+  class LogRecord:::concrete {
+    +level LogLevel
+    +message string
+    +time Date
+    +fields object
+  }
+  class Appender:::abstract {
+    <<abstract>>
+    +minLevel LogLevel
+    +append(record)
+    +write(line)*
+  }
+  class ConsoleAppender:::concrete
+  class MemoryAppender:::concrete
+  class FileAppender:::concrete {
+    -buffer string[]
+    +flush() Promise
+  }
+  class Formatter:::iface {
+    <<interface>>
+    +format(record) string
+  }
+  class TextFormatter:::concrete
+  class JsonFormatter:::concrete
+  class LogLevel:::enum {
+    <<enumeration>>
+    DEBUG
+    INFO
+    WARN
+    ERROR
+  }
+  Logger "1" o-- "many" Appender : sends to
+  Logger ..> LogRecord : creates
+  Appender <|-- ConsoleAppender
+  Appender <|-- MemoryAppender
+  Appender <|-- FileAppender
+  Appender --> Formatter : uses
+  Formatter <|.. TextFormatter
+  Formatter <|.. JsonFormatter
+  LogRecord --> LogLevel
+```
+
+- **The logger tells every appender.** One `info()` call goes to each registered output, like listeners on Node's `EventEmitter`. `addAppender` is "subscribe". This is [Observer](../design-patterns/observer.mdx).
+- **Aggregation, not composition, for appenders.** A child logger like `[orders]` shares its parent's appenders. They are not owned by one logger.
+- **`Formatter` is an interface, separate from the appender.** Where a line goes and how it looks change for different reasons. Any output can use any format. This is [Strategy](../design-patterns/strategy.mdx).
+- **`Appender` is an abstract class.** The logger only calls `append(record)`. The base class filters by level and formats once. Each output fills in only `write(line)`. This is [Template Method](../design-patterns/template-method.mdx).
+- **The clock is passed in.** Tests and examples can use a fixed time, so the output is always the same.
+
+### One logger for the whole app: Singleton or dependency injection?
+
+Every class needs to log. There are two common ways to give them a logger:
+
+```js
+// A fragment, not runnable on its own.
+
+// 1. Singleton: one object, reached from anywhere.
+class AppLogger {
+  static #instance;
+  static get() { return (AppLogger.#instance ??= new Logger({ name: 'app' })); }
+}
+// In JavaScript, a module export does the same: a module runs once, so every import gets the same object.
+export const log = new Logger({ name: 'app' });
+
+// 2. Dependency injection: the class gets the logger from outside.
+class OrderService {
+  constructor(logger) { this.logger = logger; }
+}
+new OrderService(log.child('orders'));
+```
+
+| | Singleton | Dependency injection |
+| --- | --- | --- |
+| Easy to use | Very: call it from anywhere | A little more typing: pass it in |
+| Tests | Hard: every test shares one logger | Easy: pass a logger with a `MemoryAppender` and check its lines |
+| Different settings per part | Hard | Easy: pass `log.child('orders')` |
+| Hidden needs | The class secretly depends on it | The constructor shows it |
+
+A good answer: **create one logger at startup (one setup, like a singleton), and pass it in (or a child of it) where it is needed.** Many real apps do take the logger from a shared module, and that is fine for small apps.
+
+## Step 4: Main methods
+
+- `Logger.info(message, fields)` (and `debug`, `warn`, `error`) → logs at that level.
+- `Logger.log(level, message, fields)` → drops it if below `level`; otherwise makes a `LogRecord` and gives it to every appender.
+- `Logger.child(name)` → a logger with a new name and the same outputs.
+- `Appender.append(record)` → checks its own `minLevel`, formats, then calls `write(line)`.
+- `FileAppender.flush()` → a promise that resolves when every line is on disk.
+
+One log call, with a console and a file:
+
+```mermaid
+sequenceDiagram
+  participant S as OrderService
+  participant L as Logger
+  participant C as ConsoleAppender
+  participant F as FileAppender
+  participant D as Disk
+  S->>L: info("Order placed")
+  Note over L: INFO or above? yes
+  L->>C: append(record)
+  C->>C: format, then print
+  L->>F: append(record)
+  F->>F: format, add to buffer
+  L-->>S: returns at once
+  F-)D: write batch, later
+```
+
+## Step 5: Code
+
+**Part 1: the level enum, the record and the formatters.** The file uses `import` and top-level `await`, so save it as `logger.mjs`.
+
+```js
+import { appendFile, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const LogLevel = Object.freeze({ DEBUG: 'DEBUG', INFO: 'INFO', WARN: 'WARN', ERROR: 'ERROR' });
+const LEVEL_ORDER = [LogLevel.DEBUG, LogLevel.INFO, LogLevel.WARN, LogLevel.ERROR]; // least to most serious
+const isAtLeast = (level, minimum) => LEVEL_ORDER.indexOf(level) >= LEVEL_ORDER.indexOf(minimum);
+
+class LogRecord {
+  constructor(level, message, loggerName, time, fields) {
+    this.level = level;
+    this.message = message;
+    this.loggerName = loggerName;
+    this.time = time;
+    this.fields = fields; // extra data, like { orderId: 42 }
+  }
+}
+
+class Formatter { // interface
+  format(record) { throw new Error('not implemented'); }
+}
+class TextFormatter extends Formatter { // for people: short and easy to scan
+  format(r) {
+    const time = r.time.toISOString().slice(11, 23); // just the time of day
+    const fields = Object.entries(r.fields).map(([key, value]) => ` ${key}=${value}`).join('');
+    return `${time} ${r.level.padEnd(5)} [${r.loggerName}] ${r.message}${fields}`;
+  }
+}
+class JsonFormatter extends Formatter { // for machines: one JSON object per line
+  format(r) {
+    return JSON.stringify({ time: r.time.toISOString(), level: r.level, logger: r.loggerName, message: r.message, ...r.fields });
+  }
+}
+```
+
+**Part 2: the appenders.** `FileAppender` only adds the line to a buffer. One background loop writes waiting lines in batches, in order.
+
+```js
+class Appender { // abstract: filter and format here, then each output fills in write(line)
+  constructor(formatter, minLevel = LogLevel.DEBUG) {
+    if (new.target === Appender) throw new Error('Appender is abstract');
+    this.formatter = formatter;
+    this.minLevel = minLevel;
+  }
+  append(record) {
+    if (isAtLeast(record.level, this.minLevel)) this.write(this.formatter.format(record));
+  }
+  write(line) { throw new Error('not implemented'); }
+}
+
+class ConsoleAppender extends Appender {
+  write(line) { console.log(line); }
+}
+
+class MemoryAppender extends Appender { // keeps lines in an array: handy in tests
+  lines = [];
+  write(line) { this.lines.push(line); }
+}
+
+class FileAppender extends Appender { // async: write() returns at once, the disk work happens later
+  #buffer = [];
+  #writing = null; // the background write loop, while it runs
+  dropped = 0;
+  constructor(path, formatter, minLevel) {
+    super(formatter, minLevel);
+    this.path = path;
+  }
+  write(line) {
+    this.#buffer.push(line);
+    this.#writing ??= this.#drain(); // start one writer, only if none is running
+  }
+  async #drain() {
+    while (this.#buffer.length > 0) {
+      const batch = this.#buffer.splice(0); // take every waiting line in one go
+      try {
+        await appendFile(this.path, batch.join('\n') + '\n');
+      } catch {
+        this.dropped += batch.length; // a full disk must never crash the app
+      }
+    }
+    this.#writing = null;
+  }
+  async flush() { await this.#writing; } // wait until every line is on disk, e.g. before the app exits
+}
+```
+
+**Part 3: the logger.** It drops low levels first, then tells every appender. A broken appender can't break the app.
+
+```js
+class Logger {
+  constructor({ name = 'app', level = LogLevel.INFO, appenders = [], clock = () => new Date() } = {}) {
+    this.name = name;
+    this.level = level;
+    this.appenders = appenders;
+    this.clock = clock;
+  }
+  addAppender(appender) { this.appenders.push(appender); } // subscribe one more output
+
+  debug(message, fields) { this.log(LogLevel.DEBUG, message, fields); }
+  info(message, fields) { this.log(LogLevel.INFO, message, fields); }
+  warn(message, fields) { this.log(LogLevel.WARN, message, fields); }
+  error(message, fields) { this.log(LogLevel.ERROR, message, fields); }
+
+  log(level, message, fields = {}) {
+    if (!isAtLeast(level, this.level)) return; // filtered out early, so it costs almost nothing
+    const record = new LogRecord(level, message, this.name, this.clock(), fields);
+    for (const appender of this.appenders) {
+      try {
+        appender.append(record); // tell every output (Observer)
+      } catch {
+        // one broken output must not stop the others, or the app
+      }
+    }
+  }
+
+  child(name) { // same outputs and settings, a new name
+    return new Logger({ name, level: this.level, appenders: this.appenders, clock: this.clock });
+  }
+}
+```
+
+**Part 4: try it.** Three outputs: the console (text), memory (WARN and up) and a file (JSON). `OrderService` gets its logger by dependency injection.
+
+```js
+class OrderService {
+  constructor(logger) { this.logger = logger; } // the logger is passed in: dependency injection
+  placeOrder(orderId, total) {
+    this.logger.info('Order placed', { orderId, total });
+  }
+}
+
+const path = join(tmpdir(), 'logger-demo.log');
+await rm(path, { force: true }); // start with an empty file on every run
+
+const memory = new MemoryAppender(new TextFormatter(), LogLevel.WARN); // only WARN and ERROR
+const file = new FileAppender(path, new JsonFormatter()); // every level the logger lets through
+const log = new Logger({
+  name: 'app',
+  level: LogLevel.INFO,
+  appenders: [new ConsoleAppender(new TextFormatter()), memory, file],
+  clock: () => new Date('2026-01-01T09:00:00Z'), // a fixed clock, so the output is the same on every run
+});
+
+log.debug('Cache warmed'); // below INFO: dropped, prints nothing
+log.info('Server started', { port: 3000 }); // prints: 09:00:00.000 INFO  [app] Server started port=3000
+new OrderService(log.child('orders')).placeOrder(42, 99.5); // prints: 09:00:00.000 INFO  [orders] Order placed orderId=42 total=99.5
+log.warn('Disk almost full', { usedPercent: 91 }); // prints: 09:00:00.000 WARN  [app] Disk almost full usedPercent=91
+log.error('Payment failed', { orderId: 42 }); // prints: 09:00:00.000 ERROR [app] Payment failed orderId=42
+
+console.log(memory.lines.length); // 2
+
+await file.flush(); // the file lines were written in the background
+const fileLines = (await readFile(path, 'utf8')).trim().split('\n');
+console.log(fileLines.length); // 4
+console.log(fileLines[1]); // {"time":"2026-01-01T09:00:00.000Z","level":"INFO","logger":"orders","message":"Order placed","orderId":42,"total":99.5}
+```
+
+The first line went to disk alone. The next three arrived while that write was running, so they waited in the buffer and went in one batch.
+
+## Step 6: Edge cases and extensions
+
+### Edge cases
+
+| Case | What happens |
+| --- | --- |
+| A message below the logger's level | Dropped on the first line of `log`, before any record or string is built. |
+| One output fails (a full disk, a bug) | Caught. The other outputs still get the line, and the app keeps running. `FileAppender` counts `dropped` lines. |
+| Fields that can't become JSON (an object that points to itself) | `JSON.stringify` throws, and the `try` in `log` stops it. Better: a safe formatter that replaces such values. |
+| The app crashes before the buffer is written | The last lines are lost. Call `flush()` on shutdown. For ERROR lines, you can choose to write at once. |
+| Logs come faster than the disk can write | The buffer grows. Cap it (say 10,000 lines), drop DEBUG lines first, and count what was dropped. Or make the caller wait: safer for audit logs, but slower. |
+| Secrets in the data (passwords, card numbers) | Remove or mask known field names before formatting. |
+| User text with a newline in it | It can fake a second log line. JSON escapes newlines. Never run code found inside messages: that was the Log4Shell bug in Log4j in 2021. |
+
+### Two requests at once
+
+A server handles many requests at once, and all of them log. In Node.js, each `log()` call runs to the end before the next one starts, so two lines never mix in the middle.
+
+The real race is in the **async file write**. If every line started its own write, the writes would run side by side, and the lines could land in the wrong order:
+
+```js
+// NOT SAFE. A fragment, not runnable on its own.
+write(line) {
+  appendFile(this.path, line + '\n'); // each line starts its own write; they can finish in any order
+}
+```
+
+`FileAppender` avoids this with **one writer at a time**. `#writing` holds the running loop. New lines only join the buffer, and the loop writes them in order. It is a small form of [Producer-Consumer](../concurrency/producer-consumer.mdx): the app produces lines, and one loop consumes them.
+
+- **Many processes or servers:** don't let them write to the same file. Each one writes to its own output (often just the console), and a log tool gathers the lines in one place.
+- **In Java,** many threads log at once. Log4j 2 offers async loggers: threads put events in a queue, and a background thread writes them.
+
+See [Race Conditions and Locks](../concurrency/race-conditions-locks.mdx).
+
+### Adding features
+
+- **A new output** (a log server, a chat alert for ERROR): add one `Appender` class with a `write(line)`. `Logger` doesn't change. This is the [Open-Closed Principle](../design-principles/open-closed.mdx).
+- **A new format** (colors, a different text layout): add one `Formatter` class. This is [Strategy](../design-patterns/strategy.mdx).
+- **Processing steps** (hide secrets, then add a request id, then keep only 1 in 10 DEBUG lines): put each step in a small handler that passes the record to the next, like Express middleware. This is [Chain of Responsibility](../design-patterns/chain-of-responsibility.mdx).
+
+## Patterns used
+
+| Pattern | Where | Why |
+| --- | --- | --- |
+| [Observer](../design-patterns/observer.mdx) | `Logger` and its `appenders` | One log call reaches every output that subscribed. |
+| [Strategy](../design-patterns/strategy.mdx) | `Formatter`: `TextFormatter`, `JsonFormatter` | Change how lines look without touching outputs. |
+| [Template Method](../design-patterns/template-method.mdx) | `Appender.append()` calls `write(line)` | Filter and format in one place. Each output writes its own way. |
+| [Singleton](../design-patterns/singleton.mdx) or [Dependency Injection](../design-principles/dependency-injection.mdx) | How code gets the logger | One setup for the app. Passing it in keeps tests easy. |
+| [Chain of Responsibility](../design-patterns/chain-of-responsibility.mdx) (extension) | Processing steps | Add or remove steps without changing the others. |
+
+Real loggers follow this shape. Log4j has loggers, appenders and layouts (its word for formatters). Python's `logging` has loggers, handlers and formatters. In Node.js, Winston calls its outputs "transports", and pino writes JSON lines and can run its transports in a worker thread, to keep the main thread fast.
+
+## Follow-up questions
+
+<Accordions>
+<Accordion title="What is the textbook Chain of Responsibility logger?">
+
+Each handler owns one level: `InfoHandler` → `WarnHandler` → `ErrorHandler`. A message starts at the first handler. Each one writes the message if the level matches, then passes it to the next. It is a common interview answer. Our design instead sends every record to all outputs, and each output filters for itself. That is simpler to extend, and it fits how real loggers work.
+
+</Accordion>
+<Accordion title="Why check the level before building the message?">
+
+`log.debug('User: ' + JSON.stringify(user))` builds the string even when DEBUG is off. On a hot path that wastes time. Pass the data as `fields` and let the logger format it only if needed, or pass a function: `log.debug(() => expensiveText())`. In Java, people write `if (log.isDebugEnabled())` for the same reason.
+
+</Accordion>
+<Accordion title="How do you add a request id to every line?">
+
+Create a child logger per request with the id as a field, and pass it down. Or, in Node.js, keep the id in `AsyncLocalStorage` (from `node:async_hooks`), and let the logger read it for every record. Then any code can find out which request it is working for.
+
+</Accordion>
+</Accordions>
+
+## What the interviewer expects
+
+<Tabs items={['Mid-level', 'Senior', 'Staff']}>
+<Tab value="Mid-level">
+
+- Levels and filtering that work.
+- An `Appender` interface with console and file outputs.
+- Clean, small classes: logger, record, appender, formatter.
+
+</Tab>
+<Tab value="Senior">
+
+- Singleton vs dependency injection, with the testing trade-off.
+- Async file writes that keep the order and never crash the app.
+- Edge cases: failing outputs, secrets, unsafe user text.
+
+</Tab>
+<Tab value="Staff">
+
+- Everything from senior, but faster.
+- Back-pressure: what happens when logs come faster than the disk.
+- Logging across many servers, request ids, and when to drop lines.
+
+</Tab>
+</Tabs>
+
+<Callout title="Remember this" type="success">
+  - Drop low levels first. A filtered log should cost almost nothing.
+  - The logger tells every appender (Observer). Where a line goes and how it looks are separate (Appender and Formatter).
+  - Write files in the background with one writer and a buffer, so logging never slows a request.
+  - Make one logger at startup and pass it in. A Singleton is easy to reach, but hard to test.
+  - A broken output must never break the app.
+</Callout>

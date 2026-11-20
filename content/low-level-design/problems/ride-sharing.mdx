@@ -1,0 +1,629 @@
+---
+title: "Design a Ride-Sharing App"
+description: "Riders, drivers, matching, fares and trip states, like Uber or Ola."
+icon: Car
+---
+
+<Callout title="About this question">
+  **Difficulty:** Hard. **Patterns used:** [Strategy](../design-patterns/strategy.mdx),
+  [Observer](../design-patterns/observer.mdx), a state machine (see [State](../design-patterns/state.mdx)),
+  [Facade](../design-patterns/facade.mdx), plus an atomic accept from
+  [Race Conditions and Locks](../concurrency/race-conditions-locks.mdx).
+  **Also asked as:** "Design Uber (LLD)", "Design Ola", "Design a cab booking system".
+</Callout>
+
+## Understand the problem
+
+Think of an old taxi stand with a dispatcher. A customer calls and says "from the station to the market". The
+dispatcher looks at the map, picks the closest free taxi, and radios the driver. The driver says "OK, coming". The
+dispatcher tells the customer "your taxi is on the way".
+
+A ride-sharing app does the same, with phones instead of radios.
+
+What makes it interesting:
+
+- **A ride moves through steps:** requested, accepted, started, completed (or cancelled). Some moves must never
+  happen, like cancelling a trip that is already half done.
+- **Rules that change:** how we pick a driver, and how we price a trip (surge at rush hour).
+- **Many people to tell:** the rider and the driver both need updates at every step.
+- **One driver, two rides.** Two riders near the same driver get offered the same driver. If he taps "Accept" on
+  both, only one may work.
+
+This is the class design. For servers, maps and millions of location updates, see the
+[Uber system design](/learn/system-design/questions/uber).
+
+## Step 1: Requirements
+
+### Functional requirements
+
+1. Riders should be able to request a ride from a pickup point to a drop point, and see the fare first.
+2. The system should offer the ride to the nearest available driver.
+3. Drivers should be able to accept, start and complete a ride.
+4. Riders should be able to cancel a ride before the trip starts.
+5. The rider and the driver should get a message at every step.
+6. A driver should never have two rides at once.
+
+### Out of scope
+
+- Real maps, road distance and live GPS (we use straight-line distance on a grid).
+- Payment, ratings, ride pooling and scheduled rides.
+- Offer timeouts (if a driver ignores an offer, try the next one). See "Follow-up questions".
+
+### Questions to ask the interviewer
+
+| Question | What we assume |
+| --- | --- |
+| How do we pick a driver? | The nearest available driver within 5 km, by straight-line distance. |
+| How is the fare worked out? | Base fare + a price per km. At busy times, multiply by a surge factor. |
+| When is the fare fixed? | When the rider requests the ride. The rider sees it up front. |
+| Can a rider cancel any time? | Only before the trip starts. |
+| One server or many? | One process first. Then the database rule for many servers. |
+
+## Step 2: Core classes
+
+| Class | What it is | Key data | Key actions |
+| --- | --- | --- | --- |
+| `Rider` | The person who wants a ride | id, name | – |
+| `Driver` | The person who drives | id, name, location, status | – |
+| `Location` | A point on the map | x, y (km) | `distanceTo(other)` |
+| `Ride` | One trip, a small state machine | rider, driver, pickup, drop, fare, status | `moveTo(next)` |
+| `MatchingStrategy` | The rule that picks a driver | max distance | `pickDriver(ride, drivers)` |
+| `FareStrategy` | The rule that prices a trip | base, per km, surge | `fareFor(ride)` |
+| `RideObserver` | Anyone who wants ride updates | – | `onRideUpdate(ride)` |
+| `RideService` | The front door for the app | riders, drivers, rides, strategies, observers | `requestRide`, `acceptRide`, `startRide`, `completeRide`, `cancelRide` |
+
+**Enums:**
+
+- `RideStatus`: `REQUESTED`, `ACCEPTED`, `STARTED`, `COMPLETED`, `CANCELLED`.
+- `DriverStatus`: `AVAILABLE`, `ON_RIDE`, `OFFLINE`.
+
+**The ride's states.** Only these moves are allowed. Anything else throws an error.
+
+```mermaid
+stateDiagram-v2
+  [*] --> REQUESTED
+  REQUESTED --> ACCEPTED : driver accepts
+  REQUESTED --> CANCELLED : rider cancels
+  ACCEPTED --> STARTED : rider picked up
+  ACCEPTED --> CANCELLED : rider cancels
+  STARTED --> COMPLETED : drop reached
+  COMPLETED --> [*]
+  CANCELLED --> [*]
+```
+
+## Step 3: Class diagram
+
+```mermaid
+classDiagram
+  direction TB
+  class RideService:::concrete {
+    +requestRide(riderId, pickup, drop) Ride
+    +acceptRide(driverId, rideId) Ride
+    +completeRide(driverId, rideId)
+    +cancelRide(rideId)
+  }
+  class Ride:::concrete {
+    -status RideStatus
+    +pickup Location
+    +drop Location
+    +fare number
+    +moveTo(next)
+  }
+  class Rider:::concrete {
+    +name string
+  }
+  class Driver:::concrete {
+    +status DriverStatus
+    +location Location
+  }
+  class MatchingStrategy:::iface {
+    <<interface>>
+    +pickDriver(ride, drivers) Driver
+  }
+  class NearestDriverMatching:::concrete
+  class FareStrategy:::iface {
+    <<interface>>
+    +fareFor(ride) number
+  }
+  class StandardFare:::concrete
+  class SurgeFare:::concrete
+  class RideObserver:::iface {
+    <<interface>>
+    +onRideUpdate(ride)
+  }
+  class PushNotifier:::concrete
+  RideService "1" *-- "many" Ride : keeps
+  RideService --> MatchingStrategy : uses
+  RideService --> FareStrategy : uses
+  RideService "1" --> "many" RideObserver : notifies
+  Ride "many" --> "1" Rider : for
+  Ride "many" --> "0..1" Driver : driven by
+  MatchingStrategy <|.. NearestDriverMatching
+  FareStrategy <|.. StandardFare
+  StandardFare <|-- SurgeFare
+  RideObserver <|.. PushNotifier
+```
+
+Key choices:
+
+- **`Ride` guards its own state.** The allowed moves sit in one table inside `Ride`. Nobody can set the status
+  directly, so "cancel a started trip" is impossible everywhere, not just in one method.
+- **Two Strategies, both swappable.** Matching and fare rules change often (new cities, festivals, rush hour). The
+  service only talks to the interfaces. See [Strategy](../design-patterns/strategy.mdx).
+- **Observer for messages.** The service doesn't know about phones, e-mail or SMS. It tells every
+  `RideObserver`, and each one decides what to send. See [Observer](../design-patterns/observer.mdx).
+- **`Ride` → `Driver` is "0..1".** A new ride has no driver yet. The driver is set only when one accepts.
+- **`Location` is a small value** (x and y), shown as a field type to keep the diagram small. `RideService` also
+  keeps maps of all riders and drivers by id.
+
+## Step 4: Main methods
+
+| Method | What it does |
+| --- | --- |
+| `RideService.requestRide(riderId, pickup, drop)` | Makes a `REQUESTED` ride, sets the fare, and picks a driver to offer it to. |
+| `RideService.findDriver(rideId)` | Asks the matching strategy for a driver again (say, after the first one said no). |
+| `RideService.acceptRide(driverId, rideId)` | Atomic: checks the driver is free and the ride is still open, then links them. |
+| `RideService.startRide(driverId, rideId)` | The rider is in the car. |
+| `RideService.completeRide(driverId, rideId)` | The trip is over. The driver is free again, at the drop point. |
+| `RideService.cancelRide(rideId)` | Allowed only before the trip starts. Frees the driver. |
+| `Ride.moveTo(next)` | Changes the status if the move is allowed, or throws. |
+
+The main flow, from request to accept:
+
+```mermaid
+sequenceDiagram
+  actor R as Rider
+  participant S as RideService
+  participant F as FareStrategy
+  participant M as MatchingStrategy
+  actor D as Driver
+  participant O as PushNotifier
+  R->>S: requestRide("u1", pickup, drop)
+  S->>F: fareFor(ride)
+  F-->>S: 11000 paise
+  S->>M: pickDriver(ride, drivers)
+  M-->>S: Ravi, nearest and free
+  S-->>R: R1, REQUESTED, offered to Ravi
+  D->>S: acceptRide("d1", "R1")
+  S->>S: Ravi free and R1 open? Then link them
+  S->>O: onRideUpdate(R1)
+  O-->>R: push, Ravi is on the way
+  O-->>D: the same push to Ravi
+```
+
+## Step 5: Code
+
+Money is in whole **paise** (₹1 = 100 paise). Distances are in km on a simple grid. Run all the parts together as
+one `.mjs` file (the last part uses top-level `await`).
+
+**Part 1: enums and small classes.** `Location` knows the straight-line distance to another point.
+
+```js
+const RideStatus = Object.freeze({
+  REQUESTED: 'REQUESTED', ACCEPTED: 'ACCEPTED', STARTED: 'STARTED', COMPLETED: 'COMPLETED', CANCELLED: 'CANCELLED',
+});
+const DriverStatus = Object.freeze({ AVAILABLE: 'AVAILABLE', ON_RIDE: 'ON_RIDE', OFFLINE: 'OFFLINE' });
+
+const rupees = (paise) => `₹${(paise / 100).toFixed(2)}`; // only for printing
+
+class Location { // x and y in km on a simple city grid
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+  }
+  distanceTo(other) { return Math.hypot(this.x - other.x, this.y - other.y); } // straight line
+}
+
+class Rider {
+  constructor(id, name) {
+    this.id = id;
+    this.name = name;
+  }
+}
+
+class Driver {
+  constructor(id, name, location) {
+    this.id = id;
+    this.name = name;
+    this.location = location;
+    this.status = DriverStatus.AVAILABLE;
+  }
+}
+```
+
+**Part 2: the core classes.** The `Ride` state machine, the two strategies, and the observer.
+
+```js
+class Ride {
+  static #NEXT = { // the only moves allowed
+    [RideStatus.REQUESTED]: [RideStatus.ACCEPTED, RideStatus.CANCELLED],
+    [RideStatus.ACCEPTED]: [RideStatus.STARTED, RideStatus.CANCELLED],
+    [RideStatus.STARTED]: [RideStatus.COMPLETED],
+    [RideStatus.COMPLETED]: [],
+    [RideStatus.CANCELLED]: [],
+  };
+  #status = RideStatus.REQUESTED;
+
+  constructor(id, rider, pickup, drop) {
+    this.id = id;
+    this.rider = rider;
+    this.pickup = pickup;
+    this.drop = drop;
+    this.driver = null; // set when a driver accepts
+    this.offeredTo = null; // the driver we asked
+    this.fare = 0; // whole paise, quoted up front
+  }
+  get status() { return this.#status; }
+  get distanceKm() { return this.pickup.distanceTo(this.drop); }
+  moveTo(next) {
+    if (!Ride.#NEXT[this.#status].includes(next)) {
+      throw new Error(`Ride ${this.id} can't go from ${this.#status} to ${next}`);
+    }
+    this.#status = next;
+  }
+}
+
+class MatchingStrategy { // interface
+  pickDriver(ride, drivers) { throw new Error('not implemented'); }
+}
+
+class NearestDriverMatching extends MatchingStrategy {
+  #maxKm;
+  constructor(maxKm) {
+    super();
+    this.#maxKm = maxKm;
+  }
+  pickDriver(ride, drivers) {
+    let best = null;
+    for (const driver of drivers) {
+      if (driver.status !== DriverStatus.AVAILABLE) continue;
+      const km = driver.location.distanceTo(ride.pickup);
+      if (km <= this.#maxKm && (!best || km < best.km)) best = { driver, km };
+    }
+    return best?.driver ?? null;
+  }
+}
+
+class FareStrategy { // interface
+  fareFor(ride) { throw new Error('not implemented'); }
+}
+
+class StandardFare extends FareStrategy {
+  constructor(base, perKm) { // whole paise
+    super();
+    this.base = base;
+    this.perKm = perKm;
+  }
+  fareFor(ride) { return this.base + Math.round(this.perKm * ride.distanceKm); }
+}
+
+class SurgeFare extends StandardFare {
+  constructor(base, perKm, surgePercent) { // 150 means 1.5 times
+    super(base, perKm);
+    this.surgePercent = surgePercent;
+  }
+  fareFor(ride) { return Math.round((super.fareFor(ride) * this.surgePercent) / 100); }
+}
+
+class RideObserver { // interface
+  onRideUpdate(ride) { throw new Error('not implemented'); }
+}
+
+class PushNotifier extends RideObserver { // stands in for real phone pushes
+  onRideUpdate(ride) {
+    const text = {
+      [RideStatus.ACCEPTED]: `${ride.driver?.name} is on the way`,
+      [RideStatus.STARTED]: 'trip started',
+      [RideStatus.COMPLETED]: `trip done, pay ${rupees(ride.fare)}`,
+      [RideStatus.CANCELLED]: 'ride cancelled',
+    }[ride.status];
+    const to = ride.driver ? `${ride.rider.name} and ${ride.driver.name}` : ride.rider.name;
+    console.log(`[push to ${to}] ${ride.id}: ${text}`);
+  }
+}
+```
+
+**Part 3: the main service.** `acceptRide` checks and writes with no `await` in between, so a driver can't take two
+rides.
+
+```js
+class RideService {
+  #riders = new Map();
+  #drivers = new Map();
+  #rides = new Map();
+  #observers = [];
+  #nextId = 1;
+  #matching;
+  #fare;
+
+  constructor({ matching, fare }) {
+    this.#matching = matching;
+    this.#fare = fare;
+  }
+
+  addRider(rider) { this.#riders.set(rider.id, rider); }
+  addDriver(driver) { this.#drivers.set(driver.id, driver); }
+  subscribe(observer) { this.#observers.push(observer); }
+  setFareStrategy(fare) { this.#fare = fare; } // like surge at rush hour
+
+  requestRide(riderId, pickup, drop) {
+    const ride = new Ride(`R${this.#nextId++}`, this.#find(this.#riders, riderId), pickup, drop);
+    ride.fare = this.#fare.fareFor(ride); // the rider sees the price before the trip
+    this.#rides.set(ride.id, ride);
+    this.findDriver(ride.id);
+    return ride;
+  }
+
+  findDriver(rideId) { // pick a driver to offer the ride to
+    const ride = this.#find(this.#rides, rideId);
+    ride.offeredTo = this.#matching.pickDriver(ride, [...this.#drivers.values()]);
+    return ride.offeredTo;
+  }
+
+  // Atomic: no await between the checks and the writes.
+  acceptRide(driverId, rideId) {
+    const driver = this.#find(this.#drivers, driverId);
+    const ride = this.#find(this.#rides, rideId);
+    if (driver.status !== DriverStatus.AVAILABLE) throw new Error(`${driver.name} is not available`);
+    if (ride.status !== RideStatus.REQUESTED) throw new Error(`Ride ${rideId} is already ${ride.status}`);
+    ride.moveTo(RideStatus.ACCEPTED);
+    ride.driver = driver;
+    driver.status = DriverStatus.ON_RIDE;
+    this.#publish(ride);
+    return ride;
+  }
+
+  startRide(driverId, rideId) {
+    const ride = this.#driversRide(driverId, rideId);
+    ride.moveTo(RideStatus.STARTED);
+    this.#publish(ride);
+  }
+
+  completeRide(driverId, rideId) {
+    const ride = this.#driversRide(driverId, rideId);
+    ride.moveTo(RideStatus.COMPLETED);
+    ride.driver.status = DriverStatus.AVAILABLE;
+    ride.driver.location = ride.drop;
+    this.#publish(ride);
+  }
+
+  cancelRide(rideId) {
+    const ride = this.#find(this.#rides, rideId);
+    ride.moveTo(RideStatus.CANCELLED); // throws once the trip has started
+    if (ride.driver) ride.driver.status = DriverStatus.AVAILABLE;
+    this.#publish(ride);
+  }
+
+  #publish(ride) {
+    for (const observer of this.#observers) observer.onRideUpdate(ride);
+  }
+  #driversRide(driverId, rideId) {
+    const ride = this.#find(this.#rides, rideId);
+    if (ride.driver?.id !== driverId) throw new Error(`Ride ${rideId} is not ${driverId}'s ride`);
+    return ride;
+  }
+  #find(map, id) {
+    const item = map.get(id);
+    if (!item) throw new Error(`Not found: ${id}`);
+    return item;
+  }
+}
+```
+
+**Part 4: try it.** Three drivers, two riders, a double accept, a move that is not allowed, and surge pricing. Lines
+starting with `[push` are printed by the `PushNotifier`.
+
+```js
+const service = new RideService({
+  matching: new NearestDriverMatching(5), // only drivers within 5 km
+  fare: new StandardFare(5000, 1200), // ₹50 + ₹12 per km, in paise
+});
+service.subscribe(new PushNotifier());
+service.addRider(new Rider('u1', 'Asha'));
+service.addRider(new Rider('u2', 'Ben'));
+const ravi = new Driver('d1', 'Ravi', new Location(1, 1));
+const meena = new Driver('d2', 'Meena', new Location(4, 4));
+const kabir = new Driver('d3', 'Kabir', new Location(0, 0));
+kabir.status = DriverStatus.OFFLINE;
+[ravi, meena, kabir].forEach((d) => service.addDriver(d));
+
+// 1. Asha asks for a 5 km ride. Kabir is closer, but offline.
+const r1 = service.requestRide('u1', new Location(0, 0), new Location(3, 4));
+console.log(r1.id, r1.offeredTo.name, rupees(r1.fare)); // R1 Ravi ₹110.00
+
+// 2. Ben asks too. Ravi is still free, so Ben's ride is offered to him as well.
+const r2 = service.requestRide('u2', new Location(1, 0), new Location(1, 6));
+console.log(r2.id, r2.offeredTo.name, rupees(r2.fare)); // R2 Ravi ₹122.00
+
+// 3. Ravi taps "Accept" on both at the same moment. Only one can work.
+const taps = await Promise.allSettled([
+  Promise.resolve().then(() => service.acceptRide('d1', 'R1')),
+  Promise.resolve().then(() => service.acceptRide('d1', 'R2')),
+]);
+// [push to Asha and Ravi] R1: Ravi is on the way
+console.log(taps.map((t) => (t.status === 'fulfilled' ? `${t.value.id} accepted` : t.reason.message)));
+// [ 'R1 accepted', 'Ravi is not available' ]
+
+// 4. Ben's ride goes to the next nearest free driver.
+console.log(service.findDriver('R2').name); // Meena
+service.acceptRide('d2', 'R2'); // [push to Ben and Meena] R2: Meena is on the way
+
+// 5. The trip, with one move that is not allowed.
+service.startRide('d1', 'R1'); // [push to Asha and Ravi] R1: trip started
+try {
+  service.cancelRide('R1');
+} catch (e) {
+  console.log(e.message); // Ride R1 can't go from STARTED to CANCELLED
+}
+service.completeRide('d1', 'R1'); // [push to Asha and Ravi] R1: trip done, pay ₹110.00
+service.cancelRide('R2'); // [push to Ben and Meena] R2: ride cancelled
+console.log(ravi.status, meena.status); // AVAILABLE AVAILABLE
+
+// 6. Rush hour: swap the fare rule. Nothing else changes.
+service.setFareStrategy(new SurgeFare(5000, 1200, 150));
+const r3 = service.requestRide('u1', new Location(3, 4), new Location(0, 0));
+console.log(r3.id, r3.offeredTo.name, rupees(r3.fare)); // R3 Ravi ₹165.00
+```
+
+In step 6, Ravi is nearest again, because he finished R1 at Asha's drop point, (3, 4). The fare is (₹50 + 5 km ×
+₹12) × 1.5 = ₹165.
+
+## Step 6: Edge cases and extensions
+
+### Edge cases
+
+| Case | What happens |
+| --- | --- |
+| No free driver within 5 km | `offeredTo` is `null`. The app says "no cars nearby" and can call `findDriver` again later. |
+| An offline driver is closest | Skipped. Only `AVAILABLE` drivers are picked. |
+| A driver accepts two rides | The second `acceptRide` throws `Ravi is not available`. |
+| Two drivers accept the same ride | The second throws `Ride R1 is already ACCEPTED`. |
+| Cancel after the trip started | `moveTo` throws `can't go from STARTED to CANCELLED`. |
+| A driver tries to start someone else's ride | `#driversRide` throws `Ride R1 is not d2's ride`. |
+| Complete a ride twice | The second call throws `can't go from COMPLETED to COMPLETED`. |
+| The surge starts mid-trip | No change: the fare was fixed when the ride was requested. |
+
+### Two requests at once
+
+**What could race.** JavaScript runs one piece of code at a time, but an `await` lets other requests run in the gap.
+If `acceptRide` waited for something between the check and the write, Ravi could end up with both rides:
+
+```js
+// Not runnable: a broken acceptRide, to show the bug.
+async acceptRide(driverId, rideId) {
+  const driver = this.#find(this.#drivers, driverId);
+  if (driver.status !== DriverStatus.AVAILABLE) throw new Error('not available');
+  await this.#maps.etaFor(driver.location, ride.pickup); // pause: his second tap runs here, sees AVAILABLE too
+  driver.status = DriverStatus.ON_RIDE; // both taps get here: one driver, two rides
+}
+```
+
+**How to make it safe:**
+
+1. **Check and write in one synchronous block.** Our `acceptRide` checks the driver and the ride, then writes both,
+   with no `await` in between. That is why case 3 gives one ride to Ravi and an error for the other.
+2. **Do slow work before or after.** Need an ETA from a maps service? Get it before the check, or after the write.
+   Never in the middle.
+3. **Many servers: let the database decide.** Use one conditional update per row, in one transaction:
+
+```sql
+UPDATE drivers SET status = 'ON_RIDE', ride_id = 'R1'
+WHERE id = 'd1' AND status = 'AVAILABLE';     -- 1 row: the driver is yours
+UPDATE rides SET status = 'ACCEPTED', driver_id = 'd1'
+WHERE id = 'R1' AND status = 'REQUESTED';     -- 1 row: the ride is yours
+-- If either changed 0 rows, roll back.
+```
+
+In Java, an interviewer may expect `synchronized` on `acceptRide`, or a lock per driver. In JavaScript, a method
+with no `await` already runs to the end without a break. See
+[Race Conditions and Locks](../concurrency/race-conditions-locks.mdx). The
+[Uber system design](/learn/system-design/questions/uber) shows how this works with many servers and Redis locks.
+
+### Adding features
+
+**1. E-mail a receipt when a trip ends.** Add one new observer. `RideService` and `Ride` don't change. This is the
+[Observer](../design-patterns/observer.mdx) pattern.
+
+```js
+// Builds on the Step 5 code.
+class ReceiptMailer extends RideObserver {
+  onRideUpdate(ride) {
+    if (ride.status === RideStatus.COMPLETED) console.log(`[email to ${ride.rider.name}] Receipt for ${ride.id}: ${rupees(ride.fare)}`);
+  }
+}
+service.subscribe(new ReceiptMailer());
+service.acceptRide('d1', 'R3'); // [push to Asha and Ravi] R3: Ravi is on the way
+service.startRide('d1', 'R3'); // [push to Asha and Ravi] R3: trip started
+service.completeRide('d1', 'R3');
+// [push to Asha and Ravi] R3: trip done, pay ₹165.00
+// [email to Asha] Receipt for R3: ₹165.00
+```
+
+**2. Match by road time, not straight-line distance.** Write an `EtaMatching` class that asks a maps service for
+the driving time. It is a new [Strategy](../design-patterns/strategy.mdx), and the maps service sits behind an
+[Adapter](../design-patterns/adapter.mdx). `RideService` doesn't change.
+
+**3. Ride types (bike, auto, car).** Add a `vehicleType` to `Driver` and to the request. A
+`VehicleTypeMatching` strategy filters by type and then picks the nearest. Each type gets its own `StandardFare`
+rates, kept in a small map from type to fare strategy.
+
+## Patterns used
+
+| Pattern | Where | Why |
+| --- | --- | --- |
+| [Strategy](../design-patterns/strategy.mdx) | `MatchingStrategy`, `FareStrategy` | Swap how drivers are picked and how trips are priced, even at runtime (surge). |
+| [Observer](../design-patterns/observer.mdx) | `RideObserver`, `PushNotifier` | Add new kinds of messages without touching the service. |
+| State machine (see [State](../design-patterns/state.mdx)) | The `#NEXT` table in `Ride` | Only valid moves are allowed, checked in one place. |
+| [Facade](../design-patterns/facade.mdx) | `RideService` | One simple front door over riders, drivers, rides and rules. |
+
+A table of allowed moves is enough here, because each state has no special behaviour. If states grew their own
+logic (say, `STARTED` tracks the route and `ACCEPTED` tracks the wait time), move to the full
+[State](../design-patterns/state.mdx) pattern: one class per state.
+
+## Follow-up questions
+
+<Accordions>
+<Accordion title="The driver ignores the offer. What then?">
+
+Give each offer an end time, like 15 seconds, using a clock passed in. If the driver hasn't accepted by then, call
+`findDriver` again and skip drivers who already ignored this ride. Keep a small "already asked" list on the `Ride`.
+
+</Accordion>
+<Accordion title="Straight-line distance is wrong because of rivers and one-way roads. Fix it?">
+
+Yes, by adding a new matching strategy. Use straight-line distance to pick, say, the 5 closest drivers quickly. Then
+ask a maps service for the real driving time for just those 5, and pick the fastest. Real maps use latitude and
+longitude, so straight-line distance there uses the haversine formula, not `Math.hypot`.
+
+</Accordion>
+<Accordion title="How do you find nearby drivers fast when there are 100,000 of them?">
+
+Don't loop over all of them. Split the map into cells (a grid or geohash) and keep a list of drivers per cell. Look
+only at the rider's cell and the cells next to it. The [Uber system design](/learn/system-design/questions/uber)
+covers this in depth.
+
+</Accordion>
+<Accordion title="Why fix the fare at request time?">
+
+The rider agrees to a price before the trip, and a surge that starts mid-trip doesn't change it. It also makes the
+fare easy to test: it depends only on the ride and the strategy in use at that moment.
+
+</Accordion>
+</Accordions>
+
+## What the interviewer expects
+
+<Tabs items={['Mid-level', 'Senior', 'Staff']}>
+<Tab value="Mid-level">
+
+- Clear classes: Rider, Driver, Location, Ride, RideService.
+- Ride statuses with only valid moves allowed.
+- Nearest-driver matching and a simple fare formula.
+
+</Tab>
+<Tab value="Senior">
+
+- Matching and fare as Strategies, notifications as Observer.
+- Spots "one driver, two rides" and makes accept atomic.
+- Explains the database rule for many servers.
+- Handles cancel rules, offer timeouts and driver states.
+
+</Tab>
+<Tab value="Staff">
+
+- Everything from senior, quickly.
+- Links the class design to the system design: location updates, geohash cells, Redis locks.
+- Trade-offs in matching: nearest versus fastest, fairness to drivers, batching requests.
+- Knows when a transition table is enough and when the full State pattern pays off.
+
+</Tab>
+</Tabs>
+
+<Callout title="Remember this" type="success">
+  - A ride is a **state machine**: `REQUESTED → ACCEPTED → STARTED → COMPLETED`, or `CANCELLED` before the start.
+    Keep the allowed moves in **one table** inside `Ride`.
+  - **Matching and fare are Strategies.** Surge is just a different fare strategy.
+  - **Notifications are Observers.** New messages mean new listeners, not new `if`s.
+  - `acceptRide` checks the driver and the ride, then writes both, with **no `await`** in between.
+  - Many servers: a **conditional update** (`WHERE status = 'AVAILABLE'`) decides who wins.
+</Callout>

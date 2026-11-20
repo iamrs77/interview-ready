@@ -1,0 +1,216 @@
+---
+title: "Liskov Substitution Principle"
+description: "A subclass must work anywhere its parent works."
+icon: Replace
+---
+
+## The idea
+
+You book "**a car**" from a rental company. At the desk they hand you a small car, or a big one. You don't mind. Every car keeps the same promises: the wheel turns it, the brake stops it.
+
+Now imagine a "car" where the brake pedal opens the boot. It is still called a car, but you crash on the first corner.
+
+The **Liskov Substitution Principle** (LSP) says:
+
+> If code works with a parent class, it must also work with **any subclass**, without knowing which one it got.
+
+It is the "L" in SOLID. It is named after Barbara Liskov, a computer scientist who described the idea in 1987.
+
+**Memory hook:** A child keeps the parent's promises.
+
+## Square extends Rectangle
+
+In maths, every square is a rectangle. So `Square extends Rectangle` feels right. Watch what happens:
+
+```js
+class Rectangle {
+  constructor(width, height) {
+    this.width = width;
+    this.height = height;
+  }
+  setWidth(w) { this.width = w; }
+  setHeight(h) { this.height = h; }
+  area() { return this.width * this.height; }
+}
+
+class Square extends Rectangle {
+  constructor(side) { super(side, side); }
+  // A square must keep both sides equal, so each setter changes both.
+  setWidth(w) { this.width = w; this.height = w; }
+  setHeight(h) { this.width = h; this.height = h; }
+}
+
+// Written for rectangles. It trusts that setWidth() doesn't change the height.
+function resize(rect) {
+  rect.setWidth(5);
+  rect.setHeight(4);
+  return rect.area();
+}
+
+console.log(resize(new Rectangle(2, 3))); // 20
+console.log(resize(new Square(2)));       // 16  (surprise! expected 20)
+```
+
+`resize()` worked for every rectangle. Then it got a `Square`, and it broke, even though `resize()` did nothing wrong.
+
+`Rectangle` made a quiet promise: "setting the width leaves the height alone." `Square` broke that promise. That is an LSP violation.
+
+The lesson: "a square **is a** rectangle" in real life is not enough. Ask: **does it behave like one, everywhere the parent is used?**
+
+## The fix
+
+Don't make `Square` a child of `Rectangle`. Give both a common parent that promises only what **both** can keep: "I can tell you my area."
+
+```mermaid
+classDiagram
+  direction TB
+  class Shape:::iface {
+    <<interface>>
+    +area() number
+  }
+  class Rectangle:::concrete {
+    +width number
+    +height number
+    +area() number
+  }
+  class Square:::concrete {
+    +side number
+    +area() number
+  }
+  Shape <|.. Rectangle
+  Shape <|.. Square
+```
+
+```js
+class Shape { // interface
+  area() { throw new Error('not implemented'); }
+}
+
+class Rectangle extends Shape {
+  constructor(width, height) { super(); this.width = width; this.height = height; }
+  area() { return this.width * this.height; }
+}
+
+class Square extends Shape {
+  constructor(side) { super(); this.side = side; }
+  area() { return this.side * this.side; }
+}
+
+const shapes = [new Rectangle(5, 4), new Square(4)];
+for (const shape of shapes) console.log(shape.constructor.name, shape.area());
+// Rectangle 20
+// Square 16
+```
+
+Any code that takes a `Shape` only calls `area()`, and every shape keeps that promise. No surprises. To "resize", you make a new shape instead of changing an old one.
+
+## A second example: the penguin
+
+```js
+class Bird {
+  fly() { return 'Flying high'; }
+}
+class Sparrow extends Bird {}
+class Penguin extends Bird {
+  fly() { throw new Error("Penguins can't fly"); }
+}
+
+function startMigration(birds) {
+  return birds.map((bird) => bird.fly());
+}
+
+console.log(startMigration([new Sparrow()])); // [ 'Flying high' ]
+try {
+  startMigration([new Sparrow(), new Penguin()]);
+} catch (e) {
+  console.log(e.message); // Penguins can't fly
+}
+```
+
+`Bird` promised "every bird can fly". `Penguin` can't keep that promise, so it throws. The fix is to put `fly()` only where it is true:
+
+```mermaid
+classDiagram
+  direction TB
+  class Bird:::abstract {
+    <<abstract>>
+    +name string
+    +eat() string
+  }
+  class FlyingBird:::abstract {
+    <<abstract>>
+    +fly() string
+  }
+  class Sparrow:::concrete
+  class Penguin:::concrete {
+    +swim() string
+  }
+  Bird <|-- FlyingBird
+  FlyingBird <|-- Sparrow
+  Bird <|-- Penguin
+```
+
+```js
+class Bird {
+  constructor(name) {
+    if (new.target === Bird || new.target === FlyingBird) throw new Error('abstract class');
+    this.name = name;
+  }
+  eat() { return `${this.name} is eating`; }
+}
+class FlyingBird extends Bird {
+  fly() { return `${this.name} is flying`; }
+}
+class Sparrow extends FlyingBird {}
+class Penguin extends Bird {
+  swim() { return `${this.name} is swimming`; }
+}
+
+function startMigration(flyingBirds) { // only takes FlyingBirds now
+  return flyingBirds.map((bird) => bird.fly());
+}
+
+console.log(startMigration([new Sparrow('Sparrow')])); // [ 'Sparrow is flying' ]
+console.log(new Penguin('Pingu').swim());              // Pingu is swimming
+console.log(new Penguin('Pingu').eat());               // Pingu is eating
+```
+
+Another fix is to make flying an ability, a small `Flyer` interface that only flying birds have. See [Interface Segregation Principle](./interface-segregation.mdx).
+
+## How to spot a bad subclass
+
+A subclass breaks LSP when it does one of these:
+
+| Smell | Example |
+| --- | --- |
+| Throws for a method the parent supports | `Penguin.fly()` throws |
+| Overrides a method to do nothing | `fly() {}` |
+| Breaks a promise the parent made | `Square.setWidth()` also changes the height |
+| Asks for more than the parent | Parent takes any amount, child only amounts over 100 |
+| Gives back less than the parent | Parent returns a number, child returns `null` |
+
+There is also a sign in the **calling** code: `instanceof` checks like `if (bird instanceof Penguin) continue;`. The caller had to learn about one child, so swapping children did not work.
+
+## In the real world
+
+- **Java's `List`** has an `add()` method. But `Collections.unmodifiableList(...)` and `List.of(...)` return lists whose `add()` throws `UnsupportedOperationException`. Code that trusts "every List can add" breaks. It is a well-known LSP trap in a standard library.
+- **JavaScript's `for...of`** works with an Array, a string, a `Map` or a `Set`. Each one keeps the same "iterable" promise, so the loop does not care which one it gets.
+- **Node.js streams.** A file stream from `fs.createReadStream()` and an incoming HTTP request are both readable streams. Code that reads a stream works with either one.
+
+## In the interview
+
+Use inheritance only when the child can **truly** stand in for the parent. When it can't, say so and pick a smaller interface or [composition](../oop-basics/composition-vs-inheritance.mdx).
+
+> "I won't put `fly()` on `Bird`, because a `Penguin` would have to throw, and any code that makes all birds fly would crash. I'll move `fly()` into `FlyingBird`, so every subclass keeps its parent's promises."
+
+**Likely follow-up:** "How do you decide if inheritance is right here?"
+
+**Answer:** "I check if the child can be used everywhere the parent is used, with no surprises: no throwing, no empty overrides, no `instanceof` checks in callers. If it can't, I use a smaller interface or composition instead."
+
+<Callout title="Remember this" type="success">
+  - **A child keeps the parent's promises.** Swap in any subclass and the code still works.
+  - "Is-a" in real life is not enough. Ask "does it **behave** like one?"
+  - Classic breaks: **Square extends Rectangle**, **Penguin extends Bird**.
+  - Smells: a child that **throws**, does **nothing**, or callers that use **`instanceof`**.
+  - Fix: a smaller parent or interface that **every** child can honour.
+</Callout>

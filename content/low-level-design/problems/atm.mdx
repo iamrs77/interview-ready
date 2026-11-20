@@ -1,0 +1,594 @@
+---
+title: "Design an ATM"
+description: "Cards, PINs, cash and transactions, with a state for each ATM step."
+icon: Banknote
+---
+
+<Callout title="About this question">
+  - **Difficulty:** Medium.
+  - **Patterns used:** [State](../design-patterns/state.mdx) (the ATM steps), [Chain of Responsibility](../design-patterns/chain-of-responsibility.mdx) (giving out notes), [Dependency Inversion](../design-principles/dependency-inversion.mdx) (the bank behind an interface).
+  - **Also asked as:** "Design a cash machine", "Design an ATM system", "Design the software of a bank ATM".
+</Callout>
+
+## Understand the problem
+
+Think of taking cash out of an ATM. You put in your card. It asks for your PIN. You type ₹2,600. The machine checks with your bank, the bank takes the money from your account, and the machine counts out the notes.
+
+What makes it interesting:
+
+- **Steps in order.** You can't withdraw before your PIN is right, and you can't type a PIN with no card inside. The same button does different things at each step. This is the [State](../design-patterns/state.mdx) pattern.
+- **Which notes?** ₹2,600 could be 4 × ₹500 + 3 × ₹200, or 26 × ₹100. And the machine only has the notes inside it.
+- **Money and machines both fail.** The bank takes your money, and then the notes get stuck. Now what? You must never lose money that you didn't get.
+
+## Step 1: Requirements
+
+### Functional requirements
+
+1. Users should be able to insert a card and enter a PIN. After 3 wrong PINs, the ATM keeps the card and the card is blocked.
+2. Users should be able to withdraw cash in multiples of ₹100, if the account has the money and the ATM has the notes.
+3. Users should get the fewest notes possible from ₹500, ₹200 and ₹100 notes.
+4. Users should be able to deposit money and check their balance.
+5. If the cash can't be given after the account was charged, the money must go back to the account.
+
+### Out of scope
+
+- The bank's own systems and the card network. We talk to the bank through an interface.
+- Receipts, PIN change, transfers between accounts.
+- The real hardware: card reader, keypad, and note counter.
+
+### Questions to ask the interviewer
+
+| Question | What we assume |
+| --- | --- |
+| One currency or many? | Indian rupees only, with ₹500, ₹200 and ₹100 notes. |
+| Who checks the PIN and the balance? | The bank. The ATM never stores PINs or balances. |
+| How many PIN tries? | 3. Then the ATM keeps the card and the bank blocks it. |
+| What if the notes jam after the bank took the money? | The ATM asks the bank to reverse the transaction. |
+| Many users at once? | One user per machine, but one account can be used from many machines at once. |
+
+## Step 2: Core classes
+
+| Class | What it is | Key data | Key actions |
+| --- | --- | --- | --- |
+| `Card` | The plastic card | `number`, `accountId` | — |
+| `Account` | Money at the bank | `id`, balance | `debit`, `credit` |
+| `Transaction` | A record of one money move | `id`, `type`, `amount`, `status` | — |
+| `Bank` (interface) | The bank's side. `InMemoryBank` is a fake one for tests. | — | `checkPin`, `debit`, `credit`, `reverse`, `blockCard` |
+| `NoteHandler` | One link in the note chain: one kind of note | `note`, `count`, next handler | `plan(amount)`, `take(notes)` |
+| `CashDispenser` | The cash box, made of a chain of note handlers | the first handler | `canDispense`, `dispense` |
+| `ATMState` (abstract) | The current step: `IdleState`, `CardInsertedState`, `AuthenticatedState` | — | one method per button |
+| `ATM` | The main service. Every button goes through it. | `bank`, `dispenser`, `state`, `card`, `pinTries` | `insertCard`, `enterPin`, `withdraw`, `deposit`, `checkBalance`, `ejectCard` |
+
+**Enums:**
+
+- `TransactionType`: `WITHDRAW`, `DEPOSIT`.
+- `TransactionStatus`: `DONE`, `REVERSED`.
+
+## Step 3: Class diagram
+
+```mermaid
+classDiagram
+  direction TB
+  class ATM:::concrete {
+    -card Card
+    -pinTries int
+    +insertCard(card) string
+    +enterPin(pin) string
+    +withdraw(amount) string
+    +ejectCard() string
+  }
+  class ATMState:::abstract {
+    <<abstract>>
+    +insertCard(atm, card)
+    +enterPin(atm, pin)
+    +withdraw(atm, amount)
+  }
+  class Bank:::iface {
+    <<interface>>
+    +checkPin(cardNumber, pin) bool
+    +debit(accountId, amount) Transaction
+    +reverse(transactionId)
+  }
+  class CashDispenser:::concrete {
+    +canDispense(amount) bool
+    +dispense(amount) Map
+  }
+  class NoteHandler:::concrete {
+    +note int
+    +count int
+    +plan(amount) Map
+  }
+  class Card:::concrete {
+    +number string
+    +accountId string
+  }
+  class Account:::concrete {
+    +id string
+    -balance int
+  }
+  class Transaction:::concrete {
+    +id string
+    +amount int
+    +status TransactionStatus
+  }
+  class TransactionStatus:::enum {
+    <<enumeration>>
+    DONE
+    REVERSED
+  }
+  ATM --> ATMState : current step
+  ATM --> Bank : talks to
+  ATM "1" *-- "1" CashDispenser : has
+  CashDispenser "1" *-- "1..*" NoteHandler : chain
+  ATM --> Card : inserted
+  Card --> Account : linked to
+  Bank ..> Transaction : creates
+  Transaction --> Account
+  Transaction --> TransactionStatus
+```
+
+`IdleState`, `CardInsertedState` and `AuthenticatedState` extend `ATMState`. `InMemoryBank` implements `Bank`. They are left out of the picture to keep it small.
+
+- **The bank is an interface.** The ATM only knows "something that checks PINs and moves money". Tests use a fake bank. The real one talks over the network.
+- **The ATM never keeps balances or PINs.** Those belong to the bank. The ATM only has the card for one session.
+- **Composition for the cash box.** The dispenser and its note handlers are part of the machine.
+- **Each step is a state object.** The base class says "not now" to every button. Each state allows only its own buttons.
+
+## Step 4: Main methods
+
+- `ATM.insertCard(card)` → message. Only in `Idle`. Refuses a blocked card.
+- `ATM.enterPin(pin)` → message. Only in `CardInserted`. Counts wrong tries, and keeps the card after 3.
+- `ATM.withdraw(amount)` → message. Only in `Authenticated`. Checks the amount and the notes, debits the bank, gives the cash, and reverses if the cash fails.
+- `ATM.deposit(amount)` / `ATM.checkBalance()` → message. Only in `Authenticated`.
+- `ATM.ejectCard()` → message. Ends the session and goes back to `Idle`.
+- `CashDispenser.dispense(amount)` → the notes given, like `{ 500 → 4, 200 → 3 }`.
+- `Bank.reverse(transactionId)`. Puts a withdrawal back. Safe to call twice.
+
+The steps of the ATM:
+
+```mermaid
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> CardInserted: insert card
+  CardInserted --> Authenticated: right PIN
+  CardInserted --> CardInserted: wrong PIN
+  CardInserted --> Idle: 3 wrong PINs or eject
+  Authenticated --> Authenticated: withdraw, deposit, balance
+  Authenticated --> Idle: eject card
+```
+
+The main flow, a withdrawal:
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant A as ATM
+  participant B as Bank
+  participant D as Dispenser
+  U->>A: withdraw(2600)
+  A->>D: canDispense(2600)
+  D-->>A: yes
+  A->>B: debit(ACC-1, 2600)
+  B-->>A: TX1
+  A->>D: dispense(2600)
+  alt cash given
+    D-->>A: 4 x 500, 3 x 200
+    A-->>U: take your cash
+  else notes stuck
+    D-->>A: error
+    A->>B: reverse(TX1)
+    A-->>U: no cash, money back
+  end
+```
+
+## Step 5: Code
+
+**Part 1: enums and small classes.** Money is in whole rupees, so there are no decimal problems.
+
+```js
+const TransactionType = Object.freeze({ WITHDRAW: 'WITHDRAW', DEPOSIT: 'DEPOSIT' });
+const TransactionStatus = Object.freeze({ DONE: 'DONE', REVERSED: 'REVERSED' });
+const MAX_PIN_TRIES = 3;
+const rupees = (amount) => `₹${amount}`;
+
+class Card {
+  constructor(number, accountId) {
+    this.number = number;
+    this.accountId = accountId;
+  }
+}
+
+class Account { // lives at the bank, never in the ATM
+  #balance;
+  constructor(id, balance) {
+    this.id = id;
+    this.#balance = balance;
+  }
+  get balance() { return this.#balance; }
+  debit(amount) {
+    if (amount > this.#balance) throw new Error('Not enough money in the account');
+    this.#balance -= amount;
+  }
+  credit(amount) { this.#balance += amount; }
+}
+
+class Transaction {
+  static #nextId = 1;
+  constructor(type, accountId, amount) {
+    this.id = `TX${Transaction.#nextId++}`;
+    this.type = type;
+    this.accountId = accountId;
+    this.amount = amount;
+    this.status = TransactionStatus.DONE;
+  }
+}
+```
+
+**Part 2: the bank, behind an interface.** `InMemoryBank` is a fake bank for tests. A real one would call the bank's servers.
+
+```js
+class Bank { // interface: the bank's side, reached over the network
+  checkPin(cardNumber, pin) { throw new Error('not implemented'); }
+  isBlocked(cardNumber) { throw new Error('not implemented'); }
+  blockCard(cardNumber) { throw new Error('not implemented'); }
+  balance(accountId) { throw new Error('not implemented'); }
+  debit(accountId, amount) { throw new Error('not implemented'); }
+  credit(accountId, amount) { throw new Error('not implemented'); }
+  reverse(transactionId) { throw new Error('not implemented'); }
+}
+
+class InMemoryBank extends Bank {
+  #accounts = new Map();
+  #pins = new Map(); // card number -> PIN (a real bank keeps only a hash)
+  #blocked = new Set();
+  #transactions = new Map();
+
+  addAccount(account) { this.#accounts.set(account.id, account); }
+  issueCard(card, pin) { this.#pins.set(card.number, pin); }
+  checkPin(cardNumber, pin) { return this.#pins.get(cardNumber) === pin; }
+  isBlocked(cardNumber) { return this.#blocked.has(cardNumber); }
+  blockCard(cardNumber) { this.#blocked.add(cardNumber); }
+  balance(accountId) { return this.#account(accountId).balance; }
+  debit(accountId, amount) { // check and take with no `await` in between
+    this.#account(accountId).debit(amount);
+    return this.#record(new Transaction(TransactionType.WITHDRAW, accountId, amount));
+  }
+  credit(accountId, amount) {
+    this.#account(accountId).credit(amount);
+    return this.#record(new Transaction(TransactionType.DEPOSIT, accountId, amount));
+  }
+  reverse(transactionId) { // undo a withdrawal: put the money back
+    const tx = this.#transactions.get(transactionId);
+    if (!tx || tx.type !== TransactionType.WITHDRAW) throw new Error(`Can't reverse ${transactionId}`);
+    if (tx.status === TransactionStatus.REVERSED) return; // already done: safe to call twice
+    this.#account(tx.accountId).credit(tx.amount);
+    tx.status = TransactionStatus.REVERSED;
+  }
+  get transactions() { return [...this.#transactions.values()]; }
+
+  #record(tx) {
+    this.#transactions.set(tx.id, tx);
+    return tx;
+  }
+  #account(id) {
+    const account = this.#accounts.get(id);
+    if (!account) throw new Error(`Unknown account ${id}`);
+    return account;
+  }
+}
+```
+
+**Part 3: the cash dispenser, a Chain of Responsibility.** Each handler gives as many of its notes as it can, and passes the rest to the next one.
+
+```js
+class NoteHandler {
+  #next = null;
+  constructor(note, count) {
+    this.note = note; // 500, 200 or 100
+    this.count = count; // how many of these notes are inside
+  }
+  setNext(handler) {
+    this.#next = handler;
+    return handler;
+  }
+  plan(amount, notes = new Map()) { // returns note -> how many, or null if it can't be made
+    const use = Math.min(Math.floor(amount / this.note), this.count);
+    if (use > 0) notes.set(this.note, use);
+    const rest = amount - use * this.note;
+    if (rest === 0) return notes;
+    return this.#next ? this.#next.plan(rest, notes) : null;
+  }
+  take(notes) {
+    this.count -= notes.get(this.note) ?? 0;
+    this.#next?.take(notes);
+  }
+}
+
+class CashDispenser {
+  #first;
+  constructor(stock) { // e.g. [[500, 10], [200, 10], [100, 20]]: note and count
+    const handlers = stock.toSorted((a, b) => b[0] - a[0]).map(([note, count]) => new NoteHandler(note, count));
+    handlers.reduce((prev, next) => prev.setNext(next)); // biggest note first
+    this.#first = handlers[0];
+  }
+  canDispense(amount) { return this.#first.plan(amount) !== null; }
+  dispense(amount) { // the real machine pushes the notes out here
+    const notes = this.#first.plan(amount);
+    if (!notes) throw new Error(`Can't make ${rupees(amount)} from the notes inside`);
+    this.#first.take(notes);
+    return notes;
+  }
+}
+
+const formatNotes = (notes) => [...notes].map(([note, n]) => `${n} x ${rupees(note)}`).join(', ');
+```
+
+**Part 4: the ATM steps (State).** The base class says "not now" to every button. Each state allows only its own buttons.
+
+```js
+class ATMState { // abstract
+  constructor() { if (new.target === ATMState) throw new Error('ATMState is abstract'); }
+  get name() { throw new Error('not implemented'); }
+  insertCard(atm, card) { this.#notNow('insert a card'); }
+  enterPin(atm, pin) { this.#notNow('enter a PIN'); }
+  withdraw(atm, amount) { this.#notNow('withdraw'); }
+  deposit(atm, amount) { this.#notNow('deposit'); }
+  checkBalance(atm) { this.#notNow('check the balance'); }
+  ejectCard(atm) { this.#notNow('eject a card'); }
+  #notNow(action) { throw new Error(`You can't ${action} now (${this.name})`); }
+}
+
+class IdleState extends ATMState {
+  get name() { return 'Idle'; }
+  insertCard(atm, card) {
+    if (atm.bank.isBlocked(card.number)) throw new Error('This card is blocked. Please call your bank.');
+    atm.startSession(card);
+    atm.setState(new CardInsertedState());
+    return 'Enter your PIN';
+  }
+}
+
+class CardInsertedState extends ATMState {
+  get name() { return 'CardInserted'; }
+  enterPin(atm, pin) {
+    if (atm.bank.checkPin(atm.card.number, pin)) {
+      atm.setState(new AuthenticatedState());
+      return 'PIN OK';
+    }
+    atm.pinTries += 1;
+    const left = MAX_PIN_TRIES - atm.pinTries;
+    if (left > 0) return `Wrong PIN. ${left} ${left === 1 ? 'try' : 'tries'} left.`;
+    atm.bank.blockCard(atm.card.number);
+    atm.endSession(); // the machine keeps the card
+    return 'Wrong PIN 3 times. The card is kept. Please call your bank.';
+  }
+  ejectCard(atm) {
+    atm.endSession();
+    return 'Take your card';
+  }
+}
+
+const checkAmount = (amount) => {
+  if (!Number.isInteger(amount) || amount <= 0 || amount % 100 !== 0) throw new Error('Amount must be a multiple of ₹100');
+};
+
+class AuthenticatedState extends ATMState {
+  get name() { return 'Authenticated'; }
+  checkBalance(atm) { return `Balance: ${rupees(atm.bank.balance(atm.card.accountId))}`; }
+  deposit(atm, amount) {
+    checkAmount(amount);
+    atm.bank.credit(atm.card.accountId, amount);
+    return `Deposited ${rupees(amount)}`;
+  }
+  withdraw(atm, amount) {
+    checkAmount(amount);
+    if (!atm.dispenser.canDispense(amount)) throw new Error(`This ATM can't give ${rupees(amount)} right now`);
+    const tx = atm.bank.debit(atm.card.accountId, amount); // 1. take the money from the account
+    try {
+      const notes = atm.dispenser.dispense(amount); // 2. give out the cash
+      return `Take your cash: ${formatNotes(notes)}`;
+    } catch (err) {
+      atm.bank.reverse(tx.id); // 3. the cash failed: put the money back
+      return `Sorry, no cash was given (${err.message}). ${rupees(amount)} is back in your account.`;
+    }
+  }
+  ejectCard(atm) {
+    atm.endSession();
+    return 'Take your card';
+  }
+}
+```
+
+**Part 5: the main service.** Every button on the ATM just asks the current state.
+
+```js
+class ATM {
+  constructor(bank, dispenser) {
+    this.bank = bank;
+    this.dispenser = dispenser;
+    this.state = new IdleState();
+    this.card = null;
+    this.pinTries = 0;
+  }
+  setState(state) { this.state = state; }
+  startSession(card) {
+    this.card = card;
+    this.pinTries = 0;
+  }
+  endSession() {
+    this.card = null;
+    this.pinTries = 0;
+    this.setState(new IdleState());
+  }
+
+  insertCard(card) { return this.state.insertCard(this, card); }
+  enterPin(pin) { return this.state.enterPin(this, pin); }
+  withdraw(amount) { return this.state.withdraw(this, amount); }
+  deposit(amount) { return this.state.deposit(this, amount); }
+  checkBalance() { return this.state.checkBalance(this); }
+  ejectCard() { return this.state.ejectCard(this); }
+}
+```
+
+**Part 6: try it.** One account with ₹3,000, and an ATM with four ₹500, five ₹200 and ten ₹100 notes.
+
+```js
+const show = (fn) => { try { console.log(fn()); } catch (e) { console.log(e.message); } };
+
+const bank = new InMemoryBank();
+bank.addAccount(new Account('ACC-1', 3000));
+const card = new Card('4000-1234', 'ACC-1');
+bank.issueCard(card, '1234');
+const atm = new ATM(bank, new CashDispenser([[500, 4], [200, 5], [100, 10]]));
+
+show(() => atm.withdraw(500)); // You can't withdraw now (Idle)
+show(() => atm.insertCard(card)); // Enter your PIN
+show(() => atm.enterPin('0000')); // Wrong PIN. 2 tries left.
+show(() => atm.enterPin('1234')); // PIN OK
+show(() => atm.withdraw(2600)); // Take your cash: 4 x ₹500, 3 x ₹200
+show(() => atm.withdraw(250)); // Amount must be a multiple of ₹100
+show(() => atm.withdraw(1000)); // Not enough money in the account
+show(() => atm.deposit(500)); // Deposited ₹500
+show(() => atm.checkBalance()); // Balance: ₹900
+show(() => atm.ejectCard()); // Take your card
+
+// A test double: a cash box whose notes always get stuck.
+class JammedDispenser extends CashDispenser {
+  dispense() { throw new Error('notes stuck'); }
+}
+const brokenAtm = new ATM(bank, new JammedDispenser([[100, 50]]));
+brokenAtm.insertCard(card);
+brokenAtm.enterPin('1234');
+show(() => brokenAtm.withdraw(300)); // Sorry, no cash was given (notes stuck). ₹300 is back in your account.
+show(() => brokenAtm.checkBalance()); // Balance: ₹900
+for (const tx of bank.transactions) console.log(tx.id, tx.type, tx.amount, tx.status);
+// TX1 WITHDRAW 2600 DONE
+// TX2 DEPOSIT 500 DONE
+// TX3 WITHDRAW 300 REVERSED
+
+atm.insertCard(card);
+atm.enterPin('1111');
+atm.enterPin('2222');
+show(() => atm.enterPin('3333')); // Wrong PIN 3 times. The card is kept. Please call your bank.
+show(() => atm.insertCard(card)); // This card is blocked. Please call your bank.
+```
+
+## Step 6: Edge cases and extensions
+
+### Edge cases
+
+| Case | What happens |
+| --- | --- |
+| A button pressed at the wrong step | The state says "You can't ... now". |
+| A wrong PIN | "2 tries left". After the 3rd, the card is kept and blocked. |
+| A blocked card | Refused at `insertCard`. |
+| ₹250, ₹0 or a negative amount | Refused: must be a multiple of ₹100. |
+| Not enough money in the account | The bank refuses the debit. No cash moves. |
+| The ATM doesn't have the notes | Refused **before** asking the bank, so the account is never touched. |
+| The notes jam after the debit | The ATM reverses the transaction. The user sees "money back". |
+| The power goes off after the debit, before the cash | The ATM writes each step to a log on its disk. On restart, it finds the unfinished withdrawal and asks the bank to reverse it. |
+| The greedy plan fails but another mix works | ₹600 with one ₹500 and three ₹200 notes: greedy takes ₹500 and is stuck. Fix: if the plan fails, try again with one fewer big note. |
+| The user walks away | Extension: a timeout ejects the card, and keeps it if no one takes it. |
+
+### Two requests at once
+
+One ATM serves one person at a time. But **one account** can be used from two places at once: a joint account with two cards at two ATMs, or an ATM and an online payment.
+
+The danger is at the bank, if it reads the balance, waits, and then writes:
+
+```js
+// NOT SAFE. A fragment, not runnable on its own.
+async debit(accountId, amount) {
+  const balance = await db.getBalance(accountId);            // both ATMs read ₹3,000
+  if (balance < amount) throw new Error('Not enough money');
+  await db.setBalance(accountId, balance - amount);          // both take ₹2,000: ₹4,000 left the account
+}
+```
+
+How to make it safe:
+
+- **One process:** check and take in one method with no `await` in between, as `InMemoryBank.debit` does.
+- **Many servers:** one conditional update, so the database checks and takes in one step:
+
+```sql
+UPDATE accounts SET balance = balance - 2000
+WHERE id = 'ACC-1' AND balance >= 2000;
+-- 1 row changed: done. 0 rows changed: not enough money.
+```
+
+In Java, you would use a database transaction that locks the account row, or `synchronized` in a single process. See [Race Conditions and Locks](../concurrency/race-conditions-locks.mdx).
+
+### Adding features
+
+- **A new step**, like "Do you want a receipt?": add a `ReceiptState`. The other states don't change. This is [State](../design-patterns/state.mdx).
+- **A new note**, like ₹50: add one more handler to the chain. `CashDispenser` and the states don't change. This is [Chain of Responsibility](../design-patterns/chain-of-responsibility.mdx).
+- **More menu options** (mini statement, PIN change, transfer): make each option a small object with `execute(atm)`, so the menu is a list of commands. This is [Command](../design-patterns/command.mdx).
+- **Cards from other banks:** another `Bank` class that talks to the card network, and changes its messages into our `Bank` methods. This is [Adapter](../design-patterns/adapter.mdx).
+
+## Patterns used
+
+| Pattern | Where | Why |
+| --- | --- | --- |
+| [State](../design-patterns/state.mdx) | `ATMState`: `IdleState`, `CardInsertedState`, `AuthenticatedState` | Each step allows only its own buttons. No `if (step === ...)` in every method. |
+| [Chain of Responsibility](../design-patterns/chain-of-responsibility.mdx) | `NoteHandler` chain in `CashDispenser` | Each note type gives what it can and passes the rest on, like Express middleware calling `next()`. |
+| [Dependency Inversion](../design-principles/dependency-inversion.mdx) | `Bank` interface, `InMemoryBank` | The ATM depends on "a bank", not on one network API. Tests use a fake. |
+| Test double | `JammedDispenser` | Shows that the "money back" path works, without a real jam. |
+
+## Follow-up questions
+
+<Accordions>
+<Accordion title="Why debit first and then give the cash? Why not the other way?">
+
+If the ATM gives the cash first and the debit then fails (for example, the network drops), the bank has lost money and has no record of it. If it debits first and the cash fails, the ATM sends a **reverse**. That is a normal, logged transaction, and the customer gets the money back. Real systems often go one step further: first **hold** the money, then **confirm** it only after the notes are out.
+
+</Accordion>
+<Accordion title="Why a chain of handlers and not one loop over the notes?">
+
+For three notes, a loop works fine, so say so. The chain gives each cash box its own count and rule, and adding or removing a note type only changes how the chain is built. It is the same idea as Express middleware: each step does its part and passes the rest on.
+
+</Accordion>
+<Accordion title="Where should the PIN tries be counted?">
+
+The ATM counts them in the session to show "2 tries left". But the **bank** must count them too, per card. Otherwise someone could try 2 PINs at each of many ATMs. In real cards, the chip and the bank both keep a count.
+
+</Accordion>
+<Accordion title="How does the ATM keep the PIN safe?">
+
+The ATM never stores the PIN. The PIN pad encrypts it right away, and only the bank can check it. The bank keeps a hash, never the PIN itself. In our design, this hides behind `Bank.checkPin`, so the ATM code doesn't change.
+
+</Accordion>
+</Accordions>
+
+## What the interviewer expects
+
+<Tabs items={['Mid-level', 'Senior', 'Staff']}>
+<Tab value="Mid-level">
+
+- Clear classes: `Card`, `Account`, `ATM`, `CashDispenser`, `Transaction`.
+- A working card → PIN → withdraw flow with PIN tries.
+- Giving out the fewest notes.
+
+</Tab>
+<Tab value="Senior">
+
+- The State pattern for the steps, and the bank behind an interface.
+- "Debit, then dispense, and reverse if it fails", without being asked.
+- The race on one account from two places, and the conditional `UPDATE`.
+
+</Tab>
+<Tab value="Staff">
+
+- Everything from senior, but faster.
+- Hold-then-confirm, a log on the ATM's disk for power cuts, and retries that are safe to repeat.
+- PIN security, and talking to many banks through the card network.
+
+</Tab>
+</Tabs>
+
+<Callout title="Remember this" type="success">
+  - The steps are states: Idle → CardInserted → Authenticated. The base state says "not now" to every button.
+  - The ATM never stores balances or PINs. It asks the bank through a `Bank` interface.
+  - Notes come from a chain: ₹500 → ₹200 → ₹100. Each gives what it can and passes the rest on.
+  - Check the notes first, then debit, then dispense. If the cash fails, reverse the transaction.
+  - One account, two ATMs: the bank must check and take the money in one step.
+</Callout>

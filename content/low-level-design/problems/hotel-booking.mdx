@@ -1,0 +1,549 @@
+---
+title: "Design a Hotel Booking System"
+description: "Rooms, date ranges and reservations, with cancellation and refund rules."
+icon: Hotel
+---
+
+<Callout title="About this question">
+  **Difficulty:** Hard. **Patterns used:** [Strategy](../design-patterns/strategy.mdx),
+  [Facade](../design-patterns/facade.mdx), [Dependency Injection](../design-principles/dependency-injection.mdx),
+  plus an atomic booking from [Race Conditions and Locks](../concurrency/race-conditions-locks.mdx).
+  **Also asked as:** "Design a hotel reservation system", "Design Booking.com / Airbnb (the class design)".
+</Callout>
+
+## Understand the problem
+
+Think of the big diary at a hotel front desk. Each room has a row, and each night has a column. When you book room
+102 from the 24th to the 27th, the clerk writes your name in three boxes: the nights of the 24th, 25th and 26th. The
+next guest can take room 102 from the 27th, because you leave that morning.
+
+What makes it interesting:
+
+- **Date ranges, not single slots.** A movie seat is taken for one show. A room is taken for a **range** of nights,
+  and two ranges can overlap in part.
+- **Cancellation rules differ.** A "free cancellation" booking gets money back. A cheaper "non-refundable" one gets
+  nothing. The rule is picked when the guest books.
+- **The last room.** Two guests click "Book" on the last free double room at the same moment. Only one may get it.
+
+## Step 1: Requirements
+
+### Functional requirements
+
+1. Users should be able to search the free rooms of a hotel for a date range, with an optional room type.
+2. Users should be able to book a room of a chosen type for a date range.
+3. Users should be able to cancel a booking before check-in and get a refund based on its policy.
+4. The system should never give one room to two guests for the same night.
+5. Admins should be able to add hotels and rooms, each room with a type and a nightly rate.
+
+### Out of scope
+
+- Payment itself (we work out the amount and the refund, and assume a gateway moves the money).
+- Searching many hotels by city, reviews, photos, and loyalty points.
+- Check-in and check-out at the desk, and seasonal prices (see "Adding features").
+
+### Questions to ask the interviewer
+
+| Question | What we assume |
+| --- | --- |
+| Does the guest pick a room number, or a room type? | A type. The system picks a free room of that type. |
+| Is check-out day a night of the stay? | No. 24th to 27th is 3 nights, and the room is free again on the 27th. |
+| Is the price the same every night? | Yes, one nightly rate per room for now. |
+| What refund rules exist? | "Flexible": full refund up to 2 days before check-in, after that the first night is kept. "Non-refundable": no money back. |
+| One server or many? | One process first. Then the database rule for many servers. |
+
+## Step 2: Core classes
+
+| Class | What it is | Key data | Key actions |
+| --- | --- | --- | --- |
+| `Hotel` | One hotel building | name, city, rooms | `addRoom`, `rooms` |
+| `Room` | One room to sleep in | number, type, nightly rate, its bookings | `isFree(range)`, `addBooking` |
+| `Guest` | The person staying | id, name | – |
+| `DateRange` | Check-in day to check-out day | start day, end day | `nights`, `overlaps(other)` |
+| `Booking` | One guest's stay in one room | guest, room, range, amount, policy, status | – |
+| `RefundPolicy` | The cancellation rule | – | `refundFor(booking, daysBefore)` |
+| `BookingService` | The front door for the app | hotels, guests, bookings, clock | `searchFreeRooms`, `book`, `cancel` |
+
+**Enums:**
+
+- `RoomType`: `SINGLE`, `DOUBLE`, `SUITE`.
+- `BookingStatus`: `CONFIRMED`, `CANCELLED`.
+
+`DateRange` is a small class, not two loose dates. The overlap rule is easy to get wrong, so it lives in one place
+and gets tested once.
+
+## Step 3: Class diagram
+
+```mermaid
+classDiagram
+  direction TB
+  class Hotel:::concrete {
+    +name string
+    +addRoom(room) Room
+  }
+  class Room:::concrete {
+    +number number
+    +type RoomType
+    +nightlyRate number
+    +isFree(range) boolean
+  }
+  class RoomType:::enum {
+    <<enumeration>>
+    SINGLE
+    DOUBLE
+    SUITE
+  }
+  class Guest:::concrete {
+    +name string
+  }
+  class DateRange:::concrete {
+    +start number
+    +end number
+    +nights number
+    +overlaps(other) boolean
+  }
+  class Booking:::concrete {
+    +amount number
+    +status BookingStatus
+  }
+  class RefundPolicy:::iface {
+    <<interface>>
+    +refundFor(booking, daysBefore) number
+  }
+  class FlexiblePolicy:::concrete
+  class NonRefundablePolicy:::concrete
+  class BookingService:::concrete {
+    +searchFreeRooms(hotelId, range, type) Room[]
+    +book(guestId, hotelId, type, range, policy) Booking
+    +cancel(bookingId) number
+  }
+  Hotel "1" *-- "many" Room : has
+  Room --> RoomType
+  Booking "many" --> "1" Room : reserves
+  Booking "many" --> "1" Guest : for
+  Booking "1" *-- "1" DateRange : stay
+  Booking --> RefundPolicy : uses
+  RefundPolicy <|.. FlexiblePolicy
+  RefundPolicy <|.. NonRefundablePolicy
+  BookingService "1" o-- "many" Hotel
+  BookingService "1" *-- "many" Booking
+```
+
+Key choices:
+
+- **Composition for Hotel → Room.** A room doesn't exist without its hotel.
+- **Each `Room` also keeps a list of its own bookings.** Then the room can answer "am I free from the 24th to the
+  27th?" by itself. The data and the check sit together.
+- **`RefundPolicy` is an interface, chosen per booking.** The guest picks "flexible" or "non-refundable" at booking
+  time, so the policy is stored on the `Booking`. See [Strategy](../design-patterns/strategy.mdx).
+- **Cancelled bookings stay in the list** with status `CANCELLED`. `isFree` skips them. We keep the history, and
+  the room is free again.
+- **A clock is passed in.** "Is check-in in the past?" and "how many days before check-in?" both need today's date.
+
+## Step 4: Main methods
+
+| Method | What it does |
+| --- | --- |
+| `BookingService.searchFreeRooms(hotelId, range, type)` | Returns the rooms free for every night of the range. `type` is optional. |
+| `BookingService.book(guestId, hotelId, type, range, policy)` | Finds a free room of that type and books it, in one synchronous call. |
+| `BookingService.cancel(bookingId)` | Works out the refund with the booking's policy, then frees the room. Returns the refund in paise. |
+| `Room.isFree(range)` | True if no confirmed booking of this room overlaps the range. |
+| `DateRange.overlaps(other)` | `this.start < other.end && other.start < this.end`. |
+| `RefundPolicy.refundFor(booking, daysBefore)` | Returns how much money goes back, in paise. |
+
+**The overlap rule.** Ranges include the check-in day but not the check-out day. Two stays clash only if each starts
+before the other ends:
+
+| Stay | Nights | Clashes with Asha (24th to 27th)? |
+| --- | --- | --- |
+| Ben, 26th to 28th | 26th, 27th | Yes, the night of the 26th. |
+| Dev, 27th to 29th | 27th, 28th | No. Asha leaves the morning Dev arrives. |
+| Chen, 20th to 24th | 20th to 23rd | No. Chen leaves the morning Asha arrives. |
+
+The main flow, booking a room:
+
+```mermaid
+sequenceDiagram
+  actor G as Guest
+  participant S as BookingService
+  participant H as Hotel
+  participant R as Room 102
+  participant D as DateRange
+  G->>S: book("g1", "H1", DOUBLE, 24th to 27th, Flexible)
+  S->>H: rooms
+  H-->>S: 101, 102, 103, 201
+  S->>R: isFree(range)
+  R->>D: overlaps(each confirmed booking)
+  D-->>R: no clash
+  R-->>S: true
+  S->>R: addBooking(BK1)
+  S-->>G: BK1, room 102, 3 nights, 1500000 paise
+```
+
+## Step 5: Code
+
+Money is in whole **paise** (₹1 = 100 paise). Dates are turned into whole **day numbers** (days since 1 Jan 1970),
+so "how many nights?" is a simple subtraction. Run all the parts together as one `.mjs` file.
+
+**Part 1: enums and small classes.** `DateRange` holds the overlap rule, and `Room` checks its own bookings.
+
+```js
+const RoomType = Object.freeze({ SINGLE: 'SINGLE', DOUBLE: 'DOUBLE', SUITE: 'SUITE' });
+const BookingStatus = Object.freeze({ CONFIRMED: 'CONFIRMED', CANCELLED: 'CANCELLED' });
+
+const DAY_MS = 86_400_000;
+const dayNumber = (ms) => Math.floor(ms / DAY_MS); // whole days since 1 Jan 1970 (UTC)
+const rupees = (paise) => `₹${(paise / 100).toFixed(2)}`; // only for printing
+
+class DateRange { // from the check-in day up to, but not including, the check-out day
+  constructor(checkIn, checkOut) { // 'YYYY-MM-DD'
+    this.checkIn = checkIn;
+    this.checkOut = checkOut;
+    this.start = dayNumber(Date.parse(checkIn));
+    this.end = dayNumber(Date.parse(checkOut));
+    if (Number.isNaN(this.start) || Number.isNaN(this.end)) throw new Error('Use dates like 2026-12-24');
+    if (this.end <= this.start) throw new Error('Check-out must be after check-in');
+  }
+  get nights() { return this.end - this.start; }
+  overlaps(other) { return this.start < other.end && other.start < this.end; }
+  toString() { return `${this.checkIn} to ${this.checkOut}`; }
+}
+
+class Guest {
+  constructor(id, name) {
+    this.id = id;
+    this.name = name;
+  }
+}
+
+class Room {
+  #bookings = [];
+  constructor(number, type, nightlyRate) {
+    this.number = number;
+    this.type = type; // a RoomType
+    this.nightlyRate = nightlyRate; // whole paise
+  }
+  isFree(range) {
+    return !this.#bookings.some((b) => b.status === BookingStatus.CONFIRMED && b.range.overlaps(range));
+  }
+  addBooking(booking) { this.#bookings.push(booking); }
+}
+
+class Hotel {
+  #rooms = new Map(); // room number -> Room
+  constructor(id, name, city) {
+    this.id = id;
+    this.name = name;
+    this.city = city;
+  }
+  addRoom(room) {
+    this.#rooms.set(room.number, room);
+    return room;
+  }
+  get rooms() { return [...this.#rooms.values()]; }
+}
+
+class FakeClock { // tests control "today"
+  constructor(ms) { this.ms = ms; }
+  now() { return this.ms; }
+  advanceDays(days) { this.ms += days * DAY_MS; }
+}
+```
+
+**Part 2: the core classes.** The refund rules (Strategy) and the `Booking`.
+
+```js
+class RefundPolicy { // interface
+  refundFor(booking, daysBefore) { throw new Error('not implemented'); }
+}
+
+class FlexiblePolicy extends RefundPolicy {
+  refundFor(booking, daysBefore) {
+    if (daysBefore >= 2) return booking.amount; // full refund
+    return booking.amount - booking.room.nightlyRate; // late: keep the first night
+  }
+}
+
+class NonRefundablePolicy extends RefundPolicy {
+  refundFor(booking, daysBefore) { return 0; }
+}
+
+class Booking {
+  constructor(id, guest, room, range, policy) {
+    this.id = id;
+    this.guest = guest;
+    this.room = room;
+    this.range = range;
+    this.policy = policy; // a RefundPolicy, picked when booking
+    this.amount = range.nights * room.nightlyRate; // whole paise
+    this.status = BookingStatus.CONFIRMED;
+    this.refund = 0;
+  }
+}
+```
+
+**Part 3: the main service.** `book` searches and saves in one synchronous call, so nothing can slip in between.
+
+```js
+class BookingService {
+  #hotels = new Map();
+  #guests = new Map();
+  #bookings = new Map();
+  #nextId = 1;
+  #clock;
+
+  constructor(clock) { this.#clock = clock; }
+
+  addHotel(hotel) {
+    this.#hotels.set(hotel.id, hotel);
+    return hotel;
+  }
+  addGuest(guest) {
+    this.#guests.set(guest.id, guest);
+    return guest;
+  }
+
+  searchFreeRooms(hotelId, range, type = null) {
+    if (range.start < dayNumber(this.#clock.now())) throw new Error('Check-in is in the past');
+    return this.#find(this.#hotels, hotelId).rooms
+      .filter((room) => (type === null || room.type === type) && room.isFree(range));
+  }
+
+  // Search and save in one synchronous call: no await, so two guests can't both get the last room.
+  book(guestId, hotelId, type, range, policy) {
+    const guest = this.#find(this.#guests, guestId);
+    const [room] = this.searchFreeRooms(hotelId, range, type);
+    if (!room) throw new Error(`No ${type} room free from ${range}`);
+    const booking = new Booking(`BK${this.#nextId++}`, guest, room, range, policy);
+    room.addBooking(booking);
+    this.#bookings.set(booking.id, booking);
+    return booking;
+  }
+
+  cancel(bookingId) {
+    const booking = this.#find(this.#bookings, bookingId);
+    if (booking.status !== BookingStatus.CONFIRMED) throw new Error(`${bookingId} is already ${booking.status}`);
+    const daysBefore = booking.range.start - dayNumber(this.#clock.now());
+    if (daysBefore <= 0) throw new Error(`Too late to cancel ${bookingId}: the stay has started`);
+    booking.refund = booking.policy.refundFor(booking, daysBefore);
+    booking.status = BookingStatus.CANCELLED; // the room is free again for these dates
+    return booking.refund;
+  }
+
+  #find(map, id) {
+    const item = map.get(id);
+    if (!item) throw new Error(`Not found: ${id}`);
+    return item;
+  }
+}
+```
+
+**Part 4: try it.** One hotel with four rooms, overlapping stays, cancellations, and a race for the last suite.
+
+```js
+const clock = new FakeClock(Date.UTC(2026, 11, 1)); // 1 Dec 2026
+const service = new BookingService(clock);
+const hotel = service.addHotel(new Hotel('H1', 'Sea View', 'Goa'));
+hotel.addRoom(new Room(101, RoomType.SINGLE, 300000)); // ₹3,000 a night, in paise
+hotel.addRoom(new Room(102, RoomType.DOUBLE, 500000));
+hotel.addRoom(new Room(103, RoomType.DOUBLE, 500000));
+hotel.addRoom(new Room(201, RoomType.SUITE, 1200000));
+for (const [id, name] of [['g1', 'Asha'], ['g2', 'Ben'], ['g3', 'Chen'], ['g4', 'Dev']]) {
+  service.addGuest(new Guest(id, name));
+}
+
+// 1. Search, then book a double for Christmas (3 nights).
+const xmas = new DateRange('2026-12-24', '2026-12-27');
+console.log(service.searchFreeRooms('H1', xmas).map((r) => r.number)); // [ 101, 102, 103, 201 ]
+const b1 = service.book('g1', 'H1', RoomType.DOUBLE, xmas, new FlexiblePolicy());
+console.log(b1.id, b1.room.number, b1.range.nights, rupees(b1.amount)); // BK1 102 3 ₹15000.00
+
+// 2. Ben's dates overlap Asha's, so he gets the other double.
+const b2 = service.book('g2', 'H1', RoomType.DOUBLE, new DateRange('2026-12-26', '2026-12-28'), new NonRefundablePolicy());
+console.log(b2.id, b2.room.number); // BK2 103
+
+// 3. No double is free on the 26th now.
+try {
+  service.book('g3', 'H1', RoomType.DOUBLE, new DateRange('2026-12-25', '2026-12-27'), new FlexiblePolicy());
+} catch (e) {
+  console.log(e.message); // No DOUBLE room free from 2026-12-25 to 2026-12-27
+}
+
+// 4. Back to back is fine: Asha leaves on the 27th, Dev arrives on the 27th.
+const b3 = service.book('g4', 'H1', RoomType.DOUBLE, new DateRange('2026-12-27', '2026-12-29'), new FlexiblePolicy());
+console.log(b3.id, b3.room.number); // BK3 102
+
+// 5. Cancel on 20 Dec, four days before Christmas Eve.
+clock.advanceDays(19);
+console.log(rupees(service.cancel('BK1'))); // ₹15000.00
+console.log(rupees(service.cancel('BK2'))); // ₹0.00
+console.log(service.searchFreeRooms('H1', xmas, RoomType.DOUBLE).map((r) => r.number)); // [ 102, 103 ]
+
+// 6. Dev cancels on 26 Dec, one day before check-in: the first night is kept.
+clock.advanceDays(6);
+console.log(rupees(service.cancel('BK3'))); // ₹5000.00
+
+// 7. Two guests try to book the only suite at the same moment.
+const nye = new DateRange('2026-12-31', '2027-01-01');
+const tries = await Promise.allSettled([
+  Promise.resolve().then(() => service.book('g3', 'H1', RoomType.SUITE, nye, new FlexiblePolicy())),
+  Promise.resolve().then(() => service.book('g1', 'H1', RoomType.SUITE, nye, new FlexiblePolicy())),
+]);
+console.log(tries.map((r) => (r.status === 'fulfilled' ? `${r.value.guest.name} got ${r.value.room.number}` : r.reason.message)));
+// [ 'Chen got 201', 'No SUITE room free from 2026-12-31 to 2027-01-01' ]
+```
+
+## Step 6: Edge cases and extensions
+
+### Edge cases
+
+| Case | What happens |
+| --- | --- |
+| Check-out on or before check-in | `DateRange` throws `Check-out must be after check-in`. |
+| A date like `24/12/2026` | `DateRange` throws `Use dates like 2026-12-24`. |
+| Check-in in the past | `searchFreeRooms` (and so `book`) throws. |
+| Back-to-back stays (one leaves on the 27th, one arrives on the 27th) | Allowed: the ranges don't overlap. |
+| No room of that type is free | `book` throws `No DOUBLE room free from ...`. |
+| Cancel twice | The second call throws `BK1 is already CANCELLED`. |
+| Cancel on or after check-in day | Refused: `the stay has started`. |
+| The search said "free", but the room went before the guest clicked "Book" | `book` searches again inside the same call, so it never trusts an old search. |
+
+### Two requests at once
+
+**What could race.** Two guests want the last double. In JavaScript, the danger is an `await` between "is a room
+free?" and "save the booking":
+
+```js
+// Not runnable: a broken book(), to show the bug.
+async book(guestId, hotelId, type, range, policy) {
+  const [room] = this.searchFreeRooms(hotelId, range, type); // both guests see room 103 free
+  await this.#gateway.charge(guestId, range.nights * room.nightlyRate); // pause: the other guest runs here
+  room.addBooking(new Booking(/* ... */)); // both save, so room 103 is sold twice
+}
+```
+
+**How to make it safe:**
+
+1. **One synchronous call.** Our `book` finds the room and saves the booking with no `await` in between. Once it
+   starts, it runs to the end, so the second guest sees the room taken. That is the result in case 7.
+2. **If you charge the card first, hold the room first.** Save the booking as `HELD` with an end time, then pay,
+   then confirm. Check again after the payment `await`. This is the same flow as
+   [Design a Movie Ticket Booking System](./movie-ticket-booking.mdx).
+3. **Many servers: let the database refuse a clash.** Two common ways:
+   - Store one row per room per night, with a unique key on `(room_id, night)`. A clashing insert fails.
+   - In PostgreSQL, an **exclusion constraint** on a date range column refuses two overlapping ranges for the same
+     room. The PostgreSQL docs show it with a room booking example.
+
+```sql
+-- PostgreSQL. btree_gist lets the constraint also compare room_id with "=".
+CREATE EXTENSION btree_gist;
+CREATE TABLE bookings (
+  room_id int,
+  stay daterange, -- like '[2026-12-24, 2026-12-27)': check-out day not included
+  EXCLUDE USING gist (room_id WITH =, stay WITH &&) -- && means "overlaps"
+);
+```
+
+In Java, an interviewer may expect `synchronized` on `book`, or a lock per room type. In JavaScript, a method with
+no `await` already runs to the end without a break. See [Race Conditions and Locks](../concurrency/race-conditions-locks.mdx),
+and the [Ticket Booking system design](/learn/system-design/questions/ticket-booking) for the database side.
+
+### Adding features
+
+**1. A new refund rule.** Say, "50% back if you cancel 7 or more days before". Add one class. `Booking` and
+`BookingService` don't change. That is [Strategy](../design-patterns/strategy.mdx), and it follows the
+[Open-Closed Principle](../design-principles/open-closed.mdx).
+
+```js
+// Builds on the Step 5 code.
+class HalfRefundPolicy extends RefundPolicy {
+  refundFor(booking, daysBefore) {
+    return daysBefore >= 7 ? Math.round(booking.amount / 2) : 0;
+  }
+}
+const stay = new DateRange('2027-01-10', '2027-01-12'); // 2 nights in the single room
+const b5 = service.book('g2', 'H1', RoomType.SINGLE, stay, new HalfRefundPolicy());
+console.log(b5.id, rupees(b5.amount), rupees(service.cancel(b5.id))); // BK5 ₹6000.00 ₹3000.00
+```
+
+**2. Weekend and holiday prices.** Move the nightly price into a `PricingStrategy` with `priceFor(room, night)`.
+`Booking` adds up the price of each night. A "festival week" rule is one new class. Strategy again.
+
+**3. A waitlist.** When a booking is cancelled, the service announces "room free for these dates". A waitlist
+listener e-mails the first guest waiting for that type and range. This is the
+[Observer](../design-patterns/observer.mdx) pattern: `cancel` doesn't need to know who is listening.
+
+## Patterns used
+
+| Pattern | Where | Why |
+| --- | --- | --- |
+| [Strategy](../design-patterns/strategy.mdx) | `RefundPolicy`, `FlexiblePolicy`, `NonRefundablePolicy` | New cancellation rules without changing `Booking` or the service. |
+| [Facade](../design-patterns/facade.mdx) | `BookingService` | One simple front door over hotels, rooms and bookings. |
+| [Dependency Injection](../design-principles/dependency-injection.mdx) | The clock is passed in | Tests can set "today" and jump forward. |
+| Value object | `DateRange` | The overlap and nights rules live in one tested place. |
+
+## Follow-up questions
+
+<Accordions>
+<Accordion title="Search is slow with 10,000 rooms and years of bookings. What do you do?">
+
+Each `isFree` call loops over all of a room's bookings. Keep only future bookings in the room's list (move old ones
+to history), and keep them sorted by start day, so you can stop early. In a database, index bookings by
+`(room_id, start)`.
+
+</Accordion>
+<Accordion title="Should the guest book a room number or a room type?">
+
+Most hotels sell a **type**, and pick the actual room at check-in. Our `book` already takes a type. To pick the room
+late, store bookings per type with a count, and check that "booked doubles that night" is less than "number of
+doubles". Assign room numbers at check-in.
+
+</Accordion>
+<Accordion title="How would you allow overbooking, like airlines do?">
+
+Hotels sometimes sell a few more rooms than they have, because some guests never come. Make the "is there room?"
+rule a Strategy: the normal rule allows `booked < rooms`, and the overbooking rule allows `booked < rooms + 2`.
+
+</Accordion>
+<Accordion title="Why is the refund policy stored on the booking and not on the hotel?">
+
+Because the guest chose it when booking, often at a different price. If the hotel later changes its rules, old
+bookings must keep the deal they were sold.
+
+</Accordion>
+</Accordions>
+
+## What the interviewer expects
+
+<Tabs items={['Mid-level', 'Senior', 'Staff']}>
+<Tab value="Mid-level">
+
+- Clear classes: Hotel, Room, Guest, Booking, a date range.
+- A correct overlap check, with back-to-back stays allowed.
+- Search, book and cancel working end to end.
+
+</Tab>
+<Tab value="Senior">
+
+- Refund rules as a Strategy, stored on the booking.
+- Explains the "last room" race and keeps `book` free of `await`.
+- Knows the hold-then-pay flow when payment comes first.
+- A database rule for many servers: one row per night, or an exclusion constraint.
+
+</Tab>
+<Tab value="Staff">
+
+- Everything from senior, quickly.
+- Booking by type with inventory counts, and overbooking as a rule.
+- Fast search: indexes, keeping only future bookings, caching availability.
+- Time zones and "nights" in the hotel's local time.
+
+</Tab>
+</Tabs>
+
+<Callout title="Remember this" type="success">
+  - A stay is a **range of nights**: check-in day included, check-out day not.
+  - Two stays clash if `a.start < b.end && b.start < a.end`. Back-to-back is fine.
+  - Put the overlap rule in a small **`DateRange`** class, and let each **`Room`** check its own bookings.
+  - **Refund rules are a Strategy**, chosen and stored per booking.
+  - `book` searches and saves **in one call with no `await`**. Many servers: the database refuses clashes.
+</Callout>

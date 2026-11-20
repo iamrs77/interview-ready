@@ -1,0 +1,660 @@
+---
+title: "Design a Movie Ticket Booking System"
+description: "Theatres, shows and seats. Hold seats, pay, and never sell one seat twice."
+icon: Ticket
+---
+
+<Callout title="About this question">
+  **Difficulty:** Hard. **Patterns used:** [Strategy](../design-patterns/strategy.mdx),
+  [Facade](../design-patterns/facade.mdx), [Dependency Injection](../design-principles/dependency-injection.mdx),
+  plus an atomic hold from [Race Conditions and Locks](../concurrency/race-conditions-locks.mdx).
+  **Also asked as:** "Design BookMyShow", "Design a cinema seat booking system".
+</Callout>
+
+## Understand the problem
+
+Think of the ticket counter at a cinema. You point at two seats on the seat map. The clerk puts a "taken" sticker on
+them. Then you pay. If you walk away without paying, the clerk peels the stickers off after a while.
+
+An app like BookMyShow does the same thing, but thousands of people point at the same seat map at once.
+
+What makes it interesting:
+
+- **Two people, one seat.** Alice and Bob both click seat A2 at the same moment. Only one may get it.
+- **Paying takes time.** We can't keep a seat locked forever while someone types a card number. So we **hold** it
+  for a few minutes, and the hold **expires** (runs out) by itself.
+- **Prices change.** A premium seat costs more than a regular one, and weekends cost more than weekdays.
+
+## Step 1: Requirements
+
+### Functional requirements
+
+1. Users should be able to see the free seats of a show.
+2. Users should be able to pick one or more seats and **hold** them for 10 minutes. They get all the seats, or none.
+3. Users should be able to pay to **confirm** the booking.
+4. Users should be able to give up a hold. A hold that runs out frees the seats too.
+5. The price should depend on the seat type and the day (weekend shows cost more).
+6. Admins should be able to add theatres, screens, movies and shows.
+
+### Out of scope
+
+- Searching movies by city or language (a simple filter).
+- Cancelling a paid ticket and refunds (see [Design a Hotel Booking System](./hotel-booking.mdx) for refund rules).
+- Food, coupons, user accounts and the seat map screen.
+
+### Questions to ask the interviewer
+
+| Question | What we assume |
+| --- | --- |
+| How long is a hold? | 10 minutes. |
+| Can a user book many seats at once? | Yes, and it is all or nothing. |
+| What changes the price? | The seat type sets the base price. Weekend shows add 20%. |
+| One server or many? | Design for one process first. Then explain the database rule for many servers. |
+| Can a paid ticket be cancelled? | Not for now. |
+
+## Step 2: Core classes
+
+| Class | What it is | Key data | Key actions |
+| --- | --- | --- | --- |
+| `Movie` | A film | title, length | – |
+| `Theatre` | A cinema building | name, city, screens | `addScreen` |
+| `Screen` | One hall in a theatre | name, seats | `seat(id)` |
+| `Seat` | One chair in a screen | id like `A1`, type | – |
+| `Show` | A movie on a screen at a time | movie, screen, start time, seat states | `hold`, `isFree`, `book`, `release` |
+| `Booking` | One user's seats for one show | seats, amount, status, hold end time | – |
+| `Payment` | Proof that money was paid | payment id, amount, time | – |
+| `PricingStrategy` | The rule that prices a seat | price table | `priceFor(seat, show)` |
+| `PaymentGateway` | The outside card or UPI service | – | `charge`, `refund` |
+| `BookingService` | The front door for the app | shows, bookings, clock | `holdSeats`, `confirm`, `cancelHold` |
+
+**Enums:**
+
+- `SeatType`: `REGULAR`, `PREMIUM`.
+- `BookingStatus`: `HELD`, `PAYING`, `CONFIRMED`, `EXPIRED`, `CANCELLED`.
+
+A seat's free or taken state lives in `Show`, not in `Seat`. Seat A1 exists at every show in that screen. It can be
+taken at 2 pm and free at 6 pm.
+
+## Step 3: Class diagram
+
+```mermaid
+classDiagram
+  direction TB
+  class Theatre:::concrete {
+    +name string
+    +city string
+  }
+  class Screen:::concrete {
+    +seat(id) Seat
+  }
+  class Seat:::concrete {
+    +id string
+    +type SeatType
+  }
+  class SeatType:::enum {
+    <<enumeration>>
+    REGULAR
+    PREMIUM
+  }
+  class Movie:::concrete {
+    +title string
+  }
+  class Show:::concrete {
+    -seatState Map
+    +hold(seatIds, bookingId, now, holdUntil)
+    +isFree(seatId, now) boolean
+    +book(seatIds)
+  }
+  class PricingStrategy:::iface {
+    <<interface>>
+    +priceFor(seat, show) number
+  }
+  class SeatTypePricing:::concrete
+  class WeekendPricing:::concrete
+  class Booking:::concrete {
+    +status BookingStatus
+    +amount number
+    +holdUntil number
+  }
+  class Payment:::concrete
+  class PaymentGateway:::iface {
+    <<interface>>
+    +charge(userId, amount)
+    +refund(paymentId)
+  }
+  class BookingService:::concrete {
+    +holdSeats(showId, userId, seatIds) Booking
+    +confirm(bookingId) Booking
+  }
+  Theatre "1" *-- "many" Screen : has
+  Screen "1" *-- "many" Seat : has
+  Seat --> SeatType
+  Show --> Movie : plays
+  Show --> Screen : runs in
+  Show --> PricingStrategy : uses
+  PricingStrategy <|.. SeatTypePricing
+  SeatTypePricing <|-- WeekendPricing
+  Booking --> Show : for
+  Booking "1" *-- "0..1" Payment
+  BookingService "1" o-- "many" Show
+  BookingService "1" *-- "many" Booking
+  BookingService --> PaymentGateway
+```
+
+Key choices:
+
+- **Composition for Theatre → Screen → Seat.** A seat can't exist without its screen, or a screen without its
+  theatre.
+- **Seat states live in `Show`.** The "is it free?" check and the "take it" write sit in one class. That is what
+  makes the hold atomic (done in one go).
+- **`PricingStrategy` is an interface.** Each show gets its own rule. See [Strategy](../design-patterns/strategy.mdx).
+- **`PaymentGateway` is an interface.** The real one talks to a card company, and tests use a fake. See
+  [Dependency Inversion](../design-principles/dependency-inversion.mdx).
+- **A clock is passed in.** With a fake clock, tests can jump 11 minutes ahead in one line.
+
+## Step 4: Main methods
+
+| Method | What it does |
+| --- | --- |
+| `BookingService.holdSeats(showId, userId, seatIds)` | Holds all the seats for 10 minutes, or none. Returns a `HELD` booking with the price. |
+| `BookingService.confirm(bookingId)` | Async. Charges the user, then marks the seats booked. Returns the `CONFIRMED` booking. |
+| `BookingService.cancelHold(bookingId)` | Gives the seats back before paying. |
+| `BookingService.freeSeats(showId)` | Lists the seat ids that are free right now. |
+| `Show.hold(seatIds, bookingId, now, holdUntil)` | Checks every seat first, then writes every seat. No `await` inside. |
+| `Show.isFree(seatId, now)` | True if nobody has the seat, or their hold ran out. |
+| `PricingStrategy.priceFor(seat, show)` | Returns the price of one seat at one show, in paise. |
+
+The main flow, hold then pay:
+
+```mermaid
+sequenceDiagram
+  actor U as User
+  participant S as BookingService
+  participant Sh as Show
+  participant P as PricingStrategy
+  participant G as PaymentGateway
+  U->>S: holdSeats("SAT", "alice", [A1, A2])
+  S->>Sh: hold(seats, "BK1", now, now + 10 min)
+  Sh-->>S: ok, both seats held
+  S->>P: priceFor(seat, show), for each seat
+  P-->>S: 42000 paise each
+  S-->>U: BK1 is HELD, total 84000 paise
+  U->>S: confirm("BK1")
+  S->>G: charge("alice", 84000)
+  G-->>S: PAY1
+  S->>Sh: still held by BK1? then book(seats)
+  S-->>U: BK1 is CONFIRMED
+```
+
+## Step 5: Code
+
+Money is in whole **paise** (₹1 = 100 paise), so there are no rounding errors. Time is in milliseconds from a clock
+that we pass in. Run all the parts together as one `.mjs` file (the last part uses top-level `await`).
+
+**Part 1: enums and small classes.** Plain data holders, plus a fake clock for tests.
+
+```js
+const SeatType = Object.freeze({ REGULAR: 'REGULAR', PREMIUM: 'PREMIUM' });
+const BookingStatus = Object.freeze({
+  HELD: 'HELD', PAYING: 'PAYING', CONFIRMED: 'CONFIRMED', EXPIRED: 'EXPIRED', CANCELLED: 'CANCELLED',
+});
+
+const rupees = (paise) => `₹${(paise / 100).toFixed(2)}`; // only for printing
+
+class Movie {
+  constructor(id, title, minutes) {
+    this.id = id;
+    this.title = title;
+    this.minutes = minutes;
+  }
+}
+
+class Seat {
+  constructor(id, type) {
+    this.id = id; // like "A1"
+    this.type = type; // a SeatType
+  }
+}
+
+class Screen {
+  #seats = new Map(); // seat id -> Seat
+  constructor(id, name, seats) {
+    this.id = id;
+    this.name = name;
+    for (const seat of seats) this.#seats.set(seat.id, seat);
+  }
+  seat(id) {
+    const seat = this.#seats.get(id);
+    if (!seat) throw new Error(`No seat ${id} in ${this.name}`);
+    return seat;
+  }
+  get seats() { return [...this.#seats.values()]; }
+}
+
+class Theatre {
+  constructor(id, name, city) {
+    this.id = id;
+    this.name = name;
+    this.city = city;
+    this.screens = [];
+  }
+  addScreen(screen) {
+    this.screens.push(screen);
+    return screen;
+  }
+}
+
+class Payment {
+  constructor(id, bookingId, amount, paidAt) {
+    this.id = id;
+    this.bookingId = bookingId;
+    this.amount = amount; // whole paise
+    this.paidAt = paidAt;
+  }
+}
+
+class FakeClock { // tests control time
+  constructor(ms) { this.ms = ms; }
+  now() { return this.ms; }
+  advanceMinutes(minutes) { this.ms += minutes * 60_000; }
+}
+```
+
+**Part 2: the core classes.** Pricing rules, the `Show` with its atomic `hold`, the `Booking`, and the payment
+interface.
+
+```js
+class PricingStrategy { // interface
+  priceFor(seat, show) { throw new Error('not implemented'); }
+}
+
+class SeatTypePricing extends PricingStrategy {
+  #prices;
+  constructor(prices) { // like { REGULAR: 20000, PREMIUM: 35000 }, in paise
+    super();
+    this.#prices = prices;
+  }
+  priceFor(seat, show) { return this.#prices[seat.type]; }
+}
+
+class WeekendPricing extends SeatTypePricing {
+  #extraPercent;
+  constructor(prices, extraPercent) {
+    super(prices);
+    this.#extraPercent = extraPercent;
+  }
+  priceFor(seat, show) {
+    const base = super.priceFor(seat, show);
+    const day = new Date(show.startsAt).getUTCDay(); // 0 = Sunday, 6 = Saturday
+    const weekend = day === 0 || day === 6;
+    return weekend ? base + Math.round((base * this.#extraPercent) / 100) : base;
+  }
+}
+
+class Show {
+  #seatState = new Map(); // seat id -> { bookingId, booked, holdUntil }
+  constructor(id, movie, screen, startsAt, pricing) {
+    this.id = id;
+    this.movie = movie;
+    this.screen = screen;
+    this.startsAt = startsAt; // milliseconds, UTC
+    this.pricing = pricing; // a PricingStrategy
+  }
+  isFree(seatId, now) {
+    const state = this.#seatState.get(seatId);
+    return !state || (!state.booked && state.holdUntil <= now); // a hold that ran out is free
+  }
+  // All or nothing, and no await inside: nothing else can run between the check and the write.
+  hold(seatIds, bookingId, now, holdUntil) {
+    for (const id of seatIds) {
+      this.screen.seat(id); // throws if the seat does not exist
+      if (!this.isFree(id, now)) throw new Error(`Seat ${id} is not free`);
+    }
+    for (const id of seatIds) this.#seatState.set(id, { bookingId, booked: false, holdUntil });
+  }
+  isHeldBy(seatIds, bookingId) { // still ours, even if the hold just ran out
+    return seatIds.every((id) => this.#seatState.get(id)?.bookingId === bookingId);
+  }
+  book(seatIds) {
+    for (const id of seatIds) this.#seatState.get(id).booked = true;
+  }
+  release(seatIds, bookingId) {
+    for (const id of seatIds) {
+      if (this.#seatState.get(id)?.bookingId === bookingId) this.#seatState.delete(id);
+    }
+  }
+  freeSeats(now) {
+    return this.screen.seats.filter((s) => this.isFree(s.id, now)).map((s) => s.id);
+  }
+}
+
+class Booking {
+  constructor(id, userId, show, seatIds, amount, holdUntil) {
+    this.id = id;
+    this.userId = userId;
+    this.show = show;
+    this.seatIds = seatIds;
+    this.amount = amount; // whole paise
+    this.holdUntil = holdUntil;
+    this.status = BookingStatus.HELD;
+    this.payment = null;
+  }
+}
+
+class PaymentGateway { // interface: a card or UPI provider
+  async charge(userId, amount) { throw new Error('not implemented'); }
+  async refund(paymentId) { throw new Error('not implemented'); }
+}
+
+class FakeGateway extends PaymentGateway {
+  #next = 1;
+  async charge(userId, amount) { return `PAY${this.#next++}`; }
+  async refund(paymentId) { return true; }
+}
+```
+
+**Part 3: the main service.** `holdSeats` has no `await`. `confirm` has one, so it marks the booking `PAYING`
+before it, and checks the seats again after it.
+
+```js
+class BookingService {
+  #shows = new Map();
+  #bookings = new Map();
+  #nextId = 1;
+  #clock;
+  #gateway;
+  #holdMs;
+
+  constructor({ clock, gateway, holdMinutes = 10 }) {
+    this.#clock = clock;
+    this.#gateway = gateway;
+    this.#holdMs = holdMinutes * 60_000;
+  }
+
+  addShow(show) {
+    this.#shows.set(show.id, show);
+    return show;
+  }
+
+  freeSeats(showId) {
+    return this.#findShow(showId).freeSeats(this.#clock.now());
+  }
+
+  holdSeats(showId, userId, seatIds) {
+    const show = this.#findShow(showId);
+    const now = this.#clock.now();
+    if (now >= show.startsAt) throw new Error(`Show ${showId} has started`);
+    if (seatIds.length === 0) throw new Error('Pick at least one seat');
+    if (new Set(seatIds).size !== seatIds.length) throw new Error('A seat is picked twice');
+    const id = `BK${this.#nextId}`;
+    show.hold(seatIds, id, now, now + this.#holdMs); // throws if any seat is taken
+    this.#nextId++;
+    const amount = seatIds.reduce((sum, s) => sum + show.pricing.priceFor(show.screen.seat(s), show), 0);
+    const booking = new Booking(id, userId, show, seatIds, amount, now + this.#holdMs);
+    this.#bookings.set(id, booking);
+    return booking;
+  }
+
+  async confirm(bookingId) {
+    const booking = this.#findBooking(bookingId);
+    if (booking.status !== BookingStatus.HELD) throw new Error(`${bookingId} is ${booking.status}`);
+    if (this.#clock.now() >= booking.holdUntil) {
+      booking.show.release(booking.seatIds, booking.id);
+      booking.status = BookingStatus.EXPIRED;
+      throw new Error(`Hold on ${bookingId} ran out. Pick seats again.`);
+    }
+    booking.status = BookingStatus.PAYING; // a second "Pay" click now fails above
+    let paymentId;
+    try {
+      paymentId = await this.#gateway.charge(booking.userId, booking.amount);
+    } catch (err) {
+      booking.status = BookingStatus.HELD; // card failed: let the user try again
+      throw err;
+    }
+    // The await let other code run. Check again before we write.
+    if (!booking.show.isHeldBy(booking.seatIds, booking.id)) {
+      await this.#gateway.refund(paymentId);
+      booking.status = BookingStatus.EXPIRED;
+      throw new Error(`Seats for ${bookingId} were taken. Payment refunded.`);
+    }
+    booking.show.book(booking.seatIds);
+    booking.payment = new Payment(paymentId, booking.id, booking.amount, this.#clock.now());
+    booking.status = BookingStatus.CONFIRMED;
+    return booking;
+  }
+
+  cancelHold(bookingId) {
+    const booking = this.#findBooking(bookingId);
+    if (booking.status !== BookingStatus.HELD) throw new Error(`${bookingId} is ${booking.status}`);
+    booking.show.release(booking.seatIds, booking.id);
+    booking.status = BookingStatus.CANCELLED;
+  }
+
+  #findShow(id) {
+    const show = this.#shows.get(id);
+    if (!show) throw new Error(`No show ${id}`);
+    return show;
+  }
+  #findBooking(id) {
+    const booking = this.#bookings.get(id);
+    if (!booking) throw new Error(`No booking ${id}`);
+    return booking;
+  }
+}
+```
+
+**Part 4: try it.** One screen, a Friday show and a Saturday show, and every tricky case.
+
+```js
+const clock = new FakeClock(Date.UTC(2026, 10, 20, 9, 0)); // Friday 20 Nov 2026, 09:00 UTC
+const service = new BookingService({ clock, gateway: new FakeGateway(), holdMinutes: 10 });
+
+const cinema = new Theatre('T1', 'City Cinema', 'Pune');
+const audi1 = cinema.addScreen(new Screen('S1', 'Audi 1', [
+  new Seat('A1', SeatType.PREMIUM), new Seat('A2', SeatType.PREMIUM),
+  new Seat('B1', SeatType.REGULAR), new Seat('B2', SeatType.REGULAR),
+]));
+const movie = new Movie('M1', 'Toy Robots 3', 120);
+const prices = { REGULAR: 20000, PREMIUM: 35000 }; // ₹200 and ₹350, in paise
+const friday = Date.UTC(2026, 10, 20, 14, 0);
+const saturday = Date.UTC(2026, 10, 21, 14, 0);
+service.addShow(new Show('FRI', movie, audi1, friday, new SeatTypePricing(prices)));
+service.addShow(new Show('SAT', movie, audi1, saturday, new WeekendPricing(prices, 20)));
+
+// 1. Alice holds two premium seats on Saturday (weekend: +20%).
+const alice = service.holdSeats('SAT', 'alice', ['A1', 'A2']);
+console.log(alice.id, alice.status, rupees(alice.amount)); // BK1 HELD ₹840.00
+
+// 2. Bob wants B1 and A2. A2 is taken, so he gets neither.
+try {
+  service.holdSeats('SAT', 'bob', ['B1', 'A2']);
+} catch (e) {
+  console.log(e.message); // Seat A2 is not free
+}
+console.log(service.freeSeats('SAT')); // [ 'B1', 'B2' ]
+
+// 3. Alice pays.
+await service.confirm('BK1');
+console.log(alice.status, alice.payment.id); // CONFIRMED PAY1
+
+// 4. Bob holds B1 on Friday (normal price), then waits too long.
+const bob = service.holdSeats('FRI', 'bob', ['B1']);
+console.log(bob.id, rupees(bob.amount)); // BK2 ₹200.00
+clock.advanceMinutes(11);
+await service.confirm('BK2').catch((e) => console.log(e.message)); // Hold on BK2 ran out. Pick seats again.
+
+// 5. Carol and Dave click B1 at the same moment.
+const clicks = await Promise.allSettled([
+  Promise.resolve().then(() => service.holdSeats('FRI', 'carol', ['B1'])),
+  Promise.resolve().then(() => service.holdSeats('FRI', 'dave', ['B1'])),
+]);
+console.log(clicks.map((r) => (r.status === 'fulfilled' ? `${r.value.userId} got B1` : r.reason.message)));
+// [ 'carol got B1', 'Seat B1 is not free' ]
+
+// 6. Carol clicks "Pay" twice.
+const pays = await Promise.allSettled([service.confirm('BK3'), service.confirm('BK3')]);
+console.log(pays.map((r) => (r.status === 'fulfilled' ? r.value.status : r.reason.message)));
+// [ 'CONFIRMED', 'BK3 is PAYING' ]
+```
+
+In case 2, B1 was free, but Bob did not get it, because A2 failed. That is "all or nothing".
+
+## Step 6: Edge cases and extensions
+
+### Edge cases
+
+| Case | What happens |
+| --- | --- |
+| A seat id that doesn't exist | `Screen.seat` throws `No seat Z9 in Audi 1`. Nothing is held. |
+| No seats, or the same seat twice | Rejected before anything is held. |
+| One seat of many is taken | The whole request fails. The free seats stay free. |
+| The user never pays | The hold runs out after 10 minutes. `isFree` treats it as free. No timer is needed. |
+| Two clicks on "Pay" | The first sets `PAYING`. The second fails with `BK3 is PAYING`. No double charge. |
+| The card fails | The status goes back to `HELD`, so the user can try another card while the hold lasts. |
+| The hold runs out during payment, and someone takes the seat | The check after the `await` fails. We refund at once. |
+| The show has started | `holdSeats` refuses it. |
+
+### Two requests at once
+
+**What could race.** JavaScript runs your code on one thread, so two requests never run the same line at the same
+instant. But an `await` pauses a function, and other requests run in that gap. A check, then an `await`, then a write
+is a bug:
+
+```js
+// Not runnable: a broken holdSeats, to show the bug.
+async holdSeats(showId, userId, seatIds) {
+  const show = this.#findShow(showId);
+  for (const id of seatIds) {
+    if (!show.isFree(id, now)) throw new Error(`Seat ${id} is not free`);
+  }
+  await this.#audit.log(userId, seatIds); // pause: Bob's request runs here and also sees A2 free
+  for (const id of seatIds) show.markHeld(id, bookingId); // both write, so A2 is sold twice
+}
+```
+
+**How we made it safe:**
+
+1. **No `await` between check and write.** `Show.hold` checks all seats, then writes all seats, in one synchronous
+   call. Once it starts, it runs to the end. That is why Carol and Dave can't both get B1.
+2. **Mark before you wait.** `confirm` must `await` the payment. So it sets `PAYING` first. A second click sees
+   `PAYING` and stops.
+3. **Check again after you wait.** The hold may run out during a slow payment. After the `await`, we check that the
+   seats are still ours. If not, we refund.
+4. **If the check itself needs an `await`** (say, reading a database), put a small in-process lock around the
+   check and the write, one lock per show.
+
+In Java, an interviewer may expect `synchronized` on `hold`, or a lock per show. In JavaScript, a method with no
+`await` already runs to the end without a break.
+
+**Many servers.** Each server has its own memory, so an in-memory check can't stop two servers from selling A2. Let
+the database decide, with one conditional update in a transaction:
+
+```sql
+UPDATE show_seats
+SET status = 'HELD', booking_id = 'BK1', hold_until = NOW() + INTERVAL '10 minutes'
+WHERE show_id = 'SAT' AND seat_id IN ('A1', 'A2')
+  AND (status = 'FREE' OR (status = 'HELD' AND hold_until < NOW()));
+-- 2 rows changed: both seats are yours. Fewer: roll back, someone else has one.
+```
+
+The [Ticket Booking system design](/learn/system-design/questions/ticket-booking) covers this in depth: why not lock
+rows while the user pays, idempotency keys, and huge crowds. See also
+[Race Conditions and Locks](../concurrency/race-conditions-locks.mdx).
+
+### Adding features
+
+**1. A new price rule, like 30% off morning shows.** Add one new class. `Show` and `BookingService` don't change.
+This is the [Strategy](../design-patterns/strategy.mdx) pattern, and it follows the
+[Open-Closed Principle](../design-principles/open-closed.mdx).
+
+```js
+// Builds on the Step 5 code.
+class MorningPricing extends SeatTypePricing { // 30% off before 12:00
+  priceFor(seat, show) {
+    const base = super.priceFor(seat, show);
+    const morning = new Date(show.startsAt).getUTCHours() < 12;
+    return morning ? base - Math.round((base * 30) / 100) : base;
+  }
+}
+service.addShow(new Show('SUN-AM', movie, audi1, Date.UTC(2026, 10, 22, 9, 0), new MorningPricing(prices)));
+console.log(rupees(service.holdSeats('SUN-AM', 'erin', ['A1']).amount)); // ₹245.00
+```
+
+**2. Send the ticket by e-mail and SMS.** Let `BookingService` announce "booking confirmed", and let an e-mail
+sender and an SMS sender listen. Adding WhatsApp later is one more listener. This is the
+[Observer](../design-patterns/observer.mdx) pattern.
+
+**3. Cancel a paid ticket with a refund.** Add a `RefundPolicy` interface (full refund up to 24 hours before the
+show, nothing after). Each theatre picks its policy. That is Strategy again, as in
+[Design a Hotel Booking System](./hotel-booking.mdx).
+
+## Patterns used
+
+| Pattern | Where | Why |
+| --- | --- | --- |
+| [Strategy](../design-patterns/strategy.mdx) | `PricingStrategy`, `SeatTypePricing`, `WeekendPricing` | New price rules without changing `Show` or the service. |
+| [Facade](../design-patterns/facade.mdx) | `BookingService` | One simple front door over shows, pricing and payment. |
+| [Dependency Injection](../design-principles/dependency-injection.mdx) | The clock and `PaymentGateway` are passed in | Tests use a fake clock and a fake gateway. |
+| Atomic method ([Race Conditions and Locks](../concurrency/race-conditions-locks.mdx)) | `Show.hold` | Check and write in one go, so a seat is never sold twice. |
+
+## Follow-up questions
+
+<Accordions>
+<Accordion title="Why not just lock the seats until the user pays?">
+
+Paying can take minutes, and many users close the tab halfway. A lock held that long blocks everyone else, and if
+the user leaves, nothing unlocks it. A hold with an end time frees itself: once `holdUntil` passes, `isFree` says
+the seat is free. This is **lazy expiry**: no timer and no cleanup job are needed for correctness.
+
+</Accordion>
+<Accordion title="How do you show a live seat map?">
+
+Use [Observer](../design-patterns/observer.mdx): when `Show` changes a seat, it tells listeners, and the server
+pushes the change to open seat maps (for example over a WebSocket). The map can be a second behind. That is fine,
+because the real check happens in `hold`. If the seat was just taken, the user sees "Sorry, just taken".
+
+</Accordion>
+<Accordion title="How do you stop one user from holding the whole hall?">
+
+Cap the seats per booking (for example, 10). Allow only one active hold per user per show. Add a rate limit on
+`holdSeats` per user.
+
+</Accordion>
+</Accordions>
+
+## What the interviewer expects
+
+<Tabs items={['Mid-level', 'Senior', 'Staff']}>
+<Tab value="Mid-level">
+
+- Clear classes: Theatre, Screen, Seat, Show, Booking, Payment.
+- Seat state kept per show, not on the seat.
+- A two-step flow: hold, then pay.
+- All or nothing when booking many seats.
+
+</Tab>
+<Tab value="Senior">
+
+- Spots the `await` race without help, and keeps `hold` synchronous.
+- Explains hold expiry, the `PAYING` status, and the check after payment.
+- Pricing as a Strategy, and the clock and gateway passed in.
+- Knows that many servers need a conditional database update.
+
+</Tab>
+<Tab value="Staff">
+
+- Everything from senior, quickly.
+- Trade-offs: hold length versus lost sales, refunds when a hold runs out mid-payment, idempotency keys.
+- Huge launches (a virtual waiting room), and a seat map that may be slightly stale.
+- Links the class design to the database and service design.
+
+</Tab>
+</Tabs>
+
+<Callout title="Remember this" type="success">
+  - **Hold first, pay second.** A hold has an end time, and an old hold counts as free.
+  - `holdSeats` is **all or nothing**, with **no `await`** between the check and the write.
+  - Before an `await`, mark the booking (`PAYING`). After it, **check again** before you write.
+  - Seat state lives in **`Show`**, because one seat has a different state at every show.
+  - Many servers: let the **database** decide with one conditional update. Pricing is a **Strategy**.
+</Callout>

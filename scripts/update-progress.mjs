@@ -1,9 +1,13 @@
-// Rebuilds PROGRESS.md from the sidebar order (meta.json files) and each page's `planned` flag.
+// Rebuilds PROGRESS.md from the sidebar order (meta.json files) and each page's `planned` flag, for every track.
 // Run: npm run progress
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-const trackDir = join(process.cwd(), 'content', 'system-design');
+// The tracks, in order. Each is a folder in /content with its own meta.json.
+const TRACKS = [
+  { dir: 'system-design', title: 'System Design' },
+  { dir: 'low-level-design', title: 'Low-Level Design' },
+];
 const warnings = [];
 
 function readMeta(dir) {
@@ -38,46 +42,55 @@ function readPage(file) {
   return { title, planned };
 }
 
-const lines = [];
 let total = 0;
 let written = 0;
 
-/** Adds one page line. A missing file is skipped with a warning. */
-function pageLine(file) {
-  if (!existsSync(file)) {
-    warnings.push(`skipped ${relative(process.cwd(), file)}: no such file`);
-    return [];
-  }
-  const page = readPage(file);
-  total++;
-  if (!page.planned) written++;
-  return [`- ${page.planned ? '⬜' : '✅'} ${page.title}`];
-}
+/** One track's part of the file: its heading, its count, then its pages in sidebar order. */
+function trackSection({ dir, title }) {
+  const trackDir = join(process.cwd(), 'content', dir);
+  if (!existsSync(join(trackDir, 'meta.json'))) return [];
+  const lines = [];
+  let trackTotal = 0;
+  let trackWritten = 0;
 
-const root = readMeta(trackDir);
-lines.push('## Guide');
-const guidePages = [];
-
-for (const entry of root.pages) {
-  if (!isPageEntry(entry)) continue;
-  const folder = join(trackDir, entry);
-  if (existsSync(join(folder, 'meta.json'))) {
-    const meta = readMeta(folder);
-    lines.push('', `## ${meta.title}`);
-    for (const item of meta.pages) {
-      const separator = typeof item === 'string' && item.match(/^---(.+)---$/);
-      if (separator) lines.push('', `**${separator[1]}**`, '');
-      else if (isPageEntry(item)) lines.push(...pageLine(join(folder, `${item}.mdx`)));
+  /** One page line. A missing file is skipped with a warning. */
+  function pageLine(file) {
+    if (!existsSync(file)) {
+      warnings.push(`skipped ${relative(process.cwd(), file)}: no such file`);
+      return [];
     }
-  } else {
-    // Top-level pages (Start Here, Interview Framework, Cheat Sheet) are listed under "Guide".
-    guidePages.push(entry);
+    const page = readPage(file);
+    trackTotal++;
+    if (!page.planned) trackWritten++;
+    return [`- ${page.planned ? '⬜' : '✅'} ${page.title}`];
   }
+
+  const root = readMeta(trackDir);
+  const guidePages = [];
+  for (const entry of root.pages) {
+    if (!isPageEntry(entry)) continue;
+    const folder = join(trackDir, entry);
+    if (existsSync(join(folder, 'meta.json'))) {
+      const meta = readMeta(folder);
+      lines.push('', `### ${meta.title}`);
+      for (const item of meta.pages) {
+        const separator = typeof item === 'string' && item.match(/^---(.+)---$/);
+        if (separator) lines.push('', `**${separator[1]}**`, '');
+        else if (isPageEntry(item)) lines.push(...pageLine(join(folder, `${item}.mdx`)));
+      }
+    } else {
+      // Top-level pages (Start Here, Interview Framework, Cheat Sheet) are listed under "Guide".
+      guidePages.push(entry);
+    }
+  }
+  const guideLines = ['### Guide', ...guidePages.flatMap((entry) => pageLine(join(trackDir, `${entry}.mdx`)))];
+
+  total += trackTotal;
+  written += trackWritten;
+  return [`## ${title}`, '', `**Written: ${trackWritten} of ${trackTotal}**`, '', ...guideLines, ...lines, ''];
 }
 
-// Insert the guide pages right after the "## Guide" heading.
-const guideLines = guidePages.flatMap((entry) => pageLine(join(trackDir, `${entry}.mdx`)));
-lines.splice(1, 0, ...guideLines);
+const trackLines = TRACKS.flatMap(trackSection);
 
 // Count the flashcards (src/data/flashcards/system-design/*.json). A file that can't be read is skipped.
 const cardDir = join(process.cwd(), 'src', 'data', 'flashcards', 'system-design');
@@ -95,26 +108,24 @@ const cardData = cardFiles.flatMap((name) => {
 const flashcards = { cards: cardData.reduce((n, d) => n + d.cards.length, 0), decks: new Set(cardData.map((d) => d.deck)).size };
 
 const output = [
-  '# Progress — System Design',
+  '# Progress',
   '',
   '✅ = written · ⬜ = not written yet',
   '',
   'Same order as the sidebar. This file is generated: run `npm run progress` after writing a page.',
   'A page that is not written yet has `planned: true` in its frontmatter (it shows dimmed in the sidebar).',
   '',
-  `**Written: ${written} of ${total}**`,
-  '',
-  ...lines,
-  '',
+  ...trackLines,
   '## To do',
-  '- [x] **Cheat Sheet:** written last, from all the finished lessons.',
-  `- [x] **Flashcards:** ${flashcards.cards} cards in ${flashcards.decks} decks, one per module. Check them with \`npm run check:flashcards\`.`,
+  '- [x] **System Design Cheat Sheet:** written last, from all the finished lessons.',
+  `- [x] **System Design Flashcards:** ${flashcards.cards} cards in ${flashcards.decks} decks, one per module. Check them with \`npm run check:flashcards\`.`,
+  '- [x] **Low-Level Design:** all lessons, practice problems and the Cheat Sheet.',
+  '- [ ] **Low-Level Design Flashcards:** not started (at most 6 per lesson).',
   '',
-  '## Later: separate tracks (not System Design)',
+  '## Later: separate tracks',
   '- **OS and Concurrency (slim):** processes vs threads, concurrency vs parallelism, race conditions and mutexes,',
   '  deadlocks, thread pools, event loop and async, blocking vs non-blocking I/O.',
-  '- **Low-Level Design:** OOP, SOLID, composition vs inheritance, interfaces and DI, UML basics, design patterns,',
-  '  and practice problems: parking lot, elevator, Splitwise, movie booking, LRU cache.',
+  '- **DSA in JavaScript.**',
   '',
 ].join('\n');
 

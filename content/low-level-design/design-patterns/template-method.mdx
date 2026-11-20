@@ -1,0 +1,221 @@
+---
+title: "Template Method"
+description: "Fixed steps in a base class, with some steps filled in by subclasses."
+icon: FileText
+---
+
+**Intent:** a base class fixes the steps and their order; subclasses fill in only the steps that change.
+**Group:** Behavioral (patterns about how objects share work).
+
+## The idea
+
+A cake shop uses **one recipe card** for every cake:
+
+1. make the batter;
+2. bake it;
+3. decorate it;
+4. put it in a box.
+
+The steps and their order never change. Only some steps change from cake to cake: chocolate or lemon batter, cream or icing on top. Baking and boxing are the same for every cake.
+
+In the **Template Method** pattern, the **base class** holds the recipe card: one method (the **template method**) that calls smaller **step methods** in a fixed order. Subclasses fill in the steps that change. The base class does the rest.
+
+## The problem
+
+Two importers read users from a CSV file and from JSON. Each one copies the whole flow:
+
+```js
+class CsvImporter {
+  run(raw) {
+    const rows = raw.trim().split('\n').slice(1).map((line) => {
+      const [name, email] = line.split(',');
+      return { name, email };
+    });
+    const good = rows.filter((row) => row.name && row.email?.includes('@'));
+    for (const row of good) console.log(`Saved ${row.name}`);
+    return `Imported ${good.length} of ${rows.length} rows`;
+  }
+}
+
+class JsonImporter {
+  run(raw) {
+    const rows = JSON.parse(raw);
+    const good = rows.filter((row) => row.name); // forgot the email check!
+    for (const row of good) console.log(`Saved ${row.name}`);
+    return `Imported ${good.length} of ${rows.length} rows`;
+  }
+}
+
+console.log(new JsonImporter().run('[{"name":"Ravi","email":"oops"}]'));
+// Saved Ravi
+// Imported 1 of 1 rows   <- a bad email got in
+```
+
+Why it hurts:
+
+- The flow is **copied** into every importer. Fix a bug in one, and the others keep it. Here, the JSON importer forgot the email check.
+- Nothing **forces the order**. A new importer could save before it checks.
+- A new format (XML) means copying the whole flow again. See [DRY, KISS and YAGNI](../design-principles/dry-kiss-yagni.mdx).
+
+## The pattern
+
+The base class owns `run()`, the recipe. It calls `read`, `check`, `save` and `afterImport` in that order.
+
+```mermaid
+classDiagram
+  direction TB
+  class DataImporter:::abstract {
+    <<abstract>>
+    +run(raw) string
+    #read(raw) Row[]
+    #check(row) boolean
+    #save(rows)
+    #afterImport(count)
+  }
+  class CsvImporter:::concrete {
+    #read(raw) Row[]
+  }
+  class JsonImporter:::concrete {
+    #read(raw) Row[]
+    #afterImport(count)
+  }
+  DataImporter <|-- CsvImporter
+  DataImporter <|-- JsonImporter
+```
+
+The `#` in the diagram means **protected**: "meant for subclasses". JavaScript has no protected, so in code these are normal methods with a comment.
+
+```mermaid
+flowchart TB
+  A["run(raw): the template method"] --> B["read(raw): each format writes its own"]
+  B --> C["check(row): a default, may be replaced"]
+  C --> D["save(rows): shared by all"]
+  D --> E["afterImport(count): optional hook"]
+```
+
+```js
+class DataImporter { // abstract
+  constructor() {
+    if (new.target === DataImporter) throw new Error('DataImporter is abstract');
+  }
+
+  // The template method: the same steps, in the same order, for every format.
+  run(raw) {
+    const rows = this.read(raw);
+    const good = rows.filter((row) => this.check(row));
+    this.save(good);
+    this.afterImport(good.length); // a hook: does nothing unless a subclass wants it
+    return `Imported ${good.length} of ${rows.length} rows`;
+  }
+
+  read(raw) { throw new Error('not implemented'); } // each format must fill this in
+  check(row) { return Boolean(row.name) && Boolean(row.email?.includes('@')); } // default
+  save(rows) { for (const row of rows) console.log(`Saved ${row.name}`); } // shared
+  afterImport(count) {} // hook with an empty default
+}
+
+class CsvImporter extends DataImporter {
+  read(raw) {
+    return raw.trim().split('\n').slice(1).map((line) => { // slice(1) skips the header
+      const [name, email] = line.split(',');
+      return { name, email };
+    });
+  }
+}
+
+class JsonImporter extends DataImporter {
+  read(raw) { return JSON.parse(raw); }
+  afterImport(count) { console.log(`Report sent: ${count} imported`); }
+}
+
+console.log(new CsvImporter().run('name,email\nAsha,asha@mail.com\nBen,no-email'));
+// Saved Asha
+// Imported 1 of 2 rows
+const json = '[{"name":"Ravi","email":"oops"},{"name":"Mia","email":"mia@mail.com"}]';
+console.log(new JsonImporter().run(json));
+// Saved Mia
+// Report sent: 1 imported
+// Imported 1 of 2 rows
+```
+
+The template method and the kinds of steps it calls:
+
+| Step | What the base class gives | What a subclass does |
+| --- | --- | --- |
+| `run()`, the template method | The fixed order | Must **not** override it |
+| `read()`, an abstract step | Nothing; it throws | **Must** fill it in |
+| `check()`, a default step | A sensible default | **May** replace it |
+| `save()`, a shared step | The full code | Leaves it alone |
+| `afterImport()`, a hook | An empty method | **May** add extra work |
+
+A **hook** is an optional step with an empty default: a place where a subclass *can* plug in, but doesn't have to.
+
+Notice who calls whom: the base class calls the subclass steps, never the other way round. This is the "Hollywood principle": *don't call us, we'll call you*.
+
+In Java, the template method is marked `final` so no subclass can override it, and the steps are `protected abstract`. JavaScript has neither, so say it in a comment.
+
+### The JavaScript way: pass the step in as a function
+
+Instead of a subclass, pass the step that changes as a function:
+
+```js
+// The same idea with functions: the fixed steps live in one function,
+// and the step that changes is passed in (this is Strategy).
+const hasEmail = (row) => Boolean(row.name) && Boolean(row.email?.includes('@'));
+
+function runImport(raw, read, check = hasEmail) {
+  const rows = read(raw);
+  const good = rows.filter(check);
+  for (const row of good) console.log(`Saved ${row.name}`);
+  return `Imported ${good.length} of ${rows.length} rows`;
+}
+
+console.log(runImport('[{"name":"Mia","email":"mia@mail.com"}]', JSON.parse));
+// Saved Mia
+// Imported 1 of 1 rows
+```
+
+This is really the [Strategy](./strategy.mdx) pattern. Many JavaScript developers prefer it, because it avoids inheritance. See [Composition vs Inheritance](../oop-basics/composition-vs-inheritance.mdx).
+
+## When to use it
+
+- Several classes do **the same steps in the same order**, and only a few steps differ: importers, report generators, payment flows (check, charge, send a receipt).
+- You must **force an order**: always check before saving, always log at the end.
+- You are writing a **framework**: it runs the flow, and calls the user's code at fixed points.
+
+## When not to use it
+
+- The classes share **no real skeleton**: their steps differ a lot.
+- You need to **mix and match** steps, like CSV reading with strict checks and saving to a file. Each subclass is one fixed mix; use Strategy for each step instead.
+- It would grow a **deep class tree**: `CsvImporter`, then `BigCsvImporter`, then `BigCsvWithLogsImporter`.
+
+## Common mistakes
+
+- **Overriding the template method** in a subclass. That breaks the fixed order the pattern exists for.
+- **Too many abstract steps.** If every subclass must write eight methods, give the base class more defaults.
+- **Using `#private` for the steps.** In JavaScript a subclass can't see or override a `#read` method. Use normal methods.
+
+## In the real world
+
+- **Node.js streams:** to make your own readable stream, you extend `Readable` and write `_read()`. For a transform stream, you write `_transform()`. Node's stream code does the rest: buffering, backpressure and events.
+- **Java's `HttpServlet`:** its `service()` method receives each request and calls `doGet()` or `doPost()`, which you override.
+- **React class components** (older React): React decides when to call `render()`, `componentDidMount()` and `componentDidUpdate()`. You only write those methods.
+- **Test runners** like Jest and Mocha fix the order (`beforeEach`, the test, `afterEach`), and you fill in the steps. They use functions, not inheritance, but it is the same idea.
+
+## In the interview
+
+Template Method fits when several kinds of one thing follow the same steps: file importers, reports in PDF or CSV, notifications (build the message, send it, log it), or a [Logger](../problems/logger.mdx) whose outputs share the formatting but each write to a different place.
+
+> "Every importer follows the same steps: read, check, save. I'll put that flow in `DataImporter.run()`, the template method, and make `read()` abstract. `CsvImporter` and `JsonImporter` only fill in `read()`. Nobody can break the order, and a new XML format is one small class."
+
+**Likely follow-up:** "Template Method or Strategy?"
+
+**Answer:** "Template Method when the classes share a fixed flow and differ in one or two steps, and the choice is made when the object is created. Strategy when I need to swap behavior at run time, or combine steps freely. In JavaScript I often lean to Strategy, because passing functions is easy and avoids inheritance."
+
+<Callout title="Remember this" type="success">
+  - **Template Method = one recipe card.** The base class fixes the steps in `run()`; subclasses fill in the steps that change.
+  - Steps can be **abstract** (must fill in), **default** (may replace) or a **hook** (empty, optional).
+  - Never override the template method. JavaScript has no `final`, so **say it in a comment**.
+  - Don't use `#private` for steps: subclasses can't override them.
+  - Inheritance suits a **fixed flow**; use Strategy (functions) when steps must be **swapped or mixed**.
+</Callout>

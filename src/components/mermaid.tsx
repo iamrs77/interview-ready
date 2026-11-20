@@ -47,8 +47,25 @@ const componentClasses = [
   'classDef network fill:#edf2f6,stroke:#8aa0b5,color:#26323d,stroke-width:1.5px', // routers, ISPs, DNS
 ].join('\n');
 
+/*
+ * Class diagram (UML) colors for Low-Level Design. Use them with ":::name" on a class, for example:
+ *   class PaymentMethod:::iface
+ *   class Vehicle:::abstract
+ *   class Car:::concrete
+ * One color per kind of class, the same on every page.
+ */
+const umlClasses = [
+  'classDef iface fill:#e3f4f0,stroke:#46a08e,color:#13342d,stroke-width:1.5px', // interfaces
+  'classDef abstract fill:#efe9fb,stroke:#8a73d6,color:#2a2145,stroke-width:1.5px', // abstract classes
+  'classDef concrete fill:#eceefa,stroke:#7f88d2,color:#22263f,stroke-width:1.5px', // normal classes
+  'classDef enum fill:#fcf1de,stroke:#cf9a40,color:#3d2c10,stroke-width:1.5px', // enums (fixed values)
+  'classDef external fill:#f2f1ee,stroke:#9b978d,color:#3a3833,stroke-width:1.5px,stroke-dasharray:4 3', // outside code
+].join('\n');
+
 function addComponentClasses(chart: string) {
-  return /^\s*(flowchart|graph)\b/.test(chart) ? `${chart}\n${componentClasses}` : chart;
+  if (/^\s*(flowchart|graph)\b/.test(chart)) return `${chart}\n${componentClasses}`;
+  if (/^\s*classDiagram\b/.test(chart)) return `${chart}\n${umlClasses}`;
+  return chart;
 }
 
 const mermaidConfig = {

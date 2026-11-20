@@ -1,22 +1,26 @@
-import { getNextLesson, source } from '@/lib/source';
-import {
-  DocsBody,
-  DocsDescription,
-  DocsPage,
-  DocsTitle,
-} from 'fumadocs-ui/layouts/docs/page';
-import { notFound } from 'next/navigation';
-import { getMDXComponents } from '@/components/mdx';
 import type { Metadata } from 'next';
+import { notFound } from 'next/navigation';
+import { DocsBody, DocsDescription, DocsPage, DocsTitle } from 'fumadocs-ui/layouts/docs/page';
 import { createRelativeLink } from 'fumadocs-ui/mdx';
 import { Callout } from 'fumadocs-ui/components/callout';
+import { getMDXComponents } from '@/components/mdx';
 import { MarkAsDone } from '@/components/mark-as-done';
 import { ReadingProgress } from '@/components/reading-progress';
+import { getNextLesson, source, trackOf, type Track } from '@/lib/source';
 import { getSection } from '@/lib/sections';
 
-export default async function Page(props: PageProps<'/learn/[[...slug]]'>) {
-  const params = await props.params;
-  const page = source.getPage(params.slug);
+/*
+ * The lesson page, shared by every track's route (app/learn/<track>/[[...slug]]/page.tsx).
+ * `slugs` is the full path inside /content, e.g. ['low-level-design', 'oop-basics', 'encapsulation'].
+ */
+
+/** After a track's last lesson: System Design goes on to its flashcards. Other tracks have none yet. */
+const AFTER_LAST_LESSON: Partial<Record<Track, { title: string; url: string }>> = {
+  'system-design': { title: 'Flashcards', url: '/learn/system-design/flashcards' },
+};
+
+export function LessonPage({ slugs }: { slugs: string[] }) {
+  const page = source.getPage(slugs);
   if (!page) notFound();
 
   const MDX = page.data.body;
@@ -56,25 +60,23 @@ export default async function Page(props: PageProps<'/learn/[[...slug]]'>) {
       {!page.data.planned && (
         <MarkAsDone
           pageUrl={page.url}
-          // After the last lesson (the Cheat Sheet), the next step is the flashcards.
-          nextLesson={getNextLesson(page.url) ?? { title: 'Flashcards', url: '/learn/system-design/flashcards' }}
+          nextLesson={getNextLesson(page.url) ?? AFTER_LAST_LESSON[trackOf(page.slugs)]}
         />
       )}
     </DocsPage>
   );
 }
 
-export async function generateStaticParams() {
-  return source.generateParams();
+/** The static pages of one track, as params for its [[...slug]] route (slugs without the track name). */
+export function lessonParams(track: Track) {
+  return source
+    .generateParams()
+    .filter((params) => params.slug[0] === track)
+    .map((params) => ({ slug: params.slug.slice(1) }));
 }
 
-export async function generateMetadata(props: PageProps<'/learn/[[...slug]]'>): Promise<Metadata> {
-  const params = await props.params;
-  const page = source.getPage(params.slug);
+export function lessonMetadata(slugs: string[]): Metadata {
+  const page = source.getPage(slugs);
   if (!page) notFound();
-
-  return {
-    title: page.data.title,
-    description: page.data.description,
-  };
+  return { title: page.data.title, description: page.data.description };
 }

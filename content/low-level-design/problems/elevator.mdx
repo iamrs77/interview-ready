@@ -1,0 +1,502 @@
+---
+title: "Design an Elevator System"
+description: "Many elevators, many floors, many requests. Pick a car and plan its stops."
+icon: ArrowUpDown
+---
+
+<Callout title="About this question">
+  - **Difficulty:** Medium.
+  - **Patterns used:** [State](../design-patterns/state.mdx) (what a car is doing now), [Strategy](../design-patterns/strategy.mdx) (which car answers a call).
+  - **Also asked as:** "Design a lift system", "Design an elevator controller", "Elevators for a 50-floor office".
+</Callout>
+
+## Understand the problem
+
+Think of an office building with two lifts. You stand on floor 5 and press **up**. One lift is picked and comes to you. You get in and press **9**. On the way, it stops for anyone else who wants to go up.
+
+Three things make it interesting:
+
+- **Two kinds of buttons.** A **hall button** is outside, on each floor: "I am on floor 5 and want to go up". The building must **choose a car** for it. A **car button** is inside a car: "take me to 9". It goes to that car only.
+- **A car behaves differently in each state.** An idle car can start moving. A moving car can't open its doors. A car with open doors must close them first. This is the [State](../design-patterns/state.mdx) pattern.
+- **The nearest car is not always the best.** A car 2 floors away that is going the other way can take longer than a car 3 floors away that is free. The choosing rule must be easy to swap: [Strategy](../design-patterns/strategy.mdx).
+
+A car going up stops at every requested floor on the way, then turns around. This is called **SCAN**, or the "elevator algorithm". Hard disks use the same idea to order their reads. **LOOK** is a small improvement: turn around at the last request, not at the top floor.
+
+## Step 1: Requirements
+
+### Functional requirements
+
+1. Users should be able to call a car from any floor with the **up** or **down** hall button.
+2. Users should be able to choose a floor with the buttons inside a car.
+3. The system should choose which car answers a hall call. The rule should be easy to change.
+4. A car should stop at every requested floor in its direction before it turns around.
+5. Users should be able to see each car's floor and what it is doing.
+
+### Out of scope
+
+- Weight limits, door sensors, fire and emergency modes.
+- Real time and motors. Time moves in steps with `tick()`. One tick = move one floor, or open the doors, or close them.
+- Button lights and floor displays (an extension later).
+
+### Questions to ask the interviewer
+
+| Question | What we assume |
+| --- | --- |
+| How many floors and cars? | 10 floors (0 to 9) and 2 cars. Both are settings. |
+| Does every car go to every floor? | Yes. Zones (for example "floors 20 to 40 only") are an extension. |
+| How do we choose a car for a hall call? | A rule we can swap. Start with "nearest car", then improve it. |
+| Can a car turn around with people inside? | Only after it has served every stop in its current direction. |
+| Do we model real time? | No. `tick()` moves the simulation one step, so tests are simple and give the same result every time. |
+
+## Step 2: Core classes
+
+| Class | What it is | Key data | Key actions |
+| --- | --- | --- | --- |
+| `Request` | A hall call: "someone on floor 5 wants to go up" | `floor`, `direction` | — |
+| `HallButton` | The up or down button on a floor | `floor`, `direction` | `press()` |
+| `CarButton` | A floor button inside one car | `floor`, its car | `press()` |
+| `Floor` | One floor of the building | `number`, `upButton`, `downButton` | — |
+| `Elevator` | One car | `id`, `floor`, `direction`, stops, `state` | `addStop(floor)`, `tick()` |
+| `ElevatorState` (interface) | What the car is doing now: `IdleState`, `MovingUpState`, `MovingDownState`, `DoorsOpenState` | — | `tick(car)` |
+| `DispatchStrategy` (interface) | The rule for choosing a car: `NearestCarStrategy`, `LookStrategy` | — | `choose(elevators, request)` |
+| `ElevatorController` | The main service, the "brain" of the building | floors, cars, strategy | `call(request)`, `tick()`, `status()` |
+
+**Enum:** `Direction`: `UP`, `DOWN`, `IDLE`.
+
+Only hall calls become a `Request`. A car button already knows its car, so there is nothing to choose.
+
+## Step 3: Class diagram
+
+```mermaid
+classDiagram
+  direction TB
+  class ElevatorController:::concrete {
+    +call(request) Elevator
+    +tick()
+    +status() string
+  }
+  class Floor:::concrete {
+    +number int
+  }
+  class HallButton:::concrete {
+    +direction Direction
+    +press() Elevator
+  }
+  class Request:::concrete {
+    +floor int
+    +direction Direction
+  }
+  class Elevator:::concrete {
+    +id string
+    +floor int
+    +direction Direction
+    -stops Set
+    +addStop(floor)
+    +tick()
+  }
+  class CarButton:::concrete {
+    +floor int
+    +press()
+  }
+  class ElevatorState:::iface {
+    <<interface>>
+    +tick(car)
+  }
+  class DispatchStrategy:::iface {
+    <<interface>>
+    +choose(elevators, request) Elevator
+  }
+  class Direction:::enum {
+    <<enumeration>>
+    UP
+    DOWN
+    IDLE
+  }
+  ElevatorController "1" *-- "many" Floor : has
+  ElevatorController "1" *-- "many" Elevator : has
+  Floor "1" *-- "1..2" HallButton : has
+  Elevator "1" *-- "many" CarButton : has
+  HallButton ..> Request : creates
+  HallButton --> ElevatorController : calls
+  Elevator --> ElevatorState : current state
+  ElevatorController --> DispatchStrategy : uses
+  Elevator --> Direction
+```
+
+The four state classes implement `ElevatorState`. `NearestCarStrategy` and `LookStrategy` implement `DispatchStrategy`. They are left out of the picture to keep it small.
+
+- **Composition for floors, cars and buttons.** They are created with the building and don't exist without it.
+- **The state is an object, not a big `switch`.** `Elevator.tick()` just calls `this.state.tick(this)`. Each state class holds only its own rules.
+- **The choosing rule is an interface.** The controller asks "which car?" and doesn't know how the answer is found.
+- **Two jobs, two places.** The controller decides **which car** answers a call. The car decides **in what order** it visits its stops. Each class has one job.
+
+## Step 4: Main methods
+
+- `HallButton.press()` → `Elevator`. Makes a `Request`, sends it to the controller, and returns the car that will come.
+- `CarButton.press()`. Adds a stop to its own car.
+- `ElevatorController.call(request)` → `Elevator`. Asks the strategy for the best car and gives that car the stop.
+- `ElevatorController.tick()`. Moves time one step for every car.
+- `Elevator.addStop(floor)`. Adds a floor to the car's stops. Throws for a floor that doesn't exist.
+- `Elevator.tick()`. Asks the current state what to do: move one floor, open the doors, or close them.
+- `DispatchStrategy.choose(elevators, request)` → the car that should answer.
+
+The main flow, from a hall call to the car moving:
+
+```mermaid
+sequenceDiagram
+  participant P as Person
+  participant H as HallButton
+  participant C as Controller
+  participant S as Strategy
+  participant E as Car B
+  P->>H: press() on 5
+  H->>C: call(5, UP)
+  C->>S: choose(cars, request)
+  S-->>C: car B
+  C->>E: addStop(5)
+  C-->>P: car B
+  loop every tick
+    C->>E: tick()
+    E->>E: state.tick()
+  end
+```
+
+How a car moves between its states:
+
+```mermaid
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> MovingUp: stop above
+  Idle --> MovingDown: stop below
+  Idle --> DoorsOpen: stop on this floor
+  MovingUp --> DoorsOpen: reached a stop
+  MovingDown --> DoorsOpen: reached a stop
+  DoorsOpen --> MovingUp: stops above
+  DoorsOpen --> MovingDown: stops below
+  DoorsOpen --> Idle: no stops left
+```
+
+## Step 5: Code
+
+**Part 1: the enum and small classes.** A hall button asks the controller. A car button talks to its own car.
+
+```js
+const Direction = Object.freeze({ UP: 'UP', DOWN: 'DOWN', IDLE: 'IDLE' });
+
+class Request { // a hall call: "someone on this floor wants to go this way"
+  constructor(floor, direction) {
+    this.floor = floor;
+    this.direction = direction;
+  }
+}
+
+class HallButton { // on a floor: the controller must choose a car
+  constructor(floor, direction, controller) {
+    this.floor = floor;
+    this.direction = direction;
+    this.controller = controller;
+  }
+  press() { return this.controller.call(new Request(this.floor, this.direction)); }
+}
+
+class CarButton { // inside a car: goes straight to that car
+  constructor(floor, car) {
+    this.floor = floor;
+    this.car = car;
+  }
+  press() { this.car.addStop(this.floor); }
+}
+
+class Floor {
+  constructor(number, topFloor, controller) {
+    this.number = number;
+    // The top floor has no up button. The ground floor has no down button.
+    this.upButton = number < topFloor ? new HallButton(number, Direction.UP, controller) : null;
+    this.downButton = number > 0 ? new HallButton(number, Direction.DOWN, controller) : null;
+  }
+}
+```
+
+**Part 2: the car and its states.** Each state decides what one `tick()` does. The car only keeps its data and its stops.
+
+```js
+class ElevatorState { // interface
+  get name() { throw new Error('not implemented'); }
+  tick(car) { throw new Error('not implemented'); }
+}
+
+class IdleState extends ElevatorState {
+  get name() { return 'Idle'; }
+  tick(car) {
+    if (car.hasStop(car.floor)) return car.arrive(); // someone called it to this floor
+    const next = car.nextMove();
+    if (next instanceof IdleState) return; // nothing to do
+    car.setState(next);
+    next.tick(car); // start moving in this same step
+  }
+}
+
+class MovingUpState extends ElevatorState {
+  get name() { return 'MovingUp'; }
+  tick(car) {
+    car.floor += 1;
+    if (car.hasStop(car.floor)) car.arrive();
+  }
+}
+
+class MovingDownState extends ElevatorState {
+  get name() { return 'MovingDown'; }
+  tick(car) {
+    car.floor -= 1;
+    if (car.hasStop(car.floor)) car.arrive();
+  }
+}
+
+class DoorsOpenState extends ElevatorState {
+  get name() { return 'DoorsOpen'; }
+  tick(car) { car.setState(car.nextMove()); } // close the doors, then decide where to go
+}
+
+class Elevator {
+  #stops = new Set(); // a Set: pressing 7 twice adds it once
+  constructor(id, floorCount, startFloor = 0) {
+    this.id = id;
+    this.floor = startFloor;
+    this.direction = Direction.IDLE;
+    this.state = new IdleState();
+    this.buttons = Array.from({ length: floorCount }, (_, f) => new CarButton(f, this));
+  }
+  addStop(floor) {
+    if (floor < 0 || floor >= this.buttons.length) throw new Error(`No floor ${floor}`);
+    if (floor === this.floor && this.state instanceof DoorsOpenState) return; // doors already open here
+    this.#stops.add(floor);
+  }
+  hasStop(floor) { return this.#stops.has(floor); }
+  get stops() { return [...this.#stops].sort((x, y) => x - y); }
+
+  setState(state) {
+    this.state = state;
+    if (state instanceof MovingUpState) this.direction = Direction.UP;
+    if (state instanceof MovingDownState) this.direction = Direction.DOWN;
+    if (state instanceof IdleState) this.direction = Direction.IDLE;
+  }
+  arrive() {
+    this.#stops.delete(this.floor);
+    this.setState(new DoorsOpenState());
+  }
+  // LOOK: keep going the same way while there are stops ahead, then turn around.
+  nextMove() {
+    const above = this.stops.some((f) => f > this.floor);
+    const below = this.stops.some((f) => f < this.floor);
+    if (above && this.direction !== Direction.DOWN) return new MovingUpState();
+    if (below) return new MovingDownState();
+    if (above) return new MovingUpState();
+    return new IdleState();
+  }
+  lastStopAhead() { // where this run ends: the highest stop going up, the lowest going down
+    const stops = this.stops;
+    if (stops.length === 0) return this.floor;
+    return this.direction === Direction.UP ? stops.at(-1) : stops[0];
+  }
+  tick() { this.state.tick(this); }
+  toString() { return `${this.id}: floor ${this.floor}, ${this.state.name}`; }
+}
+```
+
+**Part 3: choosing a car.** Two strategies. "Nearest" only counts floors. "LOOK" counts how many steps until the car really reaches you.
+
+```js
+class DispatchStrategy { // interface
+  choose(elevators, request) { throw new Error('not implemented'); }
+}
+
+const minBy = (items, score) => items.reduce((best, x) => (score(x) < score(best) ? x : best));
+
+class NearestCarStrategy extends DispatchStrategy {
+  choose(elevators, request) {
+    return minBy(elevators, (car) => Math.abs(car.floor - request.floor));
+  }
+}
+
+class LookStrategy extends DispatchStrategy {
+  choose(elevators, request) {
+    return minBy(elevators, (car) => this.#cost(car, request));
+  }
+  #cost(car, request) {
+    const distance = Math.abs(car.floor - request.floor);
+    if (car.direction === Direction.IDLE) return distance;
+    const ahead = car.direction === Direction.UP ? request.floor >= car.floor : request.floor <= car.floor;
+    if (ahead && car.direction === request.direction) return distance; // picks you up on the way
+    const end = car.lastStopAhead(); // it must finish its run first, then come back
+    return Math.abs(car.floor - end) + Math.abs(end - request.floor);
+  }
+}
+```
+
+**Part 4: the main service.** The controller owns the floors and cars, and gets its strategy from outside.
+
+```js
+class ElevatorController {
+  constructor(floorCount, strategy) {
+    this.strategy = strategy;
+    this.elevators = [];
+    this.floors = Array.from({ length: floorCount }, (_, n) => new Floor(n, floorCount - 1, this));
+  }
+  addElevator(id, startFloor = 0) {
+    const car = new Elevator(id, this.floors.length, startFloor);
+    this.elevators.push(car);
+    return car;
+  }
+  call(request) { // a hall button was pressed. No `await` between choosing and adding the stop.
+    const car = this.strategy.choose(this.elevators, request);
+    car.addStop(request.floor);
+    return car;
+  }
+  tick() { for (const car of this.elevators) car.tick(); }
+  status() { return this.elevators.join(' | '); }
+}
+```
+
+**Part 5: try it.** Car A is at floor 4 and car B is at floor 8.
+
+```js
+const building = new ElevatorController(10, new LookStrategy()); // floors 0 to 9
+const a = building.addElevator('A', 4);
+const b = building.addElevator('B', 8);
+
+a.buttons[0].press(); // a rider in car A wants the ground floor
+building.tick();
+console.log(building.status()); // A: floor 3, MovingDown | B: floor 8, Idle
+
+// Someone on floor 5 wants to go up. Which car should come?
+const request = new Request(5, Direction.UP);
+console.log(new NearestCarStrategy().choose(building.elevators, request).id); // A
+console.log(building.floors[5].upButton.press().id); // B
+
+building.tick();
+console.log(building.status()); // A: floor 2, MovingDown | B: floor 7, MovingDown
+building.tick();
+building.tick();
+console.log(building.status()); // A: floor 0, DoorsOpen | B: floor 5, DoorsOpen
+
+b.buttons[9].press(); // the new rider in B wants floor 9
+building.tick();
+console.log(building.status()); // A: floor 0, Idle | B: floor 5, MovingUp
+for (let i = 0; i < 4; i++) building.tick();
+console.log(building.status()); // A: floor 0, Idle | B: floor 9, DoorsOpen
+
+try { a.addStop(12); } catch (e) { console.log(e.message); } // No floor 12
+
+building.strategy = new NearestCarStrategy(); // swap the rule; nothing else changes
+console.log(building.floors[1].upButton.press().id); // A
+```
+
+"Nearest car" picks A: it is only 2 floors from floor 5. But A is going **down** to floor 0, so the rider waits 3 + 5 = 8 steps. LOOK picks B: it is free and 3 steps away.
+
+## Step 6: Edge cases and extensions
+
+### Edge cases
+
+| Case | What happens |
+| --- | --- |
+| A floor that doesn't exist | `addStop` throws "No floor 12". |
+| The same button pressed 5 times | The stops are a `Set`, so the floor is added once. |
+| A call on the floor where a car stands with open doors | Ignored. The doors are already open there. |
+| A call on the floor where an idle car waits | Its cost is 0, so it is chosen. It opens its doors on the next tick. |
+| A rider presses a floor behind the car | Added. The car serves it after it turns around (LOOK). |
+| Two cars have the same cost | The first one in the list wins. To share the wear, rotate the order. |
+| Up on the top floor, down on the ground floor | These buttons don't exist (`null`). |
+| A car is broken | Extension: a `MaintenanceState`, and the strategies skip cars in it. |
+
+### Two requests at once
+
+Two people on different floors press their buttons at the same moment.
+
+In JavaScript, each button press is one event, and the event loop runs one event at a time. `call()` has no `await`, so a press always finishes before the next one starts. The danger is an `await` between **choosing** a car and **giving it the stop**:
+
+```js
+// NOT SAFE. A fragment, not runnable on its own.
+async call(request) {
+  const car = this.strategy.choose(this.elevators, request); // chosen from where the cars are now
+  await this.log.save(request);                              // ticks run while we wait; the cars move on
+  car.addStop(request.floor);                                // the choice may be out of date
+}
+```
+
+The fix: add the stop first, then do slow work like logging. Better still, keep one queue of events (button presses and ticks), and let the controller handle them one by one. See [Producer-Consumer](../concurrency/producer-consumer.mdx).
+
+In Java, the controller would mark `call` and `tick` as `synchronized`, or run them all on one control thread. See [Race Conditions and Locks](../concurrency/race-conditions-locks.mdx).
+
+### Adding features
+
+- **Maintenance or fire mode:** add a `MaintenanceState` whose `tick()` does nothing. The strategies skip cars in that state. The other states don't change. This is [State](../design-patterns/state.mdx) and the [Open-Closed Principle](../design-principles/open-closed.mdx).
+- **Express cars or zones** ("car C serves floors 20 to 40 only"): a new `DispatchStrategy` that filters cars first. The controller doesn't change. This is [Strategy](../design-patterns/strategy.mdx).
+- **Floor displays** ("car B: floor 7, going up"): each car sends a "moved" event, and every display listens, like Node's `EventEmitter`. This is [Observer](../design-patterns/observer.mdx).
+
+## Patterns used
+
+| Pattern | Where | Why |
+| --- | --- | --- |
+| [State](../design-patterns/state.mdx) | `ElevatorState`: `IdleState`, `MovingUpState`, `MovingDownState`, `DoorsOpenState` | Each state has its own rules for a tick. No big `switch`. |
+| [Strategy](../design-patterns/strategy.mdx) | `DispatchStrategy`: `NearestCarStrategy`, `LookStrategy` | Swap the car-choosing rule without touching the controller. |
+| [Dependency Injection](../design-principles/dependency-injection.mdx) | `new ElevatorController(10, strategy)` | Tests and new buildings pass in the rule they need. |
+| [Observer](../design-patterns/observer.mdx) (extension) | Floor displays | Cars don't need to know who is watching them. |
+
+## Follow-up questions
+
+<Accordions>
+<Accordion title="Why state classes and not a status field with a switch?">
+
+A `switch` works for four states. But every new state (maintenance, fire, overload) adds a case to every method, and one change can break another state. With state classes, each state's rules live in one small class. A new state is a new class.
+
+</Accordion>
+<Accordion title="What is the difference between SCAN and LOOK?">
+
+Both keep going in one direction and serve the stops on the way. **SCAN** goes all the way to the top or bottom floor before it turns. **LOOK** turns around at the last requested floor. LOOK saves empty trips, so real lifts work like LOOK. `Elevator.nextMove()` above is LOOK.
+
+</Accordion>
+<Accordion title="How would you handle rush hour in a 50-floor tower?">
+
+Two common ideas. **Zones:** some cars serve only low floors, some only high floors. **Destination dispatch:** riders type their floor in the lobby, and the system groups people going to nearby floors into the same car. Many new office towers use it. Both are new `DispatchStrategy` classes.
+
+</Accordion>
+<Accordion title="How do you test this?">
+
+Time is a step (`tick()`), not a real clock. A test builds a controller, presses buttons, calls `tick()` a few times, and checks `status()`. There are no timers, so the test is fast and gives the same result every time.
+
+</Accordion>
+</Accordions>
+
+## What the interviewer expects
+
+<Tabs items={['Mid-level', 'Senior', 'Staff']}>
+<Tab value="Mid-level">
+
+- Clear classes: `Elevator`, `Floor`, buttons, `Request`, `ElevatorController`.
+- Hall calls and car calls handled differently.
+- A car that moves, stops at its floors, and goes idle.
+
+</Tab>
+<Tab value="Senior">
+
+- The State pattern for the car, without being asked.
+- A swappable dispatch strategy, and why "nearest" is not enough.
+- LOOK for the order of stops, plus edge cases and a testable `tick()`.
+
+</Tab>
+<Tab value="Staff">
+
+- Everything from senior, but faster.
+- Rush hour: zones, destination dispatch, and how to measure wait time.
+- One event queue for the controller, and what happens when a car breaks down mid-run.
+
+</Tab>
+</Tabs>
+
+<Callout title="Remember this" type="success">
+  - Hall button = "choose a car for me". Car button = "this car, take me there".
+  - The controller picks **which** car (Strategy). The car picks the **order** of its stops (LOOK).
+  - Car states are classes: Idle, MovingUp, MovingDown, DoorsOpen. `tick()` asks the current state what to do.
+  - "Nearest car" can pick a car that is going away. Count the steps until it really reaches you.
+  - Use `tick()` instead of real time, so the design is easy to test.
+</Callout>

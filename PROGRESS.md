@@ -1,18 +1,20 @@
-# Progress — System Design
+# Progress
 
 ✅ = written · ⬜ = not written yet
 
 Same order as the sidebar. This file is generated: run `npm run progress` after writing a page.
 A page that is not written yet has `planned: true` in its frontmatter (it shows dimmed in the sidebar).
 
+## System Design
+
 **Written: 126 of 126**
 
-## Guide
+### Guide
 - ✅ Start Here
 - ✅ The Interview Framework
 - ✅ Cheat Sheet
 
-## 1. Foundations
+### 1. Foundations
 - ✅ Client-Server Architecture
 - ✅ How the Internet Works
 - ✅ IP Addresses and Ports
@@ -27,7 +29,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ Reverse and Forward Proxies
 - ✅ What Happens When You Type a URL
 
-## 2. High-Level Design Basics
+### 2. High-Level Design Basics
 - ✅ Scalability
 - ✅ Availability and Reliability
 - ✅ Latency, Throughput and QPS
@@ -41,7 +43,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ Scaling Reads
 - ✅ Scaling Writes
 
-## 3. Databases
+### 3. Databases
 - ✅ SQL vs NoSQL
 - ✅ Schemas, Relationships and Keys
 - ✅ Normalization vs Denormalization
@@ -57,7 +59,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ How a Query Runs
 - ✅ SQL Fundamentals
 
-## 4. Caching and CDN
+### 4. Caching and CDN
 - ✅ What is Caching
 - ✅ Caching Strategies
 - ✅ Cache Invalidation and TTL
@@ -67,7 +69,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ Cache Problems
 - ✅ CDN and Edge Caching
 
-## 5. Messaging and Events
+### 5. Messaging and Events
 - ✅ Sync vs Async Communication
 - ✅ Message Queues and Pub/Sub
 - ✅ Event-Driven Architecture
@@ -79,7 +81,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ Dead-Letter Queues
 - ✅ Eventual Consistency in Async Systems
 
-## 6. Distributed Systems
+### 6. Distributed Systems
 - ✅ Why Distributed Systems Are Hard
 - ✅ CAP Theorem
 - ✅ Consistency Models
@@ -95,7 +97,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ CQRS
 - ✅ Event Sourcing
 
-## 7. Reliability and Security
+### 7. Reliability and Security
 - ✅ Redundancy and Failover
 - ✅ Circuit Breaker
 - ✅ Bulkhead Pattern
@@ -110,7 +112,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ API Security Basics
 - ✅ CSRF and CORS
 
-## 8. Advanced Components
+### 8. Advanced Components
 - ✅ Object, Block and File Storage
 - ✅ Search and Inverted Indexes
 - ✅ Geospatial Indexing
@@ -124,7 +126,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ Microservices in Practice
 - ✅ Strangler Pattern
 
-## 9. Production Systems
+### 9. Production Systems
 - ✅ Observability: Logs, Metrics, Traces
 - ✅ Latency Percentiles: p50, p95, p99
 - ✅ SLI, SLO and SLA
@@ -133,7 +135,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ Deployment Strategies
 - ✅ CI/CD, Docker and Kubernetes
 
-## 10. Interview Questions
+### 10. Interview Questions
 
 **Easy**
 
@@ -164,12 +166,104 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ Design Top K (Trending)
 - ✅ Design Google Docs
 
-## To do
-- [x] **Cheat Sheet:** written last, from all the finished lessons.
-- [x] **Flashcards:** 774 cards in 11 decks, one per module. Check them with `npm run check:flashcards`.
+## Low-Level Design
 
-## Later: separate tracks (not System Design)
+**Written: 55 of 55**
+
+### Guide
+- ✅ Start Here
+- ✅ The LLD Interview Framework
+- ✅ Cheat Sheet
+
+### 1. OOP Basics
+- ✅ Classes and Objects
+- ✅ Encapsulation
+- ✅ Abstraction
+- ✅ Inheritance
+- ✅ Polymorphism
+- ✅ Interfaces and Abstract Classes in JavaScript
+- ✅ Composition vs Inheritance
+
+### 2. Design Principles
+- ✅ Single Responsibility Principle
+- ✅ Open/Closed Principle
+- ✅ Liskov Substitution Principle
+- ✅ Interface Segregation Principle
+- ✅ Dependency Inversion Principle
+- ✅ DRY, KISS and YAGNI
+- ✅ Coupling and Cohesion
+- ✅ Dependency Injection
+
+### 3. Modeling and UML
+- ✅ Finding Classes from Requirements
+- ✅ Class Diagrams
+- ✅ Association, Aggregation and Composition
+- ✅ Sequence Diagrams
+
+### 4. Design Patterns
+
+**Creational**
+
+- ✅ Singleton
+- ✅ Factory
+- ✅ Builder
+
+**Structural**
+
+- ✅ Adapter
+- ✅ Decorator
+- ✅ Facade
+- ✅ Proxy
+- ✅ Composite
+
+**Behavioral**
+
+- ✅ Strategy
+- ✅ Observer
+- ✅ Command
+- ✅ State
+- ✅ Template Method
+- ✅ Chain of Responsibility
+
+### 5. Concurrency in LLD
+- ✅ Concurrency in JavaScript
+- ✅ Race Conditions and Locks
+- ✅ Making a Design Thread-Safe
+- ✅ Producer-Consumer
+
+### 6. Practice Problems
+
+**Easy**
+
+- ✅ Design a Parking Lot
+- ✅ Design a Vending Machine
+- ✅ Design Tic-Tac-Toe
+- ✅ Design an LRU Cache
+- ✅ Design a Logger
+
+**Medium**
+
+- ✅ Design an Elevator System
+- ✅ Design a Library Management System
+- ✅ Design Snake and Ladder
+- ✅ Design an ATM
+- ✅ Design Splitwise
+
+**Hard**
+
+- ✅ Design a Movie Ticket Booking System
+- ✅ Design a Hotel Booking System
+- ✅ Design a Ride-Sharing App
+- ✅ Design Chess
+- ✅ Design an In-Memory File System
+
+## To do
+- [x] **System Design Cheat Sheet:** written last, from all the finished lessons.
+- [x] **System Design Flashcards:** 774 cards in 11 decks, one per module. Check them with `npm run check:flashcards`.
+- [x] **Low-Level Design:** all lessons, practice problems and the Cheat Sheet.
+- [ ] **Low-Level Design Flashcards:** not started (at most 6 per lesson).
+
+## Later: separate tracks
 - **OS and Concurrency (slim):** processes vs threads, concurrency vs parallelism, race conditions and mutexes,
   deadlocks, thread pools, event loop and async, blocking vs non-blocking I/O.
-- **Low-Level Design:** OOP, SOLID, composition vs inheritance, interfaces and DI, UML basics, design patterns,
-  and practice problems: parking lot, elevator, Splitwise, movie booking, LRU cache.
+- **DSA in JavaScript.**

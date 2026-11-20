@@ -1,14 +1,20 @@
 import {
   Activity,
+  Box,
   Compass,
   Database,
+  Dumbbell,
   Layers,
   LayoutGrid,
   MessageSquare,
+  PenTool,
   Puzzle,
+  Ruler,
   Send,
+  Shapes,
   Share2,
   ShieldCheck,
+  Workflow,
   Zap,
   type LucideIcon,
 } from 'lucide-react';
@@ -38,8 +44,23 @@ export const sections = {
   questions: { label: 'Interview Questions', icon: MessageSquare, className: 'bg-rose-500/10 text-rose-700' },
 } satisfies Record<string, Section>;
 
+/**
+ * The same for Low-Level Design (folders in content/low-level-design).
+ * Kept apart from `sections` on purpose: that list is also the System Design flashcard decks.
+ */
+export const lldSections = {
+  guide: { label: 'Guide', icon: Compass, className: 'bg-violet-500/10 text-violet-700' },
+  'oop-basics': { label: 'OOP Basics', icon: Box, className: 'bg-teal-500/10 text-teal-700' },
+  'design-principles': { label: 'Design Principles', icon: Ruler, className: 'bg-indigo-500/10 text-indigo-700' },
+  'modeling-uml': { label: 'Modeling and UML', icon: PenTool, className: 'bg-sky-500/10 text-sky-700' },
+  'design-patterns': { label: 'Design Patterns', icon: Shapes, className: 'bg-amber-500/10 text-amber-700' },
+  concurrency: { label: 'Concurrency in LLD', icon: Workflow, className: 'bg-fuchsia-500/10 text-fuchsia-700' },
+  problems: { label: 'Practice Problems', icon: Dumbbell, className: 'bg-rose-500/10 text-rose-700' },
+} satisfies Record<string, Section>;
+
 /** Finds the section from a page's slugs, e.g. ['system-design', 'caching', 'redis']. */
 export function getSection(slugs: string[]): Section {
+  const list: Record<string, Section> = slugs[0] === 'low-level-design' ? lldSections : sections;
   const key = slugs[1];
-  return key && key in sections ? sections[key as keyof typeof sections] : sections.guide;
+  return key && key in list ? list[key] : list.guide;
 }

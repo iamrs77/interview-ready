@@ -2,6 +2,7 @@ import { createElement } from 'react';
 import { z } from 'zod';
 import { loader, type LoaderPlugin } from 'fumadocs-core/source';
 import { flattenTree } from 'fumadocs-core/page-tree';
+import type * as PageTree from 'fumadocs-core/page-tree';
 import { lucideIconsPlugin } from 'fumadocs-core/source/lucide-icons';
 import { metaSchema, pageSchema } from 'fumadocs-core/source/schema';
 import { remarkMdxMermaid } from 'fumadocs-core/mdx-plugins';
@@ -9,7 +10,7 @@ import { defineDocs } from 'fumadocs-mdx/macro';
 import { applyMdxPreset } from 'fumadocs-mdx/config';
 import { learnRoute } from './shared';
 
-// Every track (system-design, later dsa) is a folder inside /content.
+// Every track (system-design, low-level-design, later dsa) is a folder inside /content.
 const content = defineDocs({
   dir: 'content',
   docs: {
@@ -49,10 +50,35 @@ export const source = loader({
   plugins: [lucideIconsPlugin(), sidebarPlugin],
 });
 
-/** The next written page after this one, in sidebar order. Planned pages are skipped. */
+/** The tracks, in the order of content/meta.json. Each is a root folder: /learn/<key>. */
+export const TRACKS = ['system-design', 'low-level-design'] as const;
+export type Track = (typeof TRACKS)[number];
+
+/** The track of a page, from its slugs (['low-level-design', 'oop-basics', ...]) or its URL. */
+export function trackOf(slugsOrUrl: string[] | string): Track {
+  const first = Array.isArray(slugsOrUrl) ? slugsOrUrl[0] : slugsOrUrl.split('/')[2];
+  return TRACKS.find((track) => track === first) ?? 'system-design';
+}
+
+/** The root folder of one track in the page tree: the folder whose pages live under /learn/<track>. */
+export function getTrackFolder(track: Track): PageTree.Folder | undefined {
+  const prefix = `${learnRoute}/${track}`;
+  return source
+    .getPageTree()
+    .children.find(
+      (node): node is PageTree.Folder =>
+        node.type === 'folder' &&
+        node.root === true &&
+        flattenTree([node]).some((item) => item.url === prefix || item.url.startsWith(`${prefix}/`)),
+    );
+}
+
+/** The next written page after this one, in sidebar order, in the same track. Planned pages are skipped. */
 export function getNextLesson(currentUrl: string): { title: string; url: string } | undefined {
+  const folder = getTrackFolder(trackOf(currentUrl));
+  if (!folder) return undefined;
   const pagesByUrl = new Map(source.getPages().map((page) => [page.url, page]));
-  const inSidebarOrder = flattenTree(source.getPageTree().children)
+  const inSidebarOrder = flattenTree([folder])
     .map((item) => pagesByUrl.get(item.url))
     .filter((page) => page !== undefined);
 

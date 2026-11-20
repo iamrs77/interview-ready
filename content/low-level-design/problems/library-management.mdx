@@ -1,0 +1,502 @@
+---
+title: "Design a Library Management System"
+description: "Books and their copies, members, loans, reservations and late fines."
+icon: Library
+---
+
+<Callout title="About this question">
+  - **Difficulty:** Medium.
+  - **Patterns used:** [Observer](../design-patterns/observer.mdx) ("your reserved book is ready"), [Dependency Injection](../design-principles/dependency-injection.mdx) (the clock).
+  - **Also asked as:** "Design a library system", "Design a book lending system", "Design a DVD or tool rental system".
+</Callout>
+
+## Understand the problem
+
+Think of your local library. The catalog says it has "Clean Code". On the shelf there are **two copies** of it, each with its own barcode sticker. You borrow one copy for 2 weeks. If you bring it back late, you pay a small fine. If all copies are out, you put your name on a waiting list, and the library calls you when one comes back.
+
+Three things make it interesting:
+
+- **A title is not a copy.** "Clean Code" is one title. Copy CC-1 and copy CC-2 are two real objects. You borrow a **copy**, but you reserve a **title** (any copy will do).
+- **Rules about members.** At most 3 books at a time, and no new books while you owe a fine.
+- **Time.** Due dates and fines depend on today's date. The code must let a test say "now it is 17 days later", without waiting 17 days.
+
+## Step 1: Requirements
+
+### Functional requirements
+
+1. Users should be able to borrow a free copy of a book for 14 days.
+2. Users should be able to return a copy. If it is late, they get a fine of ₹10 per day.
+3. Users should not be able to borrow more than 3 books, or borrow while they have unpaid fines.
+4. Users should be able to reserve a book when no copy is free, and be told when a copy is ready for them.
+5. Users should be able to pay their fines.
+
+### Out of scope
+
+- Searching the catalog by author or subject (a simple filter, skipped here).
+- Real payments, logins, and the e-mail or SMS service itself.
+- E-books, inter-library loans, buying new books.
+
+### Questions to ask the interviewer
+
+| Question | What we assume |
+| --- | --- |
+| Can a library have many copies of one book? | Yes. Each copy has its own barcode and its own status. |
+| How long is a loan? How many books at once? | 14 days and 3 books. Both are settings. |
+| How is the fine counted? | ₹10 for each started day late. Money in whole rupees. |
+| Who gets a returned book if many people reserved it? | First come, first served. The copy is held for the first person in line. |
+| How are members told? | Through a notification. We only model "the member is told". |
+
+## Step 2: Core classes
+
+| Class | What it is | Key data | Key actions |
+| --- | --- | --- | --- |
+| `Book` | A title in the catalog | `isbn`, `title`, `author`, `copies` | — |
+| `BookCopy` | One physical copy on the shelf | `id` (barcode), `book`, `status`, `heldFor` | — |
+| `Member` | A person who can borrow | `id`, `name`, `loans`, `fines`, `inbox` | `checkCanBorrow()`, `payFines()`, `onBookReady()` |
+| `Loan` | "This member has this copy until this date" | `copy`, `member`, `borrowedAt`, `dueAt`, `returnedAt` | `daysLate(now)` |
+| `Reservation` | A place in the waiting line for a title | `member`, `book`, `createdAt` | — |
+| `Fine` | Money owed for a late return | `loan`, `amount`, `paid` | — |
+| `Clock` (interface) | Tells the time. `SystemClock` for real use, `FakeClock` for tests. | — | `now()` |
+| `ReservationListener` (interface) | Anyone who wants to hear "your book is ready" | — | `onBookReady(book, copy)` |
+| `Library` | The main service. The front desk calls it. | books, copies, members, active loans, waiting lines | `borrow`, `returnCopy`, `reserve` |
+
+**Enum:** `CopyStatus`: `AVAILABLE`, `LOANED`, `ON_HOLD` (kept for the member who reserved it).
+
+## Step 3: Class diagram
+
+```mermaid
+classDiagram
+  direction TB
+  class Library:::concrete {
+    +borrow(memberId, isbn) Loan
+    +returnCopy(copyId) Fine
+    +reserve(memberId, isbn) Reservation
+  }
+  class Book:::concrete {
+    +isbn string
+    +title string
+  }
+  class BookCopy:::concrete {
+    +id string
+    +status CopyStatus
+    +heldFor Member
+  }
+  class Member:::concrete {
+    +name string
+    +checkCanBorrow()
+    +payFines()
+  }
+  class Loan:::concrete {
+    +dueAt Date
+    +daysLate(now) int
+  }
+  class Fine:::concrete {
+    +amount int
+    +paid bool
+  }
+  class Reservation:::concrete {
+    +createdAt Date
+  }
+  class Clock:::iface {
+    <<interface>>
+    +now() Date
+  }
+  class ReservationListener:::iface {
+    <<interface>>
+    +onBookReady(book, copy)
+  }
+  class CopyStatus:::enum {
+    <<enumeration>>
+    AVAILABLE
+    LOANED
+    ON_HOLD
+  }
+  Library "1" *-- "many" Book : catalog
+  Book "1" *-- "many" BookCopy : copies
+  Library "1" o-- "many" Member : members
+  Member "1" o-- "0..3" Loan : current loans
+  Loan --> BookCopy
+  Member "1" *-- "many" Fine
+  Fine --> Loan
+  Library "1" *-- "many" Reservation : waiting lines
+  Reservation --> Member
+  Library --> Clock : asks the time
+  ReservationListener <|.. Member
+  BookCopy --> CopyStatus
+```
+
+- **`Book` and `BookCopy` are two classes.** Title data lives once, in `Book`. Status and barcode live in each `BookCopy`. A loan points to a copy. A reservation is for a title.
+- **Composition for copies.** A copy belongs to exactly one book entry. Remove the book from the catalog, and its copies go too.
+- **Aggregation for members.** Members are people. They exist even if a library closes.
+- **Two interfaces.** `Clock` lets tests control time. `ReservationListener` lets the library tell "someone" a book is ready, without knowing if it is an e-mail, an SMS, or a test.
+
+## Step 4: Main methods
+
+- `Library.borrow(memberId, isbn)` → `Loan`. Checks the member's limits, finds a copy (one held for this member first, else any free one), and makes a loan.
+- `Library.returnCopy(copyId)` → `Fine` or `null`. Closes the loan, adds a fine if it is late, and gives the copy to the next person in line.
+- `Library.reserve(memberId, isbn)` → `Reservation`. Adds the member to the waiting line. Only allowed when no copy is free.
+- `Member.checkCanBorrow()`. Throws if the member has 3 books or owes money.
+- `Member.onBookReady(book, copy)`. Called by the library when a reserved book comes back.
+- `Loan.daysLate(now)` → how many started days past the due date.
+
+The main flow: a late return of a book that someone else reserved.
+
+```mermaid
+sequenceDiagram
+  participant D as Desk
+  participant L as Library
+  participant C as Clock
+  participant A as Asha
+  participant R as Ravi
+  D->>L: returnCopy(CC-1)
+  L->>C: now()
+  C-->>L: Jan 18
+  L->>A: add Fine (3 days late = 30)
+  L->>L: who is next in line?
+  L->>R: onBookReady(Clean Code, CC-1)
+  L-->>D: fine of 30
+```
+
+## Step 5: Code
+
+**Part 1: the enum, the clock and small classes.** `FakeClock` only moves when a test tells it to.
+
+```js
+const CopyStatus = Object.freeze({ AVAILABLE: 'AVAILABLE', LOANED: 'LOANED', ON_HOLD: 'ON_HOLD' });
+const DAY = 24 * 60 * 60 * 1000; // one day in milliseconds
+
+class Clock { // interface
+  now() { throw new Error('not implemented'); }
+}
+class SystemClock extends Clock { // for real use
+  now() { return new Date(); }
+}
+class FakeClock extends Clock { // for tests: time moves only when we say so
+  #time;
+  constructor(start) {
+    super();
+    this.#time = start.getTime();
+  }
+  now() { return new Date(this.#time); }
+  advanceDays(days) { this.#time += days * DAY; }
+}
+
+class Book { // a title in the catalog
+  constructor(isbn, title, author) {
+    this.isbn = isbn;
+    this.title = title;
+    this.author = author;
+    this.copies = [];
+  }
+}
+
+class BookCopy { // one physical copy, with its own barcode
+  constructor(id, book) {
+    this.id = id;
+    this.book = book;
+    this.status = CopyStatus.AVAILABLE;
+    this.heldFor = null; // the member it is kept for, when ON_HOLD
+  }
+}
+
+class Loan {
+  constructor(copy, member, borrowedAt, dueAt) {
+    this.copy = copy;
+    this.member = member;
+    this.borrowedAt = borrowedAt;
+    this.dueAt = dueAt;
+    this.returnedAt = null;
+  }
+  daysLate(now) { return Math.max(0, Math.ceil((now - this.dueAt) / DAY)); }
+}
+
+class Fine {
+  constructor(loan, amount) {
+    this.loan = loan;
+    this.amount = amount; // whole rupees
+    this.paid = false;
+  }
+}
+
+class Reservation {
+  constructor(member, book, createdAt) {
+    this.member = member;
+    this.book = book;
+    this.createdAt = createdAt;
+  }
+}
+```
+
+**Part 2: the member.** A member knows its own limits, and listens for "your book is ready".
+
+```js
+class ReservationListener { // interface (Observer)
+  onBookReady(book, copy) { throw new Error('not implemented'); }
+}
+
+class Member extends ReservationListener {
+  static MAX_LOANS = 3;
+  constructor(id, name) {
+    super();
+    this.id = id;
+    this.name = name;
+    this.loans = [];
+    this.fines = [];
+    this.inbox = [];
+  }
+  get unpaidFines() {
+    return this.fines.filter((f) => !f.paid).reduce((sum, f) => sum + f.amount, 0);
+  }
+  checkCanBorrow() {
+    if (this.loans.length >= Member.MAX_LOANS) throw new Error(`${this.name} already has ${Member.MAX_LOANS} books`);
+    if (this.unpaidFines > 0) throw new Error(`${this.name} must first pay fines of ₹${this.unpaidFines}`);
+  }
+  payFines() { for (const fine of this.fines) fine.paid = true; }
+  onBookReady(book, copy) { this.inbox.push(`"${book.title}" is ready for you (copy ${copy.id})`); }
+}
+```
+
+**Part 3: the main service.** `Library` gets the clock from outside, so tests decide what "now" is.
+
+```js
+class Library {
+  static LOAN_DAYS = 14;
+  static FINE_PER_DAY = 10; // ₹10 for each late day
+  #books = new Map(); // isbn -> Book
+  #copies = new Map(); // copy id -> BookCopy
+  #members = new Map(); // member id -> Member
+  #loans = new Map(); // copy id -> the open Loan
+  #waitingLines = new Map(); // isbn -> Reservation[], first come, first served
+
+  constructor(clock) { this.clock = clock; }
+
+  addBook(book, copyIds) {
+    this.#books.set(book.isbn, book);
+    for (const id of copyIds) {
+      const copy = new BookCopy(id, book);
+      book.copies.push(copy);
+      this.#copies.set(id, copy);
+    }
+    return book;
+  }
+  addMember(member) {
+    this.#members.set(member.id, member);
+    return member;
+  }
+  copy(id) { return this.#copies.get(id); }
+
+  // Check and take the copy with no `await` in between, so no one else can take it.
+  borrow(memberId, isbn) {
+    const member = this.#find(this.#members, memberId, 'member');
+    const book = this.#find(this.#books, isbn, 'book');
+    member.checkCanBorrow();
+    const copy = book.copies.find((c) => c.status === CopyStatus.ON_HOLD && c.heldFor === member)
+      ?? book.copies.find((c) => c.status === CopyStatus.AVAILABLE);
+    if (!copy) throw new Error(`No copy of "${book.title}" is free. Reserve it instead.`);
+    copy.status = CopyStatus.LOANED;
+    copy.heldFor = null;
+    const now = this.clock.now();
+    const loan = new Loan(copy, member, now, new Date(now.getTime() + Library.LOAN_DAYS * DAY));
+    member.loans.push(loan);
+    this.#loans.set(copy.id, loan);
+    return loan;
+  }
+
+  returnCopy(copyId) {
+    const loan = this.#loans.get(copyId);
+    if (!loan) throw new Error(`Copy ${copyId} is not on loan`);
+    const now = this.clock.now();
+    loan.returnedAt = now;
+    this.#loans.delete(copyId);
+    loan.member.loans = loan.member.loans.filter((l) => l !== loan);
+    let fine = null;
+    const late = loan.daysLate(now);
+    if (late > 0) {
+      fine = new Fine(loan, late * Library.FINE_PER_DAY);
+      loan.member.fines.push(fine);
+    }
+    this.#giveToNextInLine(loan.copy);
+    return fine;
+  }
+
+  reserve(memberId, isbn) {
+    const member = this.#find(this.#members, memberId, 'member');
+    const book = this.#find(this.#books, isbn, 'book');
+    if (book.copies.some((c) => c.status === CopyStatus.AVAILABLE)) {
+      throw new Error(`"${book.title}" is on the shelf. Borrow it instead.`);
+    }
+    const line = this.#waitingLines.get(isbn) ?? [];
+    if (line.some((r) => r.member === member)) throw new Error(`${member.name} already reserved "${book.title}"`);
+    const reservation = new Reservation(member, book, this.clock.now());
+    line.push(reservation);
+    this.#waitingLines.set(isbn, line);
+    return reservation;
+  }
+
+  #giveToNextInLine(copy) {
+    const next = this.#waitingLines.get(copy.book.isbn)?.shift();
+    if (!next) {
+      copy.status = CopyStatus.AVAILABLE;
+      return;
+    }
+    copy.status = CopyStatus.ON_HOLD;
+    copy.heldFor = next.member;
+    next.member.onBookReady(copy.book, copy); // Observer: tell the member who waited
+  }
+
+  #find(map, id, what) {
+    const item = map.get(id);
+    if (!item) throw new Error(`Unknown ${what}: ${id}`);
+    return item;
+  }
+}
+```
+
+**Part 4: try it.** One copy of "Clean Code", four copies of "Refactoring", and a fake clock.
+
+```js
+const show = (fn) => { try { return fn(); } catch (e) { console.log(e.message); } };
+
+const clock = new FakeClock(new Date('2026-01-01T00:00:00Z')); // real use: new SystemClock()
+const library = new Library(clock);
+library.addBook(new Book('BK-1', 'Clean Code', 'Robert C. Martin'), ['CC-1']);
+library.addBook(new Book('BK-2', 'Refactoring', 'Martin Fowler'), ['RF-1', 'RF-2', 'RF-3', 'RF-4']);
+const asha = library.addMember(new Member('M1', 'Asha'));
+const ravi = library.addMember(new Member('M2', 'Ravi'));
+
+const loan = library.borrow('M1', 'BK-1');
+console.log(loan.copy.id, loan.dueAt.toISOString().slice(0, 10)); // CC-1 2026-01-15
+
+show(() => library.borrow('M2', 'BK-1')); // No copy of "Clean Code" is free. Reserve it instead.
+library.reserve('M2', 'BK-1');
+
+clock.advanceDays(17); // Asha brings it back 3 days late
+const fine = library.returnCopy('CC-1');
+console.log(fine.amount); // 30
+console.log(ravi.inbox[0]); // "Clean Code" is ready for you (copy CC-1)
+console.log(library.copy('CC-1').status); // ON_HOLD
+
+show(() => library.borrow('M1', 'BK-2')); // Asha must first pay fines of ₹30
+asha.payFines();
+for (let i = 0; i < 3; i++) library.borrow('M1', 'BK-2');
+show(() => library.borrow('M1', 'BK-2')); // Asha already has 3 books
+
+console.log(library.borrow('M2', 'BK-1').copy.id); // CC-1
+```
+
+## Step 6: Edge cases and extensions
+
+### Edge cases
+
+| Case | What happens |
+| --- | --- |
+| The member has 3 books | `borrow` throws "already has 3 books". |
+| The member owes a fine | `borrow` throws until the fine is paid. |
+| No copy is free | `borrow` throws and suggests a reservation. |
+| A copy is on hold for Ravi, and Asha wants it | Asha can't take it. Only Ravi gets a copy held for him. |
+| Reserve while a copy is on the shelf | Refused: borrow it instead. |
+| Reserve the same book twice | Refused. One place in line per member. |
+| Return a copy that is not on loan | Throws "is not on loan". |
+| Returned on the due date, or early | `daysLate` is 0, so there is no fine. |
+| Ravi never picks up his held copy | Extension: the hold ends after 3 days. A daily job gives the copy to the next person in line. |
+| A copy is lost or damaged | Extension: a `LOST` status and a fine for the price of the book. |
+
+### Two requests at once
+
+One copy of "Clean Code" is left. Asha and Ravi ask for it at two desks at the same moment.
+
+In the code above, `borrow` finds the copy and marks it `LOANED` with no `await` in between, so JavaScript runs it to the end before the next call starts. The danger comes when the copies live in a database and the code waits between the check and the write:
+
+```js
+// NOT SAFE. A fragment, not runnable on its own.
+async borrow(memberId, isbn) {
+  const copy = await db.findFreeCopy(isbn); // Asha's call and Ravi's call both find CC-1
+  await db.saveLoan(copy.id, memberId);     // both save a loan for the same copy
+}
+```
+
+Two ways to make it safe:
+
+- **One server:** keep the check and the write in one method with no `await` between them (as above), or put a small lock around them.
+- **Many servers:** let the database pick the winner with one conditional update. Only one call can change the row:
+
+```sql
+UPDATE copies SET status = 'LOANED' WHERE id = 'CC-1' AND status = 'AVAILABLE';
+-- 1 row changed: you got it. 0 rows changed: someone was faster, try another copy.
+```
+
+In Java, you would mark `borrow` as `synchronized`. See [Race Conditions and Locks](../concurrency/race-conditions-locks.mdx).
+
+### Adding features
+
+- **E-mail and SMS:** add `EmailNotifier` and `SmsNotifier` as more listeners. `Member.onBookReady` passes the message on, and `Library` doesn't change. This is [Observer](../design-patterns/observer.mdx).
+- **Different members** (students: 3 books for 14 days; teachers: 10 books for 30 days): give each member a `MembershipPlan` object with the limits, instead of `if (type === 'TEACHER')`. This is [Strategy](../design-patterns/strategy.mdx).
+- **New fine rules** (one free day, a cap of ₹500): move the fine maths into a `FinePolicy` interface with one class per rule. This is [Strategy](../design-patterns/strategy.mdx) and the [Open-Closed Principle](../design-principles/open-closed.mdx).
+
+## Patterns used
+
+| Pattern | Where | Why |
+| --- | --- | --- |
+| [Observer](../design-patterns/observer.mdx) | `ReservationListener`, `Member.onBookReady` | Reserving = signing up to hear "a copy is back". The library tells the first one in line, without knowing how they are told. |
+| [Dependency Injection](../design-principles/dependency-injection.mdx) | `new Library(clock)` | Tests use `FakeClock` and move time forward in one line. |
+| Interface | `Clock`: `SystemClock`, `FakeClock` | The library depends on "something that tells the time", not on `Date.now()`. See [Dependency Inversion](../design-principles/dependency-inversion.mdx). |
+| [Strategy](../design-patterns/strategy.mdx) (extension) | `FinePolicy`, `MembershipPlan` | New rules become new classes. |
+
+## Follow-up questions
+
+<Accordions>
+<Accordion title="Why not keep a count of copies inside Book?">
+
+A count can't say **which** copy is out, who has it, or which one is damaged. Each copy has its own barcode, status and loans, so it is its own object. `Book` keeps the shared title data once, so it isn't repeated on every copy.
+
+</Accordion>
+<Accordion title="Why pass a clock in, and not call Date.now()?">
+
+Fines depend on time. With `Date.now()` inside `Library`, a test for "3 days late" would have to wait 17 days, or change the computer's clock. With an injected `Clock`, the test calls `clock.advanceDays(17)`. Java has the same idea built in: `java.time.Clock`, with `Clock.fixed(...)` for tests.
+
+</Accordion>
+<Accordion title="How do you remind people about overdue books?">
+
+A job runs once a day. It looks at every open loan and finds those with `daysLate(now) > 0`, then sends a reminder. In a database, find them with `WHERE returnedAt IS NULL AND dueAt < today`, with an index on `dueAt`.
+
+</Accordion>
+<Accordion title="What if Ravi never collects the book he reserved?">
+
+Store `heldUntil` on the copy (for example, 3 days after it came back). The daily job finds holds that have run out, and calls the same "give to next in line" method. If no one is waiting, the copy becomes `AVAILABLE`.
+
+</Accordion>
+</Accordions>
+
+## What the interviewer expects
+
+<Tabs items={['Mid-level', 'Senior', 'Staff']}>
+<Tab value="Mid-level">
+
+- `Book` vs `BookCopy`, `Member`, `Loan`, `Library`.
+- Working borrow and return, with the borrow limit and a late fine.
+- A clean class diagram with the right relationships.
+
+</Tab>
+<Tab value="Senior">
+
+- Reservations with a waiting line, and Observer for "your book is ready".
+- An injected clock, so fines can be tested.
+- The race for the last copy, and the database rule for many servers.
+
+</Tab>
+<Tab value="Staff">
+
+- Everything from senior, but faster.
+- Many branches sharing one catalog, and moving copies between branches.
+- Daily jobs (reminders, hold expiry), and which rules to keep as settings.
+
+</Tab>
+</Tabs>
+
+<Callout title="Remember this" type="success">
+  - `Book` is the title. `BookCopy` is the real object on the shelf. You borrow a copy and reserve a title.
+  - The member checks its own limits: 3 books, no unpaid fines.
+  - A returned copy goes to the first person in line (ON_HOLD), and they are told: Observer.
+  - Pass the clock in. Then a "17 days later" test takes one line.
+  - Check and take the last copy with no `await` in between. With many servers, use a conditional `UPDATE`.
+</Callout>

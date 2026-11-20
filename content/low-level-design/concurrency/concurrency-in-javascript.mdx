@@ -1,0 +1,220 @@
+---
+title: "Concurrency in JavaScript"
+description: "One thread, many tasks: how JavaScript does it, and how it maps to Java threads."
+icon: Workflow
+---
+
+## The idea
+
+Picture a small restaurant with **one waiter**. The waiter takes table 1's order and hands it to the kitchen. They don't stand at the kitchen door waiting for the food. They go to table 2, then table 3. When a dish is ready, the kitchen rings a bell, and the waiter carries it out as soon as they are free. One waiter serves many tables, because most of the time is spent **waiting for the kitchen**, not walking.
+
+JavaScript works like this waiter:
+
+- **One thread** runs your JavaScript. A **thread** is one line of work that the computer runs step by step.
+- Slow jobs, like reading a file, a database query or a network call, are handed to the system (the kitchen).
+- When a slow job finishes, its callback waits in a queue. The **event loop** runs the next callback whenever the thread is free.
+
+A typical Java server is more like a restaurant with **many waiters** (threads), often one per table. That needs more staff, and the waiters can bump into each other.
+
+## Concurrency vs parallelism
+
+- **Concurrency:** many tasks are **in progress** at the same time, taking turns. One cook making soup and rice: stir the soup, check the rice, stir the soup.
+- **Parallelism:** many tasks **run at the very same moment**, on different CPU cores. Two cooks, each making one dish.
+
+| | Concurrency | Parallelism |
+| --- | --- | --- |
+| Means | Tasks take turns and overlap in time | Tasks run at the same instant |
+| Needs | One thread is enough | Several threads and CPU cores |
+| Good for | Waiting work: network, disk, database | Heavy CPU work: images, hashing |
+| In JavaScript | The event loop, `async` and `await` | Worker threads |
+
+JavaScript on its main thread is **concurrent, but not parallel**.
+
+## The event loop
+
+```mermaid
+flowchart TB
+  A["Run the script,<br/>top to bottom"] --> B["Run all microtasks<br/>(promises, code after await)"]
+  B --> C{"A task<br/>waiting?"}
+  C -->|yes| D["Run one task<br/>to the end"]
+  D --> B
+  C -->|no| E["Sleep until<br/>something finishes"]
+  E --> C
+```
+
+There are two queues:
+
+- **Tasks** (also called macrotasks): timers (`setTimeout`), finished I/O, incoming requests.
+- **Microtasks:** promise callbacks and the code after an `await`. All of them run **before** the next task.
+
+```js
+console.log('1. start');
+setTimeout(() => console.log('4. timer (a task)'), 0);
+Promise.resolve().then(() => console.log('3. promise (a microtask)'));
+console.log('2. end of the script');
+// 1. start
+// 2. end of the script
+// 3. promise (a microtask)
+// 4. timer (a task)
+```
+
+The key rule: **while a piece of JavaScript runs, nothing else runs.** A task is never stopped halfway for another one. (Node's real loop has named phases, like timers, poll and check, but this picture is enough for interviews.)
+
+## async and await
+
+`await` pauses **only the current function**, not the thread. While it waits, the event loop runs other work.
+
+```js
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function cook(dish, ms) {
+  console.log(`start ${dish}`);
+  await sleep(ms); // this function pauses here; the thread is free for other work
+  console.log(`done ${dish}`);
+}
+
+const started = Date.now();
+await Promise.all([cook('rice', 300), cook('soup', 200)]);
+console.log(`total: about ${Math.round((Date.now() - started) / 100) * 100} ms`);
+// start rice
+// start soup
+// done soup
+// done rice
+// total: about 300 ms   (not 500: the waits overlap)
+```
+
+The most important rule for concurrency bugs: **other code can only run at an `await`** (or between callbacks). The code between two `await`s runs as one block that nothing can cut into. That is why a check-then-write is safe with no `await` in the middle, and can break with one. See [Race Conditions and Locks](./race-conditions-locks.mdx).
+
+## Don't block the event loop
+
+Heavy CPU work holds the one thread, and everything else waits: timers, callbacks, other users' requests.
+
+```js
+const started = Date.now();
+const elapsed = () => Math.round((Date.now() - started) / 100) * 100;
+setTimeout(() => console.log(`timer ran after about ${elapsed()} ms`), 0);
+
+while (Date.now() - started < 500) {} // 500 ms of pure CPU work: nothing else can run
+console.log('busy loop done');
+// busy loop done
+// timer ran after about 500 ms   (it asked for 0 ms)
+```
+
+On a server, that loop makes **every user** wait 500 ms. Common causes: big loops, `JSON.parse` on huge data, slow regular expressions, and sync calls like `fs.readFileSync` inside a request handler.
+
+## Worker threads: when you need them
+
+A **worker thread** is a second JavaScript thread, with its own event loop and its own memory. Workers and the main thread talk by sending messages (`postMessage`). They don't share variables, unless you use the special `SharedArrayBuffer`.
+
+- **Use a worker** for CPU-heavy work: resizing images, hashing or compressing big files, heavy math.
+- **Don't use one** for waiting work. A database call already leaves the thread free.
+
+```js
+import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
+
+if (isMainThread) {
+  // Start this same file again, but in a new thread.
+  const worker = new Worker(new URL(import.meta.url), { workerData: 40 });
+  worker.on('message', (result) => console.log(`fib(40) = ${result}`));
+  setTimeout(() => console.log('main thread is still free'), 10);
+} else {
+  // This part runs in the worker thread.
+  const fib = (n) => (n < 2 ? n : fib(n - 1) + fib(n - 2)); // slow on purpose
+  parentPort.postMessage(fib(workerData));
+}
+// main thread is still free
+// fib(40) = 102334155
+```
+
+Node also uses a few background threads for you. A small **thread pool** (4 threads by default) runs file system work, `dns.lookup`, some `crypto` functions and `zlib` compression. Network sockets don't need it: the operating system tells Node when data arrives.
+
+## How a Node server handles many requests at once
+
+While request A waits for the database, the same thread starts request B:
+
+```mermaid
+sequenceDiagram
+  participant A as User A
+  participant B as User B
+  participant N as Node, one thread
+  participant DB as Database
+  A->>N: GET /a
+  N->>DB: query for A
+  Note over N: free while it waits
+  B->>N: GET /b
+  N->>DB: query for B
+  DB-->>N: rows for A
+  N-->>A: response A
+  DB-->>N: rows for B
+  N-->>B: response B
+```
+
+You can see it with a real server. User B arrives 100 ms after user A, while A is still waiting:
+
+```js
+import http from 'node:http';
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const server = http.createServer(async (req, res) => {
+  console.log(`start ${req.url}`);
+  await sleep(300); // like a slow database call: the thread serves others meanwhile
+  console.log(`end ${req.url}`);
+  res.end('ok');
+});
+
+server.listen(0, async () => { // port 0: any free port
+  const url = `http://localhost:${server.address().port}`;
+  const first = fetch(`${url}/a`);
+  await sleep(100); // a second user arrives 100 ms later
+  await Promise.all([first, fetch(`${url}/b`)]);
+  server.close();
+  server.closeAllConnections();
+});
+// start /a
+// start /b   <- B starts while A is still waiting
+// end /a
+// end /b
+```
+
+So one Node process can serve thousands of connections at once, as long as each request mostly **waits** (database, other services) and does little CPU work. To use every CPU core, run one Node process per core (the `cluster` module, or a process manager like PM2) behind a load balancer.
+
+## JavaScript and Java, side by side
+
+Interviewers often think in Java threads. This table translates:
+
+| Java idea | In JavaScript |
+| --- | --- |
+| Many threads share the same objects | One thread runs your code; workers share nothing by default |
+| A thread can be paused at **any line** | Your code can only be paused at an `await` |
+| A thread pool (`ExecutorService`) | The event loop, plus Node's thread pool and worker threads |
+| `CompletableFuture` | `Promise` |
+| `synchronized`, `ReentrantLock` | Rarely needed; an async mutex when a check and a write are split by `await` |
+| `BlockingQueue` | An async queue; see [Producer-Consumer](./producer-consumer.mdx) |
+
+Java 21 added **virtual threads**: very cheap threads, so a Java server can again use one thread per request, even with many thousands of waiting requests.
+
+## In the real world
+
+- **Node.js** runs JavaScript on one main thread. Its event loop and thread pool come from a C library called **libuv**.
+- **Nginx** uses the same event-driven idea: a few worker processes, each with an event loop that handles thousands of connections.
+- **Redis** runs commands one at a time on a single main thread, so each command is atomic, and it is still very fast because each command is short.
+- **Browsers:** a long JavaScript loop freezes the page, because the same thread also handles clicks and drawing. Web Workers move heavy work off it.
+
+## In the interview
+
+In LLD rounds, concurrency appears as "what if two users do this at the same time?". Be ready to explain the JavaScript answer to an interviewer who thinks in Java threads.
+
+> "My code runs in Node, so no two lines of my code run at the same instant. But requests interleave at every `await`. So any check-then-write with an `await` in the middle can race, and I protect those with an atomic method or a lock. With several server processes, the real guard has to be in the database."
+
+**Likely follow-up:** "JavaScript is single-threaded, so it has no race conditions, right?"
+
+**Answer:** "No. Plain code can't be interrupted, but async code interleaves at every `await`. And several Node processes can change the same database row at once. Both cause races."
+
+<Callout title="Remember this" type="success">
+  - **One waiter, many tables:** one thread plus the event loop. One task runs at a time, to the end.
+  - **Concurrency** is taking turns; **parallelism** is the same instant. The main thread is concurrent, not parallel.
+  - `await` pauses the function, not the thread. Other code runs **only at an `await`**.
+  - CPU-heavy work blocks everyone: move it to a **worker thread**.
+  - Java threads can be paused **at any line**, which is why Java talks so much about locks.
+</Callout>
