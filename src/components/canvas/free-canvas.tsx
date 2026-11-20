@@ -9,14 +9,12 @@ import { getBoard, saveBoard, type SavedScene } from '@/lib/canvas-store';
 import { loadBoard } from './excalidraw-loader';
 
 /*
- * The Free canvas: one blank board to draw anything.
+ * The Free canvas: a blank board to draw anything. Each track has its own board (its own `boardId`).
  * It saves itself in this browser (IndexedDB) about a second after each change, and when the tab is hidden or
  * closed, so it is there next time. Clear canvas and Save as image are in the board's menu.
  */
 
-const BOARD_ID = 'free-canvas';
 const SAVE_DELAY = 1000;
-const LESSONS_URL = '/learn/system-design';
 
 const Board = dynamic(() => loadBoard(), {
   ssr: false,
@@ -36,7 +34,16 @@ function keepCtrlKInBoard(event: KeyboardEvent) {
 
 type Status = 'idle' | 'saving' | 'saved';
 
-export function FreeCanvas() {
+type FreeCanvasProps = {
+  /** Where the drawing is saved. Each track uses its own id, so drawings never mix. */
+  boardId: string;
+  /** Shown next to the title, e.g. "Low-Level Design". */
+  trackName: string;
+  /** Where "Back" goes when the canvas was opened on its own. */
+  lessonsUrl: string;
+};
+
+export function FreeCanvas({ boardId, trackName, lessonsUrl }: FreeCanvasProps) {
   const router = useRouter();
   // undefined = still reading the saved board. The board mounts only after that, because it reads its
   // starting drawing once.
@@ -48,7 +55,7 @@ export function FreeCanvas() {
 
   useEffect(() => {
     let cancelled = false;
-    getBoard(BOARD_ID)
+    getBoard(boardId)
       .then((scene) => {
         if (!cancelled) setInitial({ scene: scene ?? null });
       })
@@ -60,7 +67,7 @@ export function FreeCanvas() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [boardId]);
 
   /** Writes the latest drawing now, if there is one waiting. */
   const flush = useCallback(() => {
@@ -69,10 +76,10 @@ export function FreeCanvas() {
     const scene = pending.current;
     if (!scene) return;
     pending.current = null;
-    saveBoard(BOARD_ID, scene)
+    saveBoard(boardId, scene)
       .then(() => setStatus('saved'))
       .catch(() => setCanSave(false));
-  }, []);
+  }, [boardId]);
 
   const onSceneChange = useCallback(
     (scene: SavedScene) => {
@@ -111,7 +118,7 @@ export function FreeCanvas() {
     <>
       <header className="flex h-14 shrink-0 items-center gap-4 border-b bg-fd-card px-4">
         <Link
-          href={LESSONS_URL}
+          href={lessonsUrl}
           onClick={goBack}
           className="inline-flex shrink-0 items-center gap-1.5 text-sm text-fd-muted-foreground transition hover:text-fd-foreground"
         >
@@ -119,7 +126,9 @@ export function FreeCanvas() {
           Back
         </Link>
         <span aria-hidden className="h-5 w-px shrink-0 bg-fd-border" />
-        <h1 className="text-sm font-semibold">Free canvas</h1>
+        <h1 className="text-sm font-semibold">
+          Free canvas <span className="font-normal text-fd-muted-foreground">· {trackName}</span>
+        </h1>
         <div className="flex flex-1 justify-end">
           {canSave ? (
             <span className="text-xs text-fd-muted-foreground" role="status">
