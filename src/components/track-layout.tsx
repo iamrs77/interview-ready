@@ -47,10 +47,10 @@ function trackTabs(): LayoutTab[] {
   });
 }
 
-/** Tracks that get the JS playground. Only DSA for now. */
-const PLAYGROUND_TRACKS: Track[] = ['dsa'];
+/** Tracks that get the JS playground (the ones with JavaScript code). */
+const PLAYGROUND_TRACKS: Track[] = ['low-level-design', 'dsa'];
 
-/** The docs layout (sidebar, track switch, done ticks, and the JS playground on DSA) for one track. */
+/** The docs layout (sidebar, track switch, done ticks, and the JS playground on LLD and DSA) for one track. */
 export function TrackLayout({ track, children }: { track: Track; children: ReactNode }) {
   const hasPlayground = PLAYGROUND_TRACKS.includes(track);
 
