@@ -34,7 +34,8 @@ export default function HomePage() {
         </p>
       </section>
 
-      <section className="mx-auto mt-16 max-w-2xl space-y-4">
+      {/* Two cards per row; one per row on phones. */}
+      <section className="mx-auto mt-16 grid max-w-4xl gap-4 md:grid-cols-2">
         {TRACK_CARDS.map(({ track, title, icon: Icon, iconClass }) => (
           <Link
             key={track}
@@ -51,7 +52,7 @@ export default function HomePage() {
             <TrackProgress pageUrls={pageUrlsOf(track)} />
           </Link>
         ))}
-        <div className="flex justify-end">
+        <div className="flex justify-end md:col-span-2">
           {/* Resets the done marks of every track. */}
           <ResetProgressButton pageUrls={pages.map((page) => page.url)} />
         </div>
