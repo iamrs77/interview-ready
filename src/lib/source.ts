@@ -5,7 +5,7 @@ import { flattenTree } from 'fumadocs-core/page-tree';
 import type * as PageTree from 'fumadocs-core/page-tree';
 import { lucideIconsPlugin } from 'fumadocs-core/source/lucide-icons';
 import { metaSchema, pageSchema } from 'fumadocs-core/source/schema';
-import { remarkMdxMermaid } from 'fumadocs-core/mdx-plugins';
+import { rehypeCodeDefaultOptions, remarkMdxMermaid } from 'fumadocs-core/mdx-plugins';
 import { defineDocs } from 'fumadocs-mdx/macro';
 import { applyMdxPreset } from 'fumadocs-mdx/config';
 import { learnRoute } from './shared';
@@ -21,6 +21,19 @@ const content = defineDocs({
     mdxOptions: applyMdxPreset({
       // Turns ```mermaid code blocks into <Mermaid /> diagrams.
       remarkPlugins: (defaults) => [remarkMdxMermaid, ...defaults],
+      rehypeCodeOptions: {
+        // Fumadocs' own code transformers, plus one that writes the block's language on it
+        // (data-language="js"), so code blocks know when to show the playground's "Run" button.
+        transformers: [
+          ...(rehypeCodeDefaultOptions.transformers ?? []),
+          {
+            name: 'language-attribute',
+            pre(node) {
+              node.properties['data-language'] = this.options.lang;
+            },
+          },
+        ],
+      },
     }),
   },
   meta: {

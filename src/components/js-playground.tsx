@@ -13,10 +13,18 @@ import { Eraser, Play, RotateCcw, SquareTerminal, X } from 'lucide-react';
  * "Reset" puts the starter code back right away (no question asked: fewer clicks).
  * Code runs in a Web Worker (public/js-runner.js), so an infinite loop can't freeze the page.
  * The code and the sizes are kept in this browser (localStorage), so they are still there next time.
+ * The "Run" button on a lesson's code block sends that block here (see runInPlayground).
  */
 
 // The sidebar button sends this event; the panel listens for it.
 const TOGGLE_EVENT = 'js-playground:toggle';
+// A code block's "Run" button sends this event, with the code in `detail`.
+const LOAD_EVENT = 'js-playground:load';
+
+/** Opens the playground with this code in the editor, and runs it. */
+export function runInPlayground(code: string) {
+  window.dispatchEvent(new CustomEvent(LOAD_EVENT, { detail: code }));
+}
 
 const CODE_KEY = 'js-playground-code';
 const SIZE_KEY = 'js-playground-size';
@@ -78,7 +86,7 @@ export function JsPlayground() {
   const [size, setSize] = useState<Size>(() => readStorage(SIZE_KEY, DEFAULT_SIZE));
   const [lines, setLines] = useState<Line[]>([]);
   const [running, setRunning] = useState(false);
-  // Bumped on reset: a new key makes the editor start again with the starter code.
+  // Bumped on reset or on "Run" from a lesson: a new key makes the editor start again with the new code.
   const [editorKey, setEditorKey] = useState(0);
   const worker = useRef<Worker | null>(null);
   const timer = useRef<number | undefined>(undefined);
@@ -90,7 +98,7 @@ export function JsPlayground() {
     setRunning(false);
   }, []);
 
-  const run = useCallback(() => {
+  const runCode = useCallback((codeToRun: string) => {
     // A new run always starts fresh: stop the old one, with any timers it left behind.
     stopWorker();
     setLines([]);
@@ -117,8 +125,10 @@ export function JsPlayground() {
       setLines((old) => [...old, { kind: 'error', text }]);
     }, TIME_LIMIT_MS);
 
-    next.postMessage(code);
-  }, [code, stopWorker]);
+    next.postMessage(codeToRun);
+  }, [stopWorker]);
+
+  const run = useCallback(() => runCode(code), [code, runCode]);
 
   // Stop the worker when the page goes away.
   useEffect(() => stopWorker, [stopWorker]);
@@ -141,6 +151,21 @@ export function JsPlayground() {
       window.removeEventListener(TOGGLE_EVENT, toggle);
     };
   }, []);
+
+  // A code block's "Run" button: put its code in the editor, open the panel, and run it.
+  useEffect(() => {
+    function load(event: Event) {
+      const blockCode = (event as CustomEvent<string>).detail;
+      setCode(blockCode);
+      writeStorage(CODE_KEY, blockCode);
+      // A new key makes the editor start again with this code.
+      setEditorKey((key) => key + 1);
+      setOpen(true);
+      runCode(blockCode);
+    }
+    window.addEventListener(LOAD_EVENT, load);
+    return () => window.removeEventListener(LOAD_EVENT, load);
+  }, [runCode]);
 
   function changeCode(value: string) {
     setCode(value);
