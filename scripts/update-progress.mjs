@@ -1,6 +1,6 @@
 // Rebuilds PROGRESS.md from the sidebar order (meta.json files) and each page's `planned` flag, for every track.
 // Run: npm run progress
-import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 // The tracks, in order. Each is a folder in /content with its own meta.json.
@@ -27,7 +27,7 @@ function readMeta(dir) {
 }
 
 /*
- * Sidebar entries that are not lesson files: links like "[Brain][Flashcards](/learn/...)",
+ * Sidebar entries that are not lesson files: links like "[Shapes][Free Canvas](/canvas/...)",
  * separators ("---" or "---Title---"), "..." / "z...a" / "...folder" (rest and extract), and "!page" (hidden).
  */
 function isPageEntry(entry) {
@@ -92,21 +92,6 @@ function trackSection({ dir, title }) {
 
 const trackLines = TRACKS.flatMap(trackSection);
 
-// Count the flashcards (src/data/flashcards/system-design/*.json). A file that can't be read is skipped.
-const cardDir = join(process.cwd(), 'src', 'data', 'flashcards', 'system-design');
-const cardFiles = existsSync(cardDir) ? readdirSync(cardDir).filter((name) => name.endsWith('.json')) : [];
-const cardData = cardFiles.flatMap((name) => {
-  try {
-    const data = JSON.parse(readFileSync(join(cardDir, name), 'utf8'));
-    if (data && Array.isArray(data.cards)) return [data];
-    warnings.push(`skipped flashcards ${name}: no "cards" list`);
-  } catch (e) {
-    warnings.push(`skipped flashcards ${name}: ${e.message}`);
-  }
-  return [];
-});
-const flashcards = { cards: cardData.reduce((n, d) => n + d.cards.length, 0), decks: new Set(cardData.map((d) => d.deck)).size };
-
 const output = [
   '# Progress',
   '',
@@ -118,9 +103,7 @@ const output = [
   ...trackLines,
   '## To do',
   '- [x] **System Design Cheat Sheet:** written last, from all the finished lessons.',
-  `- [x] **System Design Flashcards:** ${flashcards.cards} cards in ${flashcards.decks} decks, one per module. Check them with \`npm run check:flashcards\`.`,
   '- [x] **Low-Level Design:** all lessons, practice problems and the Cheat Sheet.',
-  '- [ ] **Low-Level Design Flashcards:** not started (at most 6 per lesson).',
   '',
   '## Later: separate tracks',
   '- **OS and Concurrency (slim):** processes vs threads, concurrency vs parallelism, race conditions and mutexes,',

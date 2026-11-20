@@ -6,18 +6,13 @@ import { Callout } from 'fumadocs-ui/components/callout';
 import { getMDXComponents } from '@/components/mdx';
 import { MarkAsDone } from '@/components/mark-as-done';
 import { ReadingProgress } from '@/components/reading-progress';
-import { getNextLesson, source, trackOf, type Track } from '@/lib/source';
+import { getNextLesson, source, type Track } from '@/lib/source';
 import { getSection } from '@/lib/sections';
 
 /*
  * The lesson page, shared by every track's route (app/learn/<track>/[[...slug]]/page.tsx).
  * `slugs` is the full path inside /content, e.g. ['low-level-design', 'oop-basics', 'encapsulation'].
  */
-
-/** After a track's last lesson: System Design goes on to its flashcards. Other tracks have none yet. */
-const AFTER_LAST_LESSON: Partial<Record<Track, { title: string; url: string }>> = {
-  'system-design': { title: 'Flashcards', url: '/learn/system-design/flashcards' },
-};
 
 export function LessonPage({ slugs }: { slugs: string[] }) {
   const page = source.getPage(slugs);
@@ -60,7 +55,7 @@ export function LessonPage({ slugs }: { slugs: string[] }) {
       {!page.data.planned && (
         <MarkAsDone
           pageUrl={page.url}
-          nextLesson={getNextLesson(page.url) ?? AFTER_LAST_LESSON[trackOf(page.slugs)]}
+          nextLesson={getNextLesson(page.url)}
         />
       )}
     </DocsPage>

@@ -46,7 +46,7 @@ export const sections = {
 
 /**
  * The same for Low-Level Design (folders in content/low-level-design).
- * Kept apart from `sections` on purpose: that list is also the System Design flashcard decks.
+ * Kept apart from `sections` so each track's labels stay in one place.
  */
 export const lldSections = {
   guide: { label: 'Guide', icon: Compass, className: 'bg-violet-500/10 text-violet-700' },

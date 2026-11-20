@@ -24,7 +24,7 @@ const gridTemplate = `"sidebar . header toc ."
 
 /**
  * The sidebar shows only the current track's lessons. Fumadocs finds the track from the page's place in the tree,
- * so pages that are not lessons (the flashcards) would show every track as folders. Each track's layout passes
+ * so pages that are not lessons would show every track as folders. Each track's layout passes
  * its own folder's contents instead.
  */
 function trackTree(track: Track) {
@@ -35,7 +35,7 @@ function trackTree(track: Track) {
 
 /**
  * The switch at the top of the sidebar: one entry per track. They are plain links (not tied to a tree folder),
- * so Fumadocs marks the one whose URL starts the current address as selected, on lessons and flashcards alike.
+ * so Fumadocs marks the one whose URL starts the current address as selected, on every page of the track.
  */
 function trackTabs(): LayoutTab[] {
   return TRACKS.flatMap((track) => {
