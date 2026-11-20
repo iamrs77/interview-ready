@@ -166,7 +166,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 
 ## To do
 - [x] **Cheat Sheet:** written last, from all the finished lessons.
-- [x] **Flashcards:** 1519 cards in 11 decks, one per module. Check them with `npm run check:flashcards`.
+- [x] **Flashcards:** 774 cards in 11 decks, one per module. Check them with `npm run check:flashcards`.
 
 ## Later: separate tracks (not System Design)
 - **OS and Concurrency (slim):** processes vs threads, concurrency vs parallelism, race conditions and mutexes,

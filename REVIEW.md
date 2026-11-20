@@ -17,6 +17,11 @@ All lesson paths are relative to `content/system-design/`. Card IDs are flashcar
   - one checkout story everywhere: `PENDING` → `PAID` → `SHIPPED` / `CANCELLED`, and shipping listens to `PaymentSucceeded`;
   - uptime uses a 30-day month everywhere.
 - ✅ **Flashcards:** 1,519 cards (58 new). Wrong and weak answers were fixed, and near-duplicates merged.
+- ✅ **Flashcards trimmed to a core set (2026-11-20): 1,519 → 774.**
+  - At most 6 per concept lesson and 8 per question page.
+  - Removed: trivia, config details, near-duplicates and cards that were too basic.
+  - Kept cards keep their IDs, so saved progress stays.
+  - The removed cards are saved in the session scratchpad (`trim/*/removed-*.json`) and can be restored.
 - ✅ **Checked after the fixes:**
   - all 126 pages load;
   - 312 of 312 diagrams draw, with no broken links;

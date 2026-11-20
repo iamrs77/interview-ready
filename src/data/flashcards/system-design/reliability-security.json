@@ -14,22 +14,10 @@
       "a": "Go box by box and ask \"what if this dies?\". If the answer is \"everything stops\", add a spare: two load balancers, several stateless app servers, a database replica you can promote, and servers spread across availability zones."
     },
     {
-      "id": "reliability-security/redundancy-failover-3",
-      "lesson": "reliability-security/redundancy-failover",
-      "q": "What is the N+1 rule?",
-      "a": "If you need N servers to handle the load, run N+1. Then one can fail, or be taken down for an update, and you still have enough."
-    },
-    {
       "id": "reliability-security/redundancy-failover-4",
       "lesson": "reliability-security/redundancy-failover",
       "q": "What is the difference between active-passive and active-active?",
       "a": "**Active-passive:** one copy does all the work and the standby waits, taking over only when it fails. **Active-active:** all copies work at the same time and share the load. Databases are usually active-passive, because two copies taking writes can end up with different data."
-    },
-    {
-      "id": "reliability-security/redundancy-failover-5",
-      "lesson": "reliability-security/redundancy-failover",
-      "q": "In active-active with two servers, why keep each one well under 50% load?",
-      "a": "If both run at 80% and one dies, the other gets 160% of what it can handle and falls over too. Each copy must be able to take the dead one's share."
     },
     {
       "id": "reliability-security/redundancy-failover-6",
@@ -50,18 +38,6 @@
       "a": "With **asynchronous** replication, the last few writes before the crash may never reach the standby. **Synchronous** replication (the primary waits for the standby to confirm each write) avoids this, but makes every write a little slower."
     },
     {
-      "id": "reliability-security/redundancy-failover-9",
-      "lesson": "reliability-security/redundancy-failover",
-      "q": "What is flapping, and how do you stop it?",
-      "a": "The system fails over, then back, then over again, because the health check is too touchy. Require several failed checks in a row, and don't switch back automatically right away."
-    },
-    {
-      "id": "reliability-security/redundancy-failover-10",
-      "lesson": "reliability-security/redundancy-failover",
-      "q": "Why should you test failover regularly?",
-      "a": "An untested spare often doesn't work: its disk filled up months ago, or it has old settings. Without tests, you only find out during the outage."
-    },
-    {
       "id": "reliability-security/circuit-breaker-1",
       "lesson": "reliability-security/circuit-breaker",
       "q": "What does a circuit breaker do?",
@@ -72,18 +48,6 @@
       "lesson": "reliability-security/circuit-breaker",
       "q": "How can a slow Recommendations service take Checkout down, even when Payments is fine?",
       "a": "Each call to it hangs for 30 seconds, so all of Checkout's threads end up waiting. New checkout requests find no free thread, and Checkout is down too. This chain reaction is a **cascading failure**."
-    },
-    {
-      "id": "reliability-security/circuit-breaker-3",
-      "lesson": "reliability-security/circuit-breaker",
-      "q": "Why do retries make a cascading failure worse?",
-      "a": "Every failed call is sent again, so the sick service gets more traffic just when it needs less."
-    },
-    {
-      "id": "reliability-security/circuit-breaker-4",
-      "lesson": "reliability-security/circuit-breaker",
-      "q": "Why isn't a shorter timeout enough to protect a caller?",
-      "a": "It helps (wait 1 second, not 30), but you still pay that second on every single call. A circuit breaker stops making the call at all."
     },
     {
       "id": "reliability-security/circuit-breaker-5",
@@ -98,22 +62,10 @@
       "a": "It opens when the **failure rate** is too high, like 50% of the last 20 calls (timeouts count as failures). After a wait it goes half-open: if the test calls succeed it closes, and if one fails it opens again."
     },
     {
-      "id": "reliability-security/circuit-breaker-7",
-      "lesson": "reliability-security/circuit-breaker",
-      "q": "What fallbacks can a caller use while the breaker is open?",
-      "a": "Cached data from the last good call, a safe default like popular items, hiding the feature, queuing the request for later, or a clear error. Choose by how important the feature is."
-    },
-    {
       "id": "reliability-security/circuit-breaker-8",
       "lesson": "reliability-security/circuit-breaker",
       "q": "How should a retry and a circuit breaker be combined?",
       "a": "The retry goes outside and wraps the breaker: `retry(() => breaker.call(...))`. Then each try counts toward tripping it. Once it is open, the retry should treat \"circuit open\" as final and stop."
-    },
-    {
-      "id": "reliability-security/circuit-breaker-9",
-      "lesson": "reliability-security/circuit-breaker",
-      "q": "Which tools give you a circuit breaker?",
-      "a": "Resilience4j (Java), Polly (.NET), opossum (Node.js), or a service mesh like Istio or Envoy. Netflix's Hystrix made the pattern famous, but has been in maintenance mode since 2018."
     },
     {
       "id": "reliability-security/bulkhead-1",
@@ -122,28 +74,10 @@
       "a": "Splitting resources like threads, connections and servers into separate pools, so a problem in one part can only use up its own pool. It is named after the walls in a ship that stop one leak from sinking it."
     },
     {
-      "id": "reliability-security/bulkhead-2",
-      "lesson": "reliability-security/bulkhead",
-      "q": "What does the Titanic teach about bulkheads?",
-      "a": "Its walls didn't go all the way up, so water spilled from room to room. A bulkhead only works if the parts are really separate: two thread pools that share one connection pool are not separate."
-    },
-    {
-      "id": "reliability-security/bulkhead-3",
-      "lesson": "reliability-security/bulkhead",
-      "q": "What goes wrong when a service uses one shared thread pool for all its calls?",
-      "a": "If one dependency gets slow, its calls slowly take all the threads. Then calls to healthy services like Payments can't get a thread either, and the whole service goes down."
-    },
-    {
       "id": "reliability-security/bulkhead-4",
       "lesson": "reliability-security/bulkhead",
       "q": "What should happen when a bulkhead's pool is full?",
       "a": "Fail fast: reject new calls right away and use a fallback, like hiding the recommendations box. Don't wait. The other dependencies still have their own pools."
-    },
-    {
-      "id": "reliability-security/bulkhead-5",
-      "lesson": "reliability-security/bulkhead",
-      "q": "What is the difference between a thread pool bulkhead and a semaphore bulkhead?",
-      "a": "**Thread pool:** each dependency gets its own threads; strong separation, and a stuck call can be given up on. **Semaphore:** a counter of free slots, and the call runs on the caller's own thread; lighter, and a common default."
     },
     {
       "id": "reliability-security/bulkhead-6",
@@ -164,34 +98,10 @@
       "a": "A bulkhead caps how much of your resources one dependency can use. A circuit breaker decides whether to call it at all. Together, the bulkhead limits the damage in the first seconds, then the breaker opens and stops the calls."
     },
     {
-      "id": "reliability-security/bulkhead-9",
-      "lesson": "reliability-security/bulkhead",
-      "q": "What goes wrong if bulkhead pools are sized badly?",
-      "a": "Too small, and calls are rejected even on a normal day. Too big, and the separation means little. Size them from real traffic, and watch how often each pool rejects calls."
-    },
-    {
       "id": "reliability-security/rate-limiting-1",
       "lesson": "reliability-security/rate-limiting",
       "q": "What does a rate limiter do?",
       "a": "It counts how many requests each user, IP address or API key has sent. If they go over a limit, like 100 requests per minute, the extra requests are rejected with `429 Too Many Requests`."
-    },
-    {
-      "id": "reliability-security/rate-limiting-2",
-      "lesson": "reliability-security/rate-limiting",
-      "q": "Why rate limit an API?",
-      "a": "To protect the system from overload, stop abuse (password guessing, bots copying data, spam), keep things fair, control cost when requests cost you money, and offer paid plans with higher limits."
-    },
-    {
-      "id": "reliability-security/rate-limiting-3",
-      "lesson": "reliability-security/rate-limiting",
-      "q": "What can you rate limit by?",
-      "a": "User ID, API key, IP address or endpoint (like a lower limit on `POST /login`). You often combine them. Be careful with IP: a whole office or mobile network can share one."
-    },
-    {
-      "id": "reliability-security/rate-limiting-4",
-      "lesson": "reliability-security/rate-limiting",
-      "q": "What does a rate-limited response send back?",
-      "a": "`429 Too Many Requests` with a `Retry-After` header saying how many seconds to wait. Often also `X-RateLimit-Limit` and `X-RateLimit-Remaining`, a common habit, not an official standard."
     },
     {
       "id": "reliability-security/rate-limiting-5",
@@ -200,46 +110,16 @@
       "a": "A bucket holds at most N tokens (its capacity) and refills at a steady rate. Each request takes one token; with none left, it is rejected. Bursts up to the capacity are fine, but over time you can't go faster than the refill rate."
     },
     {
-      "id": "reliability-security/rate-limiting-6",
-      "lesson": "reliability-security/rate-limiting",
-      "q": "How does a leaky bucket work?",
-      "a": "It is a fixed-size queue emptied at a fixed rate. Requests can pour in at any speed, but once the queue is full, extra requests are rejected. The output is a smooth, steady flow."
-    },
-    {
       "id": "reliability-security/rate-limiting-7",
       "lesson": "reliability-security/rate-limiting",
       "q": "When would you pick a leaky bucket over a token bucket?",
       "a": "When the thing behind it needs a steady speed, like a partner API that allows 10 calls per second. A token bucket lets a burst through at once; a leaky bucket smooths it, but requests wait in line, which adds delay."
     },
     {
-      "id": "reliability-security/rate-limiting-8",
-      "lesson": "reliability-security/rate-limiting",
-      "q": "How does a fixed window counter work?",
-      "a": "Split time into fixed windows, like each clock minute, and keep one counter per user per window. Each request adds 1, and requests over the limit are rejected. A new window starts again from zero."
-    },
-    {
       "id": "reliability-security/rate-limiting-9",
       "lesson": "reliability-security/rate-limiting",
       "q": "What is the main weakness of a fixed window counter?",
       "a": "Bursts at the edges. With a limit of 5 per minute, a user can send 5 requests at 10:00:59 and 5 more at 10:01:00: 10 requests in 2 seconds, twice the limit."
-    },
-    {
-      "id": "reliability-security/rate-limiting-10",
-      "lesson": "reliability-security/rate-limiting",
-      "q": "How does a sliding window log work, and what does it cost?",
-      "a": "It keeps the time of every request, removes times older than one window, and counts the rest. It is exact, with no edge bursts, but stores one entry per request, often in a Redis sorted set."
-    },
-    {
-      "id": "reliability-security/rate-limiting-11",
-      "lesson": "reliability-security/rate-limiting",
-      "q": "How does a sliding window counter estimate the count?",
-      "a": "It keeps just two counters, this window's and the previous one's: estimate = current + previous × (share of the previous window still in the last 60 s). Example: 30 + 80 × 0.75 = 90. Cheap and very close."
-    },
-    {
-      "id": "reliability-security/rate-limiting-12",
-      "lesson": "reliability-security/rate-limiting",
-      "q": "Which algorithm is the usual default, and which fits small limits that must be exact?",
-      "a": "The **token bucket** is the usual default for most APIs. The **sliding window log** fits small limits that must be exact, like login attempts."
     },
     {
       "id": "reliability-security/rate-limiting-13",
@@ -254,22 +134,10 @@
       "a": "If 10 gateway servers each keep their own counters, a user can get 10 times the limit by hitting different servers. A shared store keeps one count for all of them."
     },
     {
-      "id": "reliability-security/rate-limiting-15",
-      "lesson": "reliability-security/rate-limiting",
-      "q": "What should a rate limiter do if its Redis goes down?",
-      "a": "For most APIs, **fail open**: let requests through. A few minutes without limits hurts less than **failing closed**, which blocks every user."
-    },
-    {
       "id": "reliability-security/backpressure-1",
       "lesson": "reliability-security/backpressure",
       "q": "What is backpressure?",
       "a": "When the part of a system that can't keep up tells the part sending it work to slow down or stop. Without it, the fast sender keeps sending and work piles up until something breaks."
-    },
-    {
-      "id": "reliability-security/backpressure-2",
-      "lesson": "reliability-security/backpressure",
-      "q": "A producer sends 1,000 messages a second and the consumer handles 800. What happens after an hour?",
-      "a": "The queue grows by 200 a second, so 720,000 messages are waiting after an hour. A new message waits 720,000 ÷ 800 = 900 seconds: 15 minutes."
     },
     {
       "id": "reliability-security/backpressure-3",
@@ -290,24 +158,6 @@
       "a": "Rejecting work on purpose to stay healthy. It is better to serve 800 users quickly than to accept 1,000 and make all of them time out. Smart load shedding drops the least important work first."
     },
     {
-      "id": "reliability-security/backpressure-6",
-      "lesson": "reliability-security/backpressure",
-      "q": "How can a consumer make the sender slow down?",
-      "a": "A **blocking queue** makes the producer's add call wait for room. With **pull**, the consumer asks for work only when it is ready. With **credits**, it says \"send me 10 more\", like TCP and HTTP/2 flow control."
-    },
-    {
-      "id": "reliability-security/backpressure-7",
-      "lesson": "reliability-security/backpressure",
-      "q": "When is dropping messages OK, and what can you drop?",
-      "a": "Only when losing some data is fine. Drop the oldest when only the newest value matters (live prices, game positions), drop the newest to keep what you have, or sample, like 1 in 10 for metrics and debug logs."
-    },
-    {
-      "id": "reliability-security/backpressure-8",
-      "lesson": "reliability-security/backpressure",
-      "q": "How does TCP flow control give backpressure?",
-      "a": "The receiver keeps telling the sender how much free buffer space it has, the **receive window**. If the buffer fills up, the window drops to zero and the sender stops until there is room."
-    },
-    {
       "id": "reliability-security/backpressure-9",
       "lesson": "reliability-security/backpressure",
       "q": "Why can't a slow Kafka consumer be flooded?",
@@ -324,12 +174,6 @@
       "lesson": "reliability-security/graceful-degradation",
       "q": "What is graceful degradation?",
       "a": "When part of a system breaks or gets overloaded, it keeps doing its most important job and switches off or simplifies the rest. Users get a slightly worse experience instead of an error page."
-    },
-    {
-      "id": "reliability-security/graceful-degradation-2",
-      "lesson": "reliability-security/graceful-degradation",
-      "q": "How does Netflix degrade when its recommendations system is down?",
-      "a": "The home page still loads and shows popular titles instead of personal picks. Viewers can still press play, because watching is the core job."
     },
     {
       "id": "reliability-security/graceful-degradation-3",
@@ -350,12 +194,6 @@
       "a": "A **stale cache** (old but still useful), a **default value** like popular items, the **last known value** with \"updated 20 minutes ago\", or the page with that section hidden."
     },
     {
-      "id": "reliability-security/graceful-degradation-6",
-      "lesson": "reliability-security/graceful-degradation",
-      "q": "What does `Cache-Control: stale-if-error=86400` do?",
-      "a": "It tells a cache that if the server returns an error, it may serve its old copy for up to a day (86,400 seconds)."
-    },
-    {
       "id": "reliability-security/graceful-degradation-7",
       "lesson": "reliability-security/graceful-degradation",
       "q": "What are the two rules for showing fallback data?",
@@ -366,12 +204,6 @@
       "lesson": "reliability-security/graceful-degradation",
       "q": "What is a kill switch, and how does it help in an outage?",
       "a": "A feature flag used to turn something off in an emergency. Flip it, and the feature is off within seconds, with no new deploy, saving capacity for the core job."
-    },
-    {
-      "id": "reliability-security/graceful-degradation-9",
-      "lesson": "reliability-security/graceful-degradation",
-      "q": "What two things should you watch out for with fallbacks and feature flags?",
-      "a": "Test the \"off\" path: a fallback that is never used often breaks without anyone noticing. And clean up old flags: hundreds of forgotten ones make the code hard to understand."
     },
     {
       "id": "reliability-security/disaster-recovery-1",
@@ -404,28 +236,10 @@
       "a": "A full backup plus a log of every change (the **write-ahead log**), so you can restore to any second. Replicas can't do this: a bad `DELETE FROM orders` reaches every replica within a second."
     },
     {
-      "id": "reliability-security/disaster-recovery-6",
-      "lesson": "reliability-security/disaster-recovery",
-      "q": "Where should you keep backups?",
-      "a": "In another region, in another account with different logins, and locked against changes (like S3 Object Lock, which protects against ransomware). Follow **3-2-1**: 3 copies, on 2 kinds of storage, with 1 in another place."
-    },
-    {
       "id": "reliability-security/disaster-recovery-7",
       "lesson": "reliability-security/disaster-recovery",
       "q": "What are the four multi-region DR strategies, from cheapest to fastest?",
       "a": "**Backup and restore** (hours or more), **pilot light** (data copied, servers off; tens of minutes), **warm standby** (a small running copy; minutes), and **active-active** (a full copy taking traffic; close to zero)."
-    },
-    {
-      "id": "reliability-security/disaster-recovery-8",
-      "lesson": "reliability-security/disaster-recovery",
-      "q": "Why can a failover to another region lose the last few seconds of writes?",
-      "a": "The copy between regions is usually asynchronous, because waiting for a far-away region to confirm each write would make every write slow. Those missing seconds are your RPO."
-    },
-    {
-      "id": "reliability-security/disaster-recovery-9",
-      "lesson": "reliability-security/disaster-recovery",
-      "q": "How do you test disaster recovery?",
-      "a": "Restore drills (time them: that is your real RTO), failover drills to the second region, written runbooks, chaos engineering, and alerts when a backup fails or hasn't run. An untested backup is only a hope."
     },
     {
       "id": "reliability-security/authn-vs-authz-1",
@@ -434,22 +248,10 @@
       "a": "**Authentication** (AuthN) asks \"who are you?\" and fails with `401`. **Authorization** (AuthZ) asks \"what can you do?\" and fails with `403`. Authentication always comes first."
     },
     {
-      "id": "reliability-security/authn-vs-authz-2",
-      "lesson": "reliability-security/authn-vs-authz",
-      "q": "What is MFA, and why use it?",
-      "a": "Multi-factor authentication asks for two or more different kinds of factor: something you know (a password), have (a phone or security key) or are (fingerprint, face). Then a stolen password alone is not enough."
-    },
-    {
       "id": "reliability-security/authn-vs-authz-3",
       "lesson": "reliability-security/authn-vs-authz",
       "q": "How does a user prove who they are on each request after logging in?",
       "a": "They don't send their password again. The server gives them a session cookie or a token (often a JWT), and they send that with each request."
-    },
-    {
-      "id": "reliability-security/authn-vs-authz-4",
-      "lesson": "reliability-security/authn-vs-authz",
-      "q": "Why do some APIs return `404` instead of `403` when access is denied?",
-      "a": "So a stranger can't even learn that the thing exists. For example, the order service returns 404 if the order doesn't belong to the user."
     },
     {
       "id": "reliability-security/authn-vs-authz-5",
@@ -470,28 +272,10 @@
       "a": "Insecure direct object reference, or broken object level authorization: a logged-in user reads someone else's data by changing an ID, like `/orders/42` to `/orders/43`. Fix: check the user may access this exact object."
     },
     {
-      "id": "reliability-security/authn-vs-authz-8",
-      "lesson": "reliability-security/authn-vs-authz",
-      "q": "Why is hiding a button not security?",
-      "a": "Anyone can call the API directly with a tool like curl. Hiding the button is good design, but every check must happen on the server."
-    },
-    {
       "id": "reliability-security/authn-vs-authz-9",
       "lesson": "reliability-security/authn-vs-authz",
       "q": "What is zero trust?",
       "a": "Not assuming a call is safe just because it comes from inside your network. Services prove who they are to each other (often with mTLS), and each service checks what it is responsible for."
-    },
-    {
-      "id": "reliability-security/authn-vs-authz-10",
-      "lesson": "reliability-security/authn-vs-authz",
-      "q": "Why should a failed login say \"Email or password is wrong\"?",
-      "a": "Two different messages, like \"No account with this email\" and \"Wrong password\", let an attacker find out which emails have accounts."
-    },
-    {
-      "id": "reliability-security/authn-vs-authz-11",
-      "lesson": "reliability-security/authn-vs-authz",
-      "q": "The gateway passes the user ID to services in a header like `X-User-Id`. What must it do with that header first?",
-      "a": "Remove any `X-User-Id` header the client sent, then fill it in from the checked token. Otherwise a user could send the header themselves and pretend to be someone else."
     },
     {
       "id": "reliability-security/oauth-oidc-1",
@@ -506,34 +290,10 @@
       "a": "OIDC is a thin layer on top of OAuth that adds login. OAuth answers \"what can this app access?\" with an access token for the API. OIDC answers \"who is this user?\" with an **ID token** (a JWT) for the app."
     },
     {
-      "id": "reliability-security/oauth-oidc-3",
-      "lesson": "reliability-security/oauth-oidc",
-      "q": "What are the four roles in OAuth?",
-      "a": "**Resource owner** (the user), **client** (the app that wants access), **authorization server** (logs you in, asks permission, gives out tokens) and **resource server** (the API that holds the data)."
-    },
-    {
-      "id": "reliability-security/oauth-oidc-4",
-      "lesson": "reliability-security/oauth-oidc",
-      "q": "What are OAuth scopes?",
-      "a": "The exact permissions the app asks for, like \"read your calendar\". The user sees them on the consent screen. A good app asks for as few as it can."
-    },
-    {
       "id": "reliability-security/oauth-oidc-5",
       "lesson": "reliability-security/oauth-oidc",
       "q": "What are the steps of the authorization code flow?",
       "a": "The app sends your browser to the provider, you log in and click Allow, the provider sends you back with a one-time **authorization code**, and the app's server swaps the code (plus its client secret) for tokens."
-    },
-    {
-      "id": "reliability-security/oauth-oidc-6",
-      "lesson": "reliability-security/oauth-oidc",
-      "q": "Why does the authorization code flow pass a code through the browser, not the token?",
-      "a": "Web addresses end up in browser history and server logs. So only a short-lived, one-time code passes through the browser, and the real token is fetched server to server, which needs the client secret."
-    },
-    {
-      "id": "reliability-security/oauth-oidc-7",
-      "lesson": "reliability-security/oauth-oidc",
-      "q": "What are the `state` and `redirect_uri` parameters for?",
-      "a": "`state` is a random value the app checks when you come back, which blocks CSRF. `redirect_uri` must be registered in advance, so an attacker can't have the code sent to their own site."
     },
     {
       "id": "reliability-security/oauth-oidc-8",
@@ -542,22 +302,10 @@
       "a": "For apps that can't keep a secret. The app makes a random **code verifier** and first sends its hash (the **code challenge**). When swapping the code, it sends the verifier. A stolen code is useless without it. Use PKCE for every app."
     },
     {
-      "id": "reliability-security/oauth-oidc-9",
-      "lesson": "reliability-security/oauth-oidc",
-      "q": "Which OAuth flows do you use when there is no user, or the device can't type easily?",
-      "a": "**Client credentials** when a service calls an API as itself, like a nightly billing job. **Device code** when a device like a smart TV shows a code you enter on your phone. Implicit and password flows are old: don't use them."
-    },
-    {
       "id": "reliability-security/oauth-oidc-10",
       "lesson": "reliability-security/oauth-oidc",
       "q": "Access token vs refresh token: where is each sent, and how long does it live?",
       "a": "The access token is sent to the API with every request and lives a short time, up to about an hour. The refresh token is sent only to the authorization server to get new access tokens, lives days or months, and is kept safely on the server, or in the device's secure storage for mobile apps."
-    },
-    {
-      "id": "reliability-security/oauth-oidc-11",
-      "lesson": "reliability-security/oauth-oidc",
-      "q": "What is refresh token rotation?",
-      "a": "Every time a refresh token is used, the server gives out a new one and cancels the old one. If an old one is ever used again, it was probably stolen, so the server cancels them all."
     },
     {
       "id": "reliability-security/oauth-oidc-12",
@@ -596,40 +344,16 @@
       "a": "Every special case gets its own new role, like \"editor-but-no-delete\", until you have more roles than people. It is a sign you need attributes (ABAC)."
     },
     {
-      "id": "reliability-security/rbac-6",
-      "lesson": "reliability-security/rbac",
-      "q": "What is least privilege?",
-      "a": "Give each person the smallest role that lets them do their job. Review regularly who has admin, and remove access when people change jobs."
-    },
-    {
       "id": "reliability-security/rbac-7",
       "lesson": "reliability-security/rbac",
       "q": "What is the difference between RBAC and ABAC?",
       "a": "RBAC decides by the user's roles (\"editors can publish\"): simple to see. ABAC decides by facts about the user, item, time and place (\"authors can edit their own drafts\"): flexible, but harder to test. Most apps mix RBAC with ownership checks."
     },
     {
-      "id": "reliability-security/rbac-8",
-      "lesson": "reliability-security/rbac",
-      "q": "What is ReBAC?",
-      "a": "Relationship-based access control: access comes from relationships, like \"Asha can edit this doc because it was shared with her team\". Google Docs sharing works like this."
-    },
-    {
-      "id": "reliability-security/rbac-9",
-      "lesson": "reliability-security/rbac",
-      "q": "How is RBAC usually stored in a database?",
-      "a": "In four small tables: `roles`, `permissions`, `role_permissions` and `user_roles`. To check access, join a user's roles to their permissions."
-    },
-    {
       "id": "reliability-security/encryption-1",
       "lesson": "reliability-security/encryption",
       "q": "What is the difference between encryption in transit and encryption at rest?",
       "a": "**In transit** protects data while it moves over a network, with TLS. **At rest** protects data where it is stored: disks, databases, backups and file storage like S3."
-    },
-    {
-      "id": "reliability-security/encryption-2",
-      "lesson": "reliability-security/encryption",
-      "q": "What is the difference between symmetric and asymmetric encryption?",
-      "a": "**Symmetric** uses one key to encrypt and decrypt, and is fast (AES). **Asymmetric** uses a public and a private key, and is slower. Systems like TLS use asymmetric keys to agree on a shared key, then symmetric for the data."
     },
     {
       "id": "reliability-security/encryption-3",
@@ -650,28 +374,10 @@
       "a": "For the most sensitive fields, like card numbers: your code encrypts them before saving, so even a database admin or a leaked copy can't read them. The cost: you can't easily search or sort by that field."
     },
     {
-      "id": "reliability-security/encryption-6",
-      "lesson": "reliability-security/encryption",
-      "q": "What are the rules for handling encryption keys?",
-      "a": "Never put keys in code, config files or git, and never next to the data they protect. Limit and log who uses each key, and rotate keys. A **KMS** does this, with the most important keys kept inside an **HSM**."
-    },
-    {
-      "id": "reliability-security/encryption-7",
-      "lesson": "reliability-security/encryption",
-      "q": "How does envelope encryption work?",
-      "a": "The KMS gives a data key, both plain and encrypted with the master key. You encrypt data locally with the plain key, throw it away, and store the encrypted data key next to the data. To read, the KMS decrypts the data key."
-    },
-    {
       "id": "reliability-security/encryption-8",
       "lesson": "reliability-security/encryption",
       "q": "Why hash passwords instead of encrypting them?",
       "a": "Anyone who gets the encryption key could decrypt them all. A hash is one-way: to check a login, you hash what the user typed and compare it with the stored hash."
-    },
-    {
-      "id": "reliability-security/encryption-9",
-      "lesson": "reliability-security/encryption",
-      "q": "What is a salt, and why use one?",
-      "a": "A random value, different for each user, mixed in before hashing. Two users with the same password get different hashes, and it defeats **rainbow tables**, ready-made lists that map hashes back to common passwords."
     },
     {
       "id": "reliability-security/encryption-10",
@@ -684,12 +390,6 @@
       "lesson": "reliability-security/api-security",
       "q": "What is the first rule of API security?",
       "a": "Never trust anything that comes from the client: the body, URL, headers or cookies. Anyone can send anything to your API with a tool like curl, skipping your app."
-    },
-    {
-      "id": "reliability-security/api-security-2",
-      "lesson": "reliability-security/api-security",
-      "q": "Why should API protection come in layers?",
-      "a": "So one missed check is not the end. A **WAF** (web application firewall) at the edge blocks known attacks, the gateway does TLS, authentication and rate limits, and the service checks input and authorization."
     },
     {
       "id": "reliability-security/api-security-3",
@@ -716,34 +416,10 @@
       "a": "Cross-site scripting: an attacker's JavaScript runs in other people's browsers on your site. **Escape output**, use **HttpOnly cookies** so scripts can't steal the session, and add a **Content-Security-Policy** header."
     },
     {
-      "id": "reliability-security/api-security-7",
-      "lesson": "reliability-security/api-security",
-      "q": "What should you rate limit to stop abuse?",
-      "a": "Login and password reset (against brute force and credential stuffing), expensive endpoints like search and SMS, business flows like ticket buying or sign-ups, and the page size of every list endpoint."
-    },
-    {
       "id": "reliability-security/api-security-8",
       "lesson": "reliability-security/api-security",
       "q": "What are the rules for secrets like database passwords and API keys?",
       "a": "Never put them in code or git: once pushed, treat a secret as leaked. Keep them in a secrets manager, give each key least privilege, rotate them, and scan for leaks with tools like gitleaks."
-    },
-    {
-      "id": "reliability-security/api-security-9",
-      "lesson": "reliability-security/api-security",
-      "q": "How should you store and send the API keys you give to customers?",
-      "a": "Store only a hash and show the full key once; a fast hash like SHA-256 is fine for a long random key. Send keys in a header, never in the URL. A clear prefix like `sk_live_` helps leak scanners spot them."
-    },
-    {
-      "id": "reliability-security/api-security-10",
-      "lesson": "reliability-security/api-security",
-      "q": "What is SSRF?",
-      "a": "Server Side Request Forgery: your API fetches a URL the user gives it, and the attacker points it at internal systems. Allow only known addresses to be fetched. Capital One's 2019 breach was an SSRF attack."
-    },
-    {
-      "id": "reliability-security/api-security-11",
-      "lesson": "reliability-security/api-security",
-      "q": "Which of the OWASP API top risks are authorization mistakes?",
-      "a": "Numbers 1 (broken object level), 3 (broken object property level) and 5 (broken function level authorization). Three of the top five come down to a missing \"is this user allowed to do this?\" check."
     },
     {
       "id": "reliability-security/csrf-cors-1",
@@ -758,22 +434,10 @@
       "a": "The user is logged in to bank.com. A page on evil.com makes their browser send a request to bank.com, like a hidden form that POSTs a transfer. The browser adds bank.com's cookies by itself, so the bank thinks the user asked for it."
     },
     {
-      "id": "reliability-security/csrf-cors-3",
-      "lesson": "reliability-security/csrf-cors",
-      "q": "What do `SameSite=Strict`, `Lax` and `None` do?",
-      "a": "**Strict:** never sent on requests another site starts. **Lax:** sent only when the user goes to the site with a `GET`, like clicking a link. Not on cross-site form POSTs, images or `fetch`. **None:** always sent, and must be `Secure`."
-    },
-    {
       "id": "reliability-security/csrf-cors-4",
       "lesson": "reliability-security/csrf-cors",
       "q": "How does a CSRF token stop CSRF?",
       "a": "The server puts a random secret token, tied to the session, in its own pages, and every request that changes data must send it back. evil.com can't read bank.com's pages (same-origin policy), so it can't know the token."
-    },
-    {
-      "id": "reliability-security/csrf-cors-5",
-      "lesson": "reliability-security/csrf-cors",
-      "q": "Besides SameSite cookies and CSRF tokens, what else defends against CSRF?",
-      "a": "Check the `Origin` header (or `Sec-Fetch-Site`) on every request that changes data, and reject origins you don't trust, or a missing or `null` one. And never change data with `GET`, because `Lax` cookies are still sent when a user follows a link."
     },
     {
       "id": "reliability-security/csrf-cors-6",
@@ -788,34 +452,10 @@
       "a": "The server names the origin (or `*` for any) whose JavaScript may read its response. Without it, the request may still reach the server, but the browser hides the response and shows a CORS error."
     },
     {
-      "id": "reliability-security/csrf-cors-8",
-      "lesson": "reliability-security/csrf-cors",
-      "q": "What is a CORS preflight, and when does the browser send one?",
-      "a": "An `OPTIONS` request sent first to ask permission, for non-simple requests: methods like `PUT` or `DELETE`, a JSON content type, or custom headers like `Authorization`. If the answer doesn't allow it, the real request is never sent."
-    },
-    {
-      "id": "reliability-security/csrf-cors-9",
-      "lesson": "reliability-security/csrf-cors",
-      "q": "Why can't `Access-Control-Allow-Origin: *` be used with credentials?",
-      "a": "With cookies, `*` would let any website read a logged-in user's private data. So the server must send `Access-Control-Allow-Credentials: true` and the **exact** origin. Never echo back whatever `Origin` arrives."
-    },
-    {
       "id": "reliability-security/csrf-cors-10",
       "lesson": "reliability-security/csrf-cors",
       "q": "Why is CORS not a CSRF defense?",
       "a": "CSRF doesn't need to read the response. A form POST is a simple request, with no preflight, so it reaches the server with the cookies and does the damage. CORS only hides the reply."
-    },
-    {
-      "id": "reliability-security/csrf-cors-11",
-      "lesson": "reliability-security/csrf-cors",
-      "q": "Does CORS protect your server?",
-      "a": "No. The **browser** enforces CORS, to protect **users' data** inside the browser. Simple requests still reach your server, and curl, mobile apps and other servers ignore CORS completely. Your API still needs authentication and authorization on every request."
-    },
-    {
-      "id": "reliability-security/csrf-cors-12",
-      "lesson": "reliability-security/csrf-cors",
-      "q": "Why doesn't `SameSite` protect you from a sibling subdomain like `user-content.shop.com`?",
-      "a": "`SameSite` works by **site**, not origin. `user-content.shop.com` and `shop.com` are the same site, so requests from pages there carry even `Strict` cookies. Put content that users upload on a separate domain."
     }
   ]
 }

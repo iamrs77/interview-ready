@@ -2,22 +2,10 @@
   "deck": "caching",
   "cards": [
     {
-      "id": "caching/what-is-caching-1",
-      "lesson": "caching/what-is-caching",
-      "q": "What is a cache?",
-      "a": "A small, fast storage that keeps a **copy** of data you use often. Next time, you read the copy instead of going back to the slow place where the real data lives."
-    },
-    {
       "id": "caching/what-is-caching-2",
       "lesson": "caching/what-is-caching",
       "q": "What is the difference between a cache hit and a cache miss?",
       "a": "**Hit**: the data is in the cache, so you get it fast. **Miss**: it is not, so you read it from the slow place, then save a copy in the cache for next time."
-    },
-    {
-      "id": "caching/what-is-caching-3",
-      "lesson": "caching/what-is-caching",
-      "q": "What is the hit ratio?",
-      "a": "The share of lookups that are hits: `hits / (hits + misses)`. A good cache for popular data often has a hit ratio of 90% or more."
     },
     {
       "id": "caching/what-is-caching-4",
@@ -26,34 +14,10 @@
       "a": "Requests are about 10 times faster (about 2 ms on average instead of 20 ms), and the database does 20 times less work: only 5 of every 100 requests reach it."
     },
     {
-      "id": "caching/what-is-caching-5",
-      "lesson": "caching/what-is-caching",
-      "q": "Why do caches usually live in memory?",
-      "a": "Memory is about 1,000 times faster than an SSD. A memory read takes about 100 ns; an SSD read takes about 100 µs."
-    },
-    {
-      "id": "caching/what-is-caching-6",
-      "lesson": "caching/what-is-caching",
-      "q": "If one memory read took 1 second, how long would other reads take?",
-      "a": "An SSD read: about 17 minutes. A round trip in the same data center: about 1.4 hours. An HDD seek: about 1 day. A round trip to another continent: about 17 days."
-    },
-    {
-      "id": "caching/what-is-caching-7",
-      "lesson": "caching/what-is-caching",
-      "q": "Why is a Redis read much faster than a database query?",
-      "a": "A Redis read is about one memory read plus one short network trip in the data center: well under 1 ms. A database query often needs disk reads and real work. A simple query using an index takes about 1 to 10 ms; joins and sorts take tens of ms or more."
-    },
-    {
       "id": "caching/what-is-caching-8",
       "lesson": "caching/what-is-caching",
       "q": "Where can caches live between the user and the database?",
       "a": "In the browser, at a CDN edge server, in the app server's own memory, and in a shared cache like Redis. The closer to the user, the faster, and the less work for every layer behind it."
-    },
-    {
-      "id": "caching/what-is-caching-9",
-      "lesson": "caching/what-is-caching",
-      "q": "What is the catch with the browser cache?",
-      "a": "You can't clear it from the server. The `Cache-Control` header decides how long it is kept, so it suits files that rarely change."
     },
     {
       "id": "caching/what-is-caching-10",
@@ -74,12 +38,6 @@
       "a": "Not just \"add a cache\". Say **what** you cache, the **key**, and **how long** you keep it. For example: the key is the short code, the value is the long URL, kept for 24 hours."
     },
     {
-      "id": "caching/what-is-caching-13",
-      "lesson": "caching/what-is-caching",
-      "q": "When should you add a cache to a design?",
-      "a": "When the system is read-heavy, when the same data is read many times, or when a query is slow."
-    },
-    {
       "id": "caching/caching-strategies-1",
       "lesson": "caching/caching-strategies",
       "q": "How does cache-aside work?",
@@ -90,12 +48,6 @@
       "lesson": "caching/caching-strategies",
       "q": "What are the pros and cons of cache-aside?",
       "a": "Good: simple, only data someone asked for is cached, and if the cache dies the app still works, just slower. Bad: the first read of every key is a miss, and the app code must handle the cache."
-    },
-    {
-      "id": "caching/caching-strategies-3",
-      "lesson": "caching/caching-strategies",
-      "q": "What caching setup do most real systems use?",
-      "a": "Cache-aside, plus delete the key on write, plus a TTL. Cache-aside is the default choice in interviews."
     },
     {
       "id": "caching/caching-strategies-4",
@@ -110,58 +62,16 @@
       "a": "Every write goes to the cache and the database together, before the app says \"done\". The cache is always fresh, but writes are slower and the cache fills with data that may never be read."
     },
     {
-      "id": "caching/caching-strategies-6",
-      "lesson": "caching/caching-strategies",
-      "q": "How does write-behind (write-back) work?",
-      "a": "The app writes only to the cache and gets \"done\" right away. The cache saves the changes to the database later, often in batches, so many small writes become one."
-    },
-    {
       "id": "caching/caching-strategies-7",
       "lesson": "caching/caching-strategies",
       "q": "What is the risk of write-behind, and when is it okay to use?",
       "a": "If the cache crashes before it saves, those writes are lost. Use it only where losing a few seconds of changes is okay, like view counts or likes. Never for payments or orders."
     },
     {
-      "id": "caching/caching-strategies-8",
-      "lesson": "caching/caching-strategies",
-      "q": "What is write-around?",
-      "a": "Writes go only to the database and skip the cache. The cache gets the data later, on a read miss. Cache-aside with \"update the database, delete the key\" is a kind of write-around."
-    },
-    {
       "id": "caching/caching-strategies-9",
       "lesson": "caching/caching-strategies",
       "q": "How do you pick a caching strategy?",
       "a": "Can you lose a few seconds of writes, and writes are very frequent? Write-behind. Must reads right after a write be hits? Write-through. Otherwise: cache-aside with delete on write."
-    },
-    {
-      "id": "caching/caching-strategies-10",
-      "lesson": "caching/caching-strategies",
-      "q": "What caching strategy does Facebook use with Memcached?",
-      "a": "Cache-aside, which it calls a \"demand-filled look-aside cache\". On a miss, the web server reads the database and fills the cache. On a write, it updates the database and deletes the key."
-    },
-    {
-      "id": "caching/caching-strategies-11",
-      "lesson": "caching/caching-strategies",
-      "q": "Which caching strategies does Amazon DAX use?",
-      "a": "Read-through and write-through. The app sends reads and writes to DAX. DAX loads missing items from DynamoDB itself, and writes go through DAX to DynamoDB."
-    },
-    {
-      "id": "caching/caching-strategies-12",
-      "lesson": "caching/caching-strategies",
-      "q": "Where does your operating system use write-behind?",
-      "a": "When a program saves a file, the OS usually puts the change in memory first and writes it to disk a little later. That is why pulling the power at the wrong moment can lose recent changes."
-    },
-    {
-      "id": "caching/cache-invalidation-ttl-1",
-      "lesson": "caching/cache-invalidation-ttl",
-      "q": "What is stale data, and what is invalidation?",
-      "a": "**Stale data** is an old copy still in the cache after the real data changed. **Invalidation** means removing (or fixing) that stale copy."
-    },
-    {
-      "id": "caching/cache-invalidation-ttl-2",
-      "lesson": "caching/cache-invalidation-ttl",
-      "q": "Why does stale data happen?",
-      "a": "The database and the cache are two separate places. A write to one does not change the other by itself."
     },
     {
       "id": "caching/cache-invalidation-ttl-3",
@@ -182,34 +92,10 @@
       "a": "If you delete first, a read can sneak in between: it misses, reads the old value from the database (not updated yet), and puts it back in the cache."
     },
     {
-      "id": "caching/cache-invalidation-ttl-6",
-      "lesson": "caching/cache-invalidation-ttl",
-      "q": "What happens if the cache delete fails after the database update?",
-      "a": "The cache keeps the stale data. Retry the delete (for example through a queue), or rely on the TTL to remove it. That is why delete on write is never used alone."
-    },
-    {
       "id": "caching/cache-invalidation-ttl-7",
       "lesson": "caching/cache-invalidation-ttl",
       "q": "What is a TTL, and what is its weakness?",
       "a": "Time to live: an expiry timer on each cache key. When it runs out, the key is removed and the next read loads fresh data. Its weakness: data can be stale for up to the full TTL."
-    },
-    {
-      "id": "caching/cache-invalidation-ttl-8",
-      "lesson": "caching/cache-invalidation-ttl",
-      "q": "What three questions help you pick a TTL?",
-      "a": "How bad is old data? How often does it change? How costly is a miss?"
-    },
-    {
-      "id": "caching/cache-invalidation-ttl-9",
-      "lesson": "caching/cache-invalidation-ttl",
-      "q": "What are typical TTLs for like counts, product details and short URLs?",
-      "a": "Like and view counts: 10-60 seconds. Product details and user profiles: 5-60 minutes. Short URL to long URL: hours to a day."
-    },
-    {
-      "id": "caching/cache-invalidation-ttl-10",
-      "lesson": "caching/cache-invalidation-ttl",
-      "q": "What TTL fits a concert seat map, and why is it safe?",
-      "a": "1-2 seconds, for display only. Holding a seat always checks the database, so old cached data can't sell a seat twice."
     },
     {
       "id": "caching/cache-invalidation-ttl-11",
@@ -218,28 +104,10 @@
       "a": "Keys loaded at the same moment with the same TTL also expire together, sending a flood of misses to the database. A few random seconds per key spreads them out."
     },
     {
-      "id": "caching/cache-invalidation-ttl-12",
-      "lesson": "caching/cache-invalidation-ttl",
-      "q": "What is invalidation by events, and when is it useful?",
-      "a": "When many services write or many caches hold the same data, watch the database instead. CDC reads its change log, each change becomes an event, and a worker deletes the matching keys."
-    },
-    {
-      "id": "caching/cache-invalidation-ttl-13",
-      "lesson": "caching/cache-invalidation-ttl",
-      "q": "What does Facebook's mcsqueal do?",
-      "a": "It runs on Facebook's database servers, reads the database's change log, and sends the matching deletes to the caches. This is invalidation by events."
-    },
-    {
       "id": "caching/cache-invalidation-ttl-14",
       "lesson": "caching/cache-invalidation-ttl",
       "q": "You update the database first, then delete the key. What race can still leave stale data in the cache?",
       "a": "A slow reader reads the old value just before the update, then writes it into the cache after the writer's delete. It stays until the TTL ends. A short TTL limits the damage. Leases block it: the delete cancels the reader's lease, so its late write is refused."
-    },
-    {
-      "id": "caching/cache-eviction-1",
-      "lesson": "caching/cache-eviction",
-      "q": "What is cache eviction?",
-      "a": "Removing items because the cache is full, to make room for new data. The rule that picks what to remove is the **eviction policy**."
     },
     {
       "id": "caching/cache-eviction-2",
@@ -254,22 +122,10 @@
       "a": "Least recently used: remove the item used longest ago. Every read or write makes an item the most recent, and when the cache is full, the least recent one goes."
     },
     {
-      "id": "caching/cache-eviction-4",
-      "lesson": "caching/cache-eviction",
-      "q": "An LRU cache of 3 holds A, B, C (A added first). You read A, then put D. What is evicted?",
-      "a": "B. Reading A made it the most recent, so B became the least recently used."
-    },
-    {
       "id": "caching/cache-eviction-5",
       "lesson": "caching/cache-eviction",
       "q": "How do you build an LRU cache with a JavaScript `Map`?",
       "a": "A `Map` remembers the order keys were added. On a read, delete the key and add it again, so it moves to the end. When the cache is full, remove the first key."
-    },
-    {
-      "id": "caching/cache-eviction-6",
-      "lesson": "caching/cache-eviction",
-      "q": "What is the classic data structure for an LRU cache in coding interviews?",
-      "a": "A hash map plus a doubly linked list. Both `get` and `set` take the same short time no matter how many items there are: O(1)."
     },
     {
       "id": "caching/cache-eviction-7",
@@ -284,34 +140,10 @@
       "a": "Least frequently used: each item counts how often it was read, and the one with the lowest count is evicted. Popular items stay, even if a big scan passes through."
     },
     {
-      "id": "caching/cache-eviction-9",
-      "lesson": "caching/cache-eviction",
-      "q": "What are LFU's weak spots, and how are they fixed?",
-      "a": "Old favorites with huge counts never leave, and new items start at count 1, so they leave first. The fix: make counts slowly shrink over time. Redis does this."
-    },
-    {
-      "id": "caching/cache-eviction-10",
-      "lesson": "caching/cache-eviction",
-      "q": "How does FIFO eviction work, and why is it rarely best for an app cache?",
-      "a": "It removes the item added first and ignores how items are used. It can throw away the most popular item just because it is old, like a home page config read every second."
-    },
-    {
       "id": "caching/cache-eviction-11",
       "lesson": "caching/cache-eviction",
       "q": "Which eviction policy should you start with?",
       "a": "LRU. Move to LFU if you see popular keys being pushed out by one-time reads."
-    },
-    {
-      "id": "caching/cache-eviction-12",
-      "lesson": "caching/cache-eviction",
-      "q": "What is Redis's default eviction policy, and what should a cache use?",
-      "a": "`noeviction`: it evicts nothing, so new writes fail with an error when memory is full. For a cache, set `allkeys-lru`."
-    },
-    {
-      "id": "caching/cache-eviction-13",
-      "lesson": "caching/cache-eviction",
-      "q": "Why is Redis LRU \"almost LRU\"?",
-      "a": "Keeping a perfect order of every key costs memory. So Redis picks a small random sample of keys (5 by default) and evicts the least recently used one in that sample."
     },
     {
       "id": "caching/redis-1",
@@ -332,18 +164,6 @@
       "a": "Redis runs commands one at a time, so `INCR` is **atomic**: it fully happens, and no other command can mix in."
     },
     {
-      "id": "caching/redis-4",
-      "lesson": "caching/redis",
-      "q": "Which Redis data type fits a leaderboard, and why?",
-      "a": "A **sorted set**. It keeps items sorted by score, so getting the top 10 players is very fast."
-    },
-    {
-      "id": "caching/redis-5",
-      "lesson": "caching/redis",
-      "q": "How do you take and release a simple lock in Redis?",
-      "a": "`SET lock:driver:42 7f3a9c NX EX 10`: set only if the key does not exist (`NX`), and expire after 10 seconds (`EX`). The value is a random token. To release, a small Lua script deletes the key only if it still holds your token. A plain `DEL` could delete another server's lock."
-    },
-    {
       "id": "caching/redis-6",
       "lesson": "caching/redis",
       "q": "Why is a Redis lock not a perfect lock?",
@@ -356,28 +176,10 @@
       "a": "Use it to save work, like not running a job twice. When two holders would break data, the database must also check, with a conditional update or a fencing token."
     },
     {
-      "id": "caching/redis-8",
-      "lesson": "caching/redis",
-      "q": "What is the catch with Redis Pub/Sub?",
-      "a": "It is fire-and-forget: a message goes to everyone listening on the channel right now, and anyone not connected misses it."
-    },
-    {
       "id": "caching/redis-9",
       "lesson": "caching/redis",
       "q": "Why is Redis usually not your main database?",
       "a": "Memory is small and costly, so keep only popular data in it. Most teams keep the real data in a database. If the cache is lost, it can be loaded again from the database."
-    },
-    {
-      "id": "caching/redis-10",
-      "lesson": "caching/redis",
-      "q": "How did Twitter use Redis for home timelines?",
-      "a": "Each user's home timeline was a list of tweet IDs in Redis. A new tweet's ID was pushed into each follower's list, so opening the app meant reading one short list from memory."
-    },
-    {
-      "id": "caching/distributed-caching-1",
-      "lesson": "caching/distributed-caching",
-      "q": "What is the difference between a local cache and a shared cache?",
-      "a": "A **local cache** lives inside each app server's memory, like a `Map` in Node.js. A **shared cache**, like Redis, is a separate server that all app servers talk to over the network."
     },
     {
       "id": "caching/distributed-caching-2",
@@ -390,24 +192,6 @@
       "lesson": "caching/distributed-caching",
       "q": "Why is a shared cache like Redis the usual choice?",
       "a": "There is one copy for everyone, so every server gives the same answer. It grows by adding cache machines and stays full after a deploy. The cost is one network hop, under 1 ms."
-    },
-    {
-      "id": "caching/distributed-caching-4",
-      "lesson": "caching/distributed-caching",
-      "q": "How does a two-level cache work?",
-      "a": "The app checks its local cache first (level 1), then Redis (level 2), then the database. On a miss in both, the app reads the database and saves a copy in Redis."
-    },
-    {
-      "id": "caching/distributed-caching-5",
-      "lesson": "caching/distributed-caching",
-      "q": "Why keep a local cache's TTL short?",
-      "a": "When data changes, the local copies on every server can't all be deleted at once. So keep the local TTL to seconds."
-    },
-    {
-      "id": "caching/distributed-caching-6",
-      "lesson": "caching/distributed-caching",
-      "q": "What is a distributed cache?",
-      "a": "One shared cache spread over many machines. Each machine holds one part (a **shard**) of the keys, and the app hashes each key to find which machine holds it."
     },
     {
       "id": "caching/distributed-caching-7",
@@ -428,34 +212,10 @@
       "a": "If a server dies, all its keys become misses at once. The replica gets every change from the primary. On failover, the other nodes promote it to primary and clients get the new address."
     },
     {
-      "id": "caching/distributed-caching-10",
-      "lesson": "caching/distributed-caching",
-      "q": "Why can a cache failover lose a few writes, and why is that okay?",
-      "a": "Copying to the replica usually happens a moment after the write, so the newest writes can be lost. For a cache this is fine: a lost key just becomes a miss."
-    },
-    {
       "id": "caching/distributed-caching-11",
       "lesson": "caching/distributed-caching",
       "q": "What are the main differences between Redis Cluster and Memcached?",
       "a": "**Redis Cluster**: many data types, built-in sharding and failover; the usual answer. **Memcached**: plain strings only, sharding done by the client, no replicas, but many threads. Good for a very simple, fast cache."
-    },
-    {
-      "id": "caching/distributed-caching-12",
-      "lesson": "caching/distributed-caching",
-      "q": "How do you make a multi-key command work in Redis Cluster?",
-      "a": "The keys must be in the same slot. Use a **hash tag**: only the part inside curly braces is hashed, so `{user:42}:cart` and `{user:42}:profile` land on the same shard."
-    },
-    {
-      "id": "caching/distributed-caching-13",
-      "lesson": "caching/distributed-caching",
-      "q": "What do Facebook's mcrouter and Twitter's twemproxy do?",
-      "a": "They are proxies between the app servers and many cache servers. Apps talk to the proxy, and it decides which cache server holds each key. mcrouter also handles failover."
-    },
-    {
-      "id": "caching/cache-problems-1",
-      "lesson": "caching/cache-problems",
-      "q": "What do the common cache problems (stampede, penetration, hot key, cold start) have in common?",
-      "a": "For some reason, the cache stops absorbing the reads, and a flood of requests hits the database at once."
     },
     {
       "id": "caching/cache-problems-2",
@@ -470,24 +230,6 @@
       "a": "Use a lock so only one request reloads, refresh hot keys early in the background, serve the old value while refreshing, and add jitter to TTLs."
     },
     {
-      "id": "caching/cache-problems-4",
-      "lesson": "caching/cache-problems",
-      "q": "How does a lock stop a cache stampede?",
-      "a": "The first request that misses takes a lock (`SET` with `NX`) and loads the data. The others wait a few milliseconds and read the cache again. 1,000 misses become 1 database query. If the reload takes over about 1 second, waiters read the database themselves instead of failing."
-    },
-    {
-      "id": "caching/cache-problems-5",
-      "lesson": "caching/cache-problems",
-      "q": "Why does the stampede lock hold a random token?",
-      "a": "On release, you delete the lock only if it still holds your token. If your lock expired and another request took it, you don't delete theirs."
-    },
-    {
-      "id": "caching/cache-problems-6",
-      "lesson": "caching/cache-problems",
-      "q": "What is a cache avalanche?",
-      "a": "When a huge number of keys expire together, or a whole cache server dies, so a flood of misses hits the database."
-    },
-    {
       "id": "caching/cache-problems-7",
       "lesson": "caching/cache-problems",
       "q": "What is cache penetration?",
@@ -500,64 +242,16 @@
       "a": "Cache the \"not found\" answer (`null`) with a short TTL, use a Bloom filter to drop IDs that definitely don't exist, reject IDs that can't be real, and rate limit clients that cause many misses."
     },
     {
-      "id": "caching/cache-problems-9",
-      "lesson": "caching/cache-problems",
-      "q": "What is a hot key?",
-      "a": "One key with far more traffic than all others, like a celebrity's profile or a flash-sale product. It lives on one shard, so one cache server runs out of CPU or network while others sit idle."
-    },
-    {
       "id": "caching/cache-problems-10",
       "lesson": "caching/cache-problems",
       "q": "How can you fix a hot key?",
       "a": "Keep it in each app server's local cache for a few seconds, store several copies (like `product:42#1` to `product:42#5`) and read one at random, or add read replicas of the hot shard."
     },
     {
-      "id": "caching/cache-problems-11",
-      "lesson": "caching/cache-problems",
-      "q": "What is the cost of keeping several copies of a hot key?",
-      "a": "On writes, you must update or delete all the copies. Also, different key names usually hash to different shards, but that is not guaranteed, so check where they land."
-    },
-    {
-      "id": "caching/cache-problems-12",
-      "lesson": "caching/cache-problems",
-      "q": "What is a cache cold start?",
-      "a": "The cache is empty, after a restart, a new cache cluster or a flush. The hit ratio drops to zero, so all traffic goes to a database that was never sized for that."
-    },
-    {
       "id": "caching/cache-problems-13",
       "lesson": "caching/cache-problems",
       "q": "How do you handle a cache cold start?",
       "a": "Warm the cache with the most popular keys before sending traffic, shift traffic slowly (5%, then 20%, then all), and avoid losing the cache: use replicas, restart nodes one at a time, don't flush on deploy."
-    },
-    {
-      "id": "caching/cache-problems-14",
-      "lesson": "caching/cache-problems",
-      "q": "How do Facebook's Memcached \"leases\" prevent stampedes?",
-      "a": "When many clients miss on the same key, only one gets a lease (permission to reload it). The others wait briefly and retry, and by then the value is usually back in the cache."
-    },
-    {
-      "id": "caching/cache-problems-15",
-      "lesson": "caching/cache-problems",
-      "q": "How does Facebook warm a new, empty cache cluster?",
-      "a": "The new cluster reads misses from an already-warm cache cluster instead of from the databases, until its own hit ratio is high."
-    },
-    {
-      "id": "caching/cache-problems-16",
-      "lesson": "caching/cache-problems",
-      "q": "What caused Facebook's 2010 outage?",
-      "a": "A system saw a cache value it thought was invalid, and every client tried to \"fix\" it by querying the same database cluster. It fell over, and each error caused more queries."
-    },
-    {
-      "id": "caching/cdn-1",
-      "lesson": "caching/cdn",
-      "q": "What is a CDN?",
-      "a": "A content delivery network: many servers in cities around the world that keep copies of your files, so users download them from a server near them instead of from your server far away."
-    },
-    {
-      "id": "caching/cdn-2",
-      "lesson": "caching/cdn",
-      "q": "What are the origin, edge servers and PoPs in a CDN?",
-      "a": "The **origin** is your own servers or storage (like S3), where the real files live. **Edge servers** keep copies near users. A **PoP** is a CDN location with edge servers."
     },
     {
       "id": "caching/cdn-3",
@@ -578,40 +272,10 @@
       "a": "Images, videos, audio, JavaScript, CSS, fonts, downloads, video stream chunks, and public API responses that are the same for everyone."
     },
     {
-      "id": "caching/cdn-6",
-      "lesson": "caching/cdn",
-      "q": "What should you not put on a CDN?",
-      "a": "Pages with personal data (your cart, your account), data that must be exact right now (stock left, bank balance), and requests that change data (`POST`, `PUT`, `DELETE`)."
-    },
-    {
-      "id": "caching/cdn-7",
-      "lesson": "caching/cdn",
-      "q": "What is the difference between `max-age` and `s-maxage` in `Cache-Control`?",
-      "a": "`max-age` is how long anyone (browser and CDN) may keep a response. `s-maxage` is only for shared caches, like the CDN."
-    },
-    {
-      "id": "caching/cdn-8",
-      "lesson": "caching/cdn",
-      "q": "What do `private`, `no-cache` and `no-store` mean in `Cache-Control`?",
-      "a": "`private`: only the user's own browser may keep it, not the CDN. `no-cache`: you may keep it, but must ask the origin first if it changed. `no-store`: never keep it anywhere."
-    },
-    {
       "id": "caching/cdn-9",
       "lesson": "caching/cdn",
       "q": "How can you cache a file for a year but still ship a new version today?",
       "a": "Put a version (a short hash of the content) in the file name, like `app.3f9a1c.js`. A change makes a new name, and the HTML, cached only briefly, points to it."
-    },
-    {
-      "id": "caching/cdn-10",
-      "lesson": "caching/cdn",
-      "q": "What is purging, and when should you use it?",
-      "a": "Removing a file from the CDN by URL before it expires, for example after a mistake or a legal request. It is for emergencies; versioned file names are the everyday way."
-    },
-    {
-      "id": "caching/cdn-11",
-      "lesson": "caching/cdn",
-      "q": "When can a CDN cache API responses, and how much does a short TTL help?",
-      "a": "When many users get the same answer, like a live score. If 10,000 users a second ask and the edge keeps it for 2 seconds, the origin gets about 1 request every 2 seconds from each edge."
     },
     {
       "id": "caching/cdn-12",
@@ -624,18 +288,6 @@
       "lesson": "caching/cdn",
       "q": "How can private files, like a paid video, still use a CDN?",
       "a": "With **signed URLs**: the app gives the user a link with a signature that only works for a short time, and the CDN checks the signature before serving the file."
-    },
-    {
-      "id": "caching/cdn-14",
-      "lesson": "caching/cdn",
-      "q": "What went wrong with Steam's store on Christmas Day 2015?",
-      "a": "A caching change wrongly cached pages for logged-in users, so some users saw store pages made for other users, including their account details."
-    },
-    {
-      "id": "caching/cdn-15",
-      "lesson": "caching/cdn",
-      "q": "How does Netflix fill its Open Connect CDN servers?",
-      "a": "It places its own cache servers inside internet providers' networks and fills them with shows people are likely to watch during quiet, off-peak hours: a push approach."
     }
   ]
 }

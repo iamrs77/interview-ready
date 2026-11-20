@@ -14,12 +14,6 @@
       "a": "Writing logs as JSON with named fields (level, service, userId, traceId) instead of plain sentences. Then you can ask exact questions, like \"all payment errors for user 42\", and get answers in seconds."
     },
     {
-      "id": "production/observability-3",
-      "lesson": "production/observability",
-      "q": "What are good habits for logging?",
-      "a": "Use log levels (`DEBUG`, `INFO`, `WARN`, `ERROR`), add a request or trace ID to every line, never log passwords, card numbers or tokens, and send all logs to one central place."
-    },
-    {
       "id": "production/observability-4",
       "lesson": "production/observability",
       "q": "Counter vs gauge vs histogram?",
@@ -30,12 +24,6 @@
       "lesson": "production/observability",
       "q": "What are the four golden signals?",
       "a": "From Google's SRE book: **latency** (how long requests take), **traffic** (how much demand), **errors** (how many fail) and **saturation** (how full the system is)."
-    },
-    {
-      "id": "production/observability-6",
-      "lesson": "production/observability",
-      "q": "What is the high-cardinality trap in metrics?",
-      "a": "Every different label value creates a new series to store. A label like `userId` with millions of values can break your metrics system. Put per-user details in logs instead."
     },
     {
       "id": "production/observability-7",
@@ -50,34 +38,10 @@
       "a": "The first service creates it and passes it to every service it calls in a request header, the standard `traceparent`. Each service records its spans under that ID and passes it on."
     },
     {
-      "id": "production/observability-9",
-      "lesson": "production/observability",
-      "q": "Head-based vs tail-based sampling of traces?",
-      "a": "**Head-based** decides at the start (\"keep 1 in 100\"): cheap, but it can't know yet which requests will be slow. **Tail-based** decides at the end, so it can keep all slow or failed traces, but costs more."
-    },
-    {
-      "id": "production/observability-10",
-      "lesson": "production/observability",
-      "q": "In what order do you use metrics, traces and logs to hunt a problem?",
-      "a": "A **metric** alert fires, the dashboard shows which service, a **trace** shows which step is slow, and the **logs** for that trace ID show what exactly failed."
-    },
-    {
-      "id": "production/observability-11",
-      "lesson": "production/observability",
-      "q": "What is OpenTelemetry?",
-      "a": "One open standard for creating and sending logs, metrics and traces. You add its libraries once and send the data to any tool, so changing tools doesn't mean changing your code."
-    },
-    {
       "id": "production/latency-percentiles-1",
       "lesson": "production/latency-percentiles",
       "q": "Why is the average a bad way to sum up latency?",
       "a": "One slow request pulls it up, and it describes nobody. Nine requests at 20 to 40 ms and one at 900 ms average about 116 ms, which no request took."
-    },
-    {
-      "id": "production/latency-percentiles-2",
-      "lesson": "production/latency-percentiles",
-      "q": "How do you find the p90 of a list of latencies?",
-      "a": "Sort the times from fastest to slowest, then take the value 90% of the way down the list, rounding the position up. With 10 requests, p90 is the 9th."
     },
     {
       "id": "production/latency-percentiles-3",
@@ -86,34 +50,16 @@
       "a": "**p50** (the median): the typical experience. **p95**: 1 in 20 requests are slower, a bad but normal moment. **p99**: 1 in 100 are slower, the **tail**."
     },
     {
-      "id": "production/latency-percentiles-4",
-      "lesson": "production/latency-percentiles",
-      "q": "Why is \"1 in 100\" slow requests not rare for a real user?",
-      "a": "A user who makes 50 requests in a session has about a 40% chance of hitting at least one slower than p99. Your heaviest users hit the tail the most."
-    },
-    {
-      "id": "production/latency-percentiles-5",
-      "lesson": "production/latency-percentiles",
-      "q": "What is tail latency, and what causes it?",
-      "a": "The slowest requests: p99 and above. It comes from things that happen only sometimes: garbage collection pauses, cache misses, queues, a slow machine, and retries."
-    },
-    {
       "id": "production/latency-percentiles-6",
       "lesson": "production/latency-percentiles",
       "q": "Why does fan-out make tail latency worse?",
       "a": "The user's request is done only when the **slowest** server answers. If each of 100 servers is slow 1% of the time, about **63%** of user requests are slow."
     },
     {
-      "id": "production/latency-percentiles-7",
-      "lesson": "production/latency-percentiles",
-      "q": "What is a hedged request?",
-      "a": "If a server hasn't answered by the usual p95 time, send the same request to a second copy and use whichever answers first. In Google's \"The Tail at Scale\" tests, it cut p99.9 from 1,800 ms to 74 ms with only 2% more requests."
-    },
-    {
       "id": "production/latency-percentiles-8",
       "lesson": "production/latency-percentiles",
       "q": "How do you fix tail latency?",
-      "a": "Cache more, fix the slow cause (often garbage collection or a slow query), set timeouts, call fewer servers, and use hedged requests."
+      "a": "Cache more, fix the slow cause (often garbage collection or a slow query), set timeouts, call fewer servers, and use hedged requests (if a server is slower than the usual p95, send the same request to a second copy and use the first answer)."
     },
     {
       "id": "production/latency-percentiles-9",
@@ -128,40 +74,10 @@
       "a": "If server A's p99 is 100 ms and B's is 900 ms, the overall p99 is not 500 ms. Add the servers' histograms together, then compute the percentile."
     },
     {
-      "id": "production/latency-percentiles-11",
-      "lesson": "production/latency-percentiles",
-      "q": "At what percentile does Amazon write its internal performance targets?",
-      "a": "At the **99.9th percentile**, as its Dynamo paper (2007) explains, so that almost every customer gets a good experience, not just the typical one."
-    },
-    {
       "id": "production/sli-slo-sla-1",
       "lesson": "production/sli-slo-sla",
       "q": "SLI vs SLO vs SLA?",
       "a": "**SLI:** what you measure, usually good events / all events. **SLO:** your own goal. **SLA:** the promise to customers, with a penalty if you break it."
-    },
-    {
-      "id": "production/sli-slo-sla-2",
-      "lesson": "production/sli-slo-sla",
-      "q": "What are four common kinds of SLI?",
-      "a": "**Availability** (requests that didn't fail), **latency** (requests faster than a limit), **freshness** (data updated recently enough) and **durability** (stored data not lost)."
-    },
-    {
-      "id": "production/sli-slo-sla-3",
-      "lesson": "production/sli-slo-sla",
-      "q": "What makes a good SLI?",
-      "a": "Something users feel, like \"checkout requests that succeeded\", not \"CPU is at 60%\". Measure it close to the user, like at the load balancer: a server that is down can't count its own failures."
-    },
-    {
-      "id": "production/sli-slo-sla-4",
-      "lesson": "production/sli-slo-sla",
-      "q": "Why don't most teams count `4xx` errors as failures in an SLI?",
-      "a": "A `4xx` error is usually the client's mistake, not the service's."
-    },
-    {
-      "id": "production/sli-slo-sla-5",
-      "lesson": "production/sli-slo-sla",
-      "q": "What makes up an SLO?",
-      "a": "An SLI plus a **target** and a **time window**. Example: \"99.9% of checkout requests succeed, measured over 30 days.\""
     },
     {
       "id": "production/sli-slo-sla-6",
@@ -194,12 +110,6 @@
       "a": "Plenty left: ship faster and try risky changes. Almost gone: slow down, only small, careful releases. Used up: freeze risky releases and work on reliability fixes."
     },
     {
-      "id": "production/sli-slo-sla-11",
-      "lesson": "production/sli-slo-sla",
-      "q": "Why alert on how fast the error budget is burning?",
-      "a": "If the whole month's budget would be gone in a day or two at the current error rate, someone should be paged right away."
-    },
-    {
       "id": "production/finding-bottlenecks-1",
       "lesson": "production/finding-bottlenecks",
       "q": "What is a bottleneck?",
@@ -218,28 +128,10 @@
       "a": "Find what is slow (metrics), find where the time goes (a trace), check the resource behind it, change **one** thing, then measure again under the same load."
     },
     {
-      "id": "production/finding-bottlenecks-4",
-      "lesson": "production/finding-bottlenecks",
-      "q": "What is the classic mistake when a system is slow?",
-      "a": "Guessing, like \"it must be the code\", and then spending a week tuning code that was never the problem. Measure first."
-    },
-    {
-      "id": "production/finding-bottlenecks-5",
-      "lesson": "production/finding-bottlenecks",
-      "q": "Where do bottlenecks usually hide?",
-      "a": "In CPU, memory, disk, network, the database, or waiting on others, like full thread or connection pools, or a slow third-party API."
-    },
-    {
       "id": "production/finding-bottlenecks-6",
       "lesson": "production/finding-bottlenecks",
       "q": "What is the USE method?",
       "a": "A checklist for each resource: **Utilization** (how busy), **Saturation** (how much work is waiting), **Errors** (is it failing). A resource that is busy and has a queue is your bottleneck."
-    },
-    {
-      "id": "production/finding-bottlenecks-7",
-      "lesson": "production/finding-bottlenecks",
-      "q": "What is a slow query log?",
-      "a": "The database writes down every query slower than a limit, like 200 ms. In PostgreSQL it is `log_min_duration_statement`. In MySQL, `slow_query_log` with `long_query_time`."
     },
     {
       "id": "production/finding-bottlenecks-8",
@@ -248,22 +140,10 @@
       "a": "If it runs a million times an hour, its **total** time is bigger. In PostgreSQL, `pg_stat_statements` shows which queries take the most total time."
     },
     {
-      "id": "production/finding-bottlenecks-9",
-      "lesson": "production/finding-bottlenecks",
-      "q": "What does a `Seq Scan` on a big table in `EXPLAIN ANALYZE` usually mean?",
-      "a": "The database read every row to find a few, which usually means a missing index. In one example, adding the index took the query from 92 ms to 0.2 ms."
-    },
-    {
       "id": "production/finding-bottlenecks-10",
       "lesson": "production/finding-bottlenecks",
       "q": "What are the classic database fixes for slow requests?",
       "a": "Add an index, fix N+1 queries, fetch less (only the columns you need, and paginate), use a connection pool, and cache repeated reads."
-    },
-    {
-      "id": "production/load-testing-1",
-      "lesson": "production/load-testing",
-      "q": "What is load testing?",
-      "a": "Sending lots of fake traffic to your system on purpose, to learn where it slows down and breaks **before** real users do. The fake users are **virtual users**, run from **load generators**."
     },
     {
       "id": "production/load-testing-2",
@@ -284,18 +164,6 @@
       "a": "**Throughput** (requests per second handled), **latency** (p50, p95, p99), **error rate** (including timeouts) and **saturation** of each resource, which shows the bottleneck."
     },
     {
-      "id": "production/load-testing-5",
-      "lesson": "production/load-testing",
-      "q": "Why do you need dashboards as well as the load test tool?",
-      "a": "The test tool tells you what users felt: latency and errors. The dashboards tell you **why**, like which server was at 100% CPU."
-    },
-    {
-      "id": "production/load-testing-6",
-      "lesson": "production/load-testing",
-      "q": "What should a load test's pass line be?",
-      "a": "Decide it **before** you start. It is usually your SLO, like \"p95 under 200 ms and errors under 0.1%\"."
-    },
-    {
       "id": "production/load-testing-7",
       "lesson": "production/load-testing",
       "q": "What is \"the knee\" in load test results?",
@@ -312,30 +180,6 @@
       "lesson": "production/load-testing",
       "q": "How do you make a load test realistic?",
       "a": "Test a copy of production with production-sized data, use many different IDs (not one cached product), mix actions like real users, mock third parties, ramp up slowly, and check the load generator isn't at 100% CPU."
-    },
-    {
-      "id": "production/load-testing-10",
-      "lesson": "production/load-testing",
-      "q": "What are k6 and JMeter?",
-      "a": "Load testing tools. **k6** (Grafana Labs): tests in JavaScript, run from the command line, easy to keep in Git and run in CI. **JMeter** (Apache): a visual editor, old and popular, supports many protocols."
-    },
-    {
-      "id": "production/load-testing-11",
-      "lesson": "production/load-testing",
-      "q": "What did the Pokémon GO launch in 2016 show about load planning?",
-      "a": "Player traffic reached 50 times the launch target and 10 times the planned worst case, and the servers struggled for days. Planning and testing only for the expected load is not enough."
-    },
-    {
-      "id": "production/load-testing-12",
-      "lesson": "production/load-testing",
-      "q": "What happened at the Taylor Swift Eras Tour presale in 2022?",
-      "a": "Ticketmaster got **3.5 billion system requests**, four times its previous peak. Many fans got errors or waited for hours. When you know a huge event is coming, stress test far beyond your past record."
-    },
-    {
-      "id": "production/deployment-strategies-1",
-      "lesson": "production/deployment-strategies",
-      "q": "What is a deployment strategy?",
-      "a": "A plan for switching to a new version of your code **without downtime**, and for **going back fast** if something is wrong. The simplest, recreate (stop everything, start the new version), has downtime."
     },
     {
       "id": "production/deployment-strategies-2",
@@ -356,22 +200,10 @@
       "a": "Run two full copies. **Blue** is live. **Green** gets the new version and is tested while no user sees it. Then the load balancer switches all traffic to green in one step."
     },
     {
-      "id": "production/deployment-strategies-5",
-      "lesson": "production/deployment-strategies",
-      "q": "What are the tradeoffs of a blue-green deployment?",
-      "a": "Good: **instant rollback** (switch back to blue) and testing the real production setup. Bad: double the servers, a shared database both versions must work with, and all users move at once."
-    },
-    {
       "id": "production/deployment-strategies-6",
       "lesson": "production/deployment-strategies",
       "q": "How does a canary release work?",
       "a": "Send the new version to a small share of users first, like 1% or 5%, and watch the metrics. If it is healthy, grow the share step by step. If not, roll it back: only that small share was hit."
-    },
-    {
-      "id": "production/deployment-strategies-7",
-      "lesson": "production/deployment-strategies",
-      "q": "Why is a canary release the safest strategy, and what does it need?",
-      "a": "Bugs that only show up with real users hurt only a few of them. It needs good metrics and automation to compare canary and stable. A 1% canary can miss a rare bug, so keep watching as the share grows."
     },
     {
       "id": "production/deployment-strategies-8",
@@ -380,46 +212,16 @@
       "a": "An on/off switch in code, controlled from a config service, not a deploy. It separates deploying code from releasing a feature, so you can turn a feature off in seconds with no new deploy."
     },
     {
-      "id": "production/deployment-strategies-9",
-      "lesson": "production/deployment-strategies",
-      "q": "How do you make rolling back safe and easy?",
-      "a": "Keep every old build ready (like a Docker image), so rollback is one command. Roll back automatically when the error rate or p99 crosses a line. And ship small changes often."
-    },
-    {
       "id": "production/deployment-strategies-10",
       "lesson": "production/deployment-strategies",
       "q": "What is \"expand and contract\" for database changes?",
       "a": "Add the new column and keep the old one. Write to both, then read from the new one while still writing both. Weeks later, stop writing the old column and remove it. Old and new code keep working."
     },
     {
-      "id": "production/deployment-strategies-11",
-      "lesson": "production/deployment-strategies",
-      "q": "What database change must never ship together with a code deploy?",
-      "a": "A change that **deletes or renames** something the old code needs. Then a rollback has nowhere to go."
-    },
-    {
-      "id": "production/deployment-strategies-12",
-      "lesson": "production/deployment-strategies",
-      "q": "What went wrong in the CrowdStrike outage of July 2024?",
-      "a": "A faulty update went to all customers at the same time and crashed about 8.5 million Windows devices. Afterwards, CrowdStrike said it would release such updates in stages, starting with a small canary group."
-    },
-    {
-      "id": "production/deployment-strategies-13",
-      "lesson": "production/deployment-strategies",
-      "q": "What went wrong at Knight Capital in August 2012?",
-      "a": "New code was deployed by hand to eight servers, and one was missed. A reused setting switched on old, unused code there, which sent huge numbers of wrong orders. The firm lost over $400 million in about 45 minutes. Automated, checked deploys and removing dead code would have prevented it."
-    },
-    {
       "id": "production/cicd-docker-kubernetes-1",
       "lesson": "production/cicd-docker-kubernetes",
       "q": "CI vs continuous delivery vs continuous deployment?",
       "a": "**CI:** every push is built and tested automatically. **Continuous delivery:** every change that passes is ready to deploy with one click. **Continuous deployment:** it is deployed automatically, with no click."
-    },
-    {
-      "id": "production/cicd-docker-kubernetes-2",
-      "lesson": "production/cicd-docker-kubernetes",
-      "q": "What happens in a CI/CD pipeline when a step fails?",
-      "a": "The pipeline stops, and the change never reaches users."
     },
     {
       "id": "production/cicd-docker-kubernetes-3",
@@ -444,12 +246,6 @@
       "lesson": "production/cicd-docker-kubernetes",
       "q": "How does Kubernetes heal and scale itself?",
       "a": "If a pod crashes, the deployment starts a new one. If a node dies, its pods start on other nodes. The **HPA** (Horizontal Pod Autoscaler) adds or removes pods based on load, like CPU use."
-    },
-    {
-      "id": "production/cicd-docker-kubernetes-7",
-      "lesson": "production/cicd-docker-kubernetes",
-      "q": "What must the pods have for the HPA to scale on CPU?",
-      "a": "**CPU requests**: the amount of CPU each pod asks for in its settings. A target like 70% is a share of that request, so without one the HPA can't work."
     }
   ]
 }
