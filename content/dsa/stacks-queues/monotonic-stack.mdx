@@ -2,9 +2,392 @@
 title: "Monotonic Stack"
 description: "Find the next greater or smaller element in O(n)."
 icon: ChartColumnIncreasing
-planned: true
 ---
 
-- Next greater element
-- Daily temperatures
-- Largest rectangle in histogram
+## The idea
+
+A **monotonic stack** is a [stack](./stacks.mdx) whose values are always in order: only going down, or only going up, from bottom to top. ("Monotonic" means "always moving one way".) Before you push a new item, you pop every item that would break the order. Each item you pop has just found its answer.
+
+Think of people in a waiting room, each **waiting for someone taller** to walk in. People enter one by one. When someone new comes in, everyone **shorter** than them stops waiting: the newcomer is their answer, and they leave. Then the newcomer sits down and waits too. The people still waiting are always ordered from tallest (came in first) to shortest (came in last).
+
+- The waiting room is the **stack**.
+- Leaving when someone taller arrives is a **pop**, and the newcomer is the **answer** for the person who left.
+- It answers "who is the **next bigger** one?" for everybody in **one pass**.
+
+## How it works
+
+### The problem: next greater element
+
+For each number, find the **first bigger number to its right**. If there is none, the answer is -1.
+
+| index | 0 | 1 | 2 | 3 | 4 |
+| --- | --- | --- | --- | --- | --- |
+| value | 2 | 1 | 2 | 4 | 3 |
+| next greater | 4 | 2 | 4 | -1 | -1 |
+
+### The slow way: two loops
+
+For every number, look right until you find a bigger one.
+
+```js
+function nextGreaterSlow(numbers) {
+    const answer = [];
+
+    for (let i = 0; i < numbers.length; i++) {
+        let found = -1;
+
+        // Look right until we find a bigger number.
+        for (let j = i + 1; j < numbers.length; j++) {
+            if (numbers[j] > numbers[i]) {
+                found = numbers[j];
+                break;
+            }
+        }
+
+        answer.push(found);
+    }
+
+    return answer;
+}
+
+console.log(nextGreaterSlow([2, 1, 2, 4, 3])); // [ 4, 2, 4, -1, -1 ]
+```
+
+**Time:** O(n²). For a falling array like `[5, 4, 3, 2, 1]`, every number looks all the way to the end and finds nothing.
+
+### The fast way: a stack of numbers still waiting
+
+Walk from left to right once. The stack holds the numbers that **haven't found a bigger number yet**. For each new number:
+
+1. While the top of the stack is **smaller** than the new number: pop it. The new number is its answer.
+2. Push the new number. Now it waits too.
+3. At the end, whatever is still on the stack never found a bigger number: its answer stays -1.
+
+Because we always pop the smaller ones first, the values on the stack always **go down** from bottom to top.
+
+How `[2, 1, 2, 4, 3]` runs. (The code keeps **indexes** on the stack; the table shows their values so it's easier to read.)
+
+| Step | i | value | Popped, with its answer | Stack after (values) |
+| --- | --- | --- | --- | --- |
+| 1 | 0 | 2 | | [2] |
+| 2 | 1 | 1 | (1 is not bigger than 2) | [2, 1] |
+| 3 | 2 | 2 | the 1 at index 1 → 2 | [2, 2] |
+| 4 | 3 | 4 | the 2 at index 2 → 4, the 2 at index 0 → 4 | [4] |
+| 5 | 4 | 3 | (3 is not bigger than 4) | [4, 3] |
+| end | | | 4 and 3 stay: -1 | |
+
+In step 3, the new 2 doesn't pop the old 2, because it's equal, not bigger. Both wait.
+
+```js
+function nextGreater(numbers) {
+    // -1 for everyone, until we find a bigger number.
+    const answer = new Array(numbers.length).fill(-1);
+
+    // Indexes of numbers still waiting for a bigger one.
+    const stack = [];
+
+    for (let i = 0; i < numbers.length; i++) {
+        const current = numbers[i];
+
+        while (stack.length > 0) {
+            const topIndex = stack[stack.length - 1];
+
+            // The top is not smaller: it keeps waiting. Stop popping.
+            if (numbers[topIndex] >= current) {
+                break;
+            }
+
+            // The top is smaller: current is its next greater.
+            stack.pop();
+            answer[topIndex] = current;
+        }
+
+        stack.push(i);
+    }
+
+    return answer;
+}
+
+console.log(nextGreater([2, 1, 2, 4, 3])); // [ 4, 2, 4, -1, -1 ]
+console.log(nextGreater([5, 4, 3, 2, 1])); // [ -1, -1, -1, -1, -1 ]
+```
+
+### Why it's O(n), not O(n²)
+
+There's a `while` inside a `for`, so it looks like O(n²). But count what happens to each index: it is **pushed once** and **popped at most once**. So over the whole run, the `while` loop pops at most `n` times in total. That is about 2n steps: **O(n)** time. The stack can hold all `n` indexes (for a falling array), so it's **O(n)** space.
+
+### Why the stack holds indexes, not values
+
+- To write the answer in the **right place**: `answer[topIndex] = current`.
+- Some problems ask for a **distance**, like "how many days until...": that is `i - topIndex`.
+- You can always get the value back: `numbers[topIndex]`.
+
+### The four kinds
+
+The same loop answers four questions. Only the comparison changes.
+
+| For each item, you want... | Pop while the top is... | Who gets the answer |
+| --- | --- | --- |
+| next greater (to the right) | smaller than current | each popped item: current is its answer |
+| next smaller (to the right) | bigger than current | each popped item: current is its answer |
+| previous greater (to the left) | smaller than or equal to current | current: the top left after popping |
+| previous smaller (to the left) | bigger than or equal to current | current: the top left after popping |
+
+## Classic problems
+
+### 1. Next Greater Element I
+
+**Problem:** every number in `nums1` also appears in `nums2`, and all numbers are different. For each number in `nums1`, find the next greater number to its right **in `nums2`**, or -1. With `nums1 = [4, 1, 2]` and `nums2 = [1, 3, 4, 2]`, the answer is `[-1, 3, -1]`.
+
+**Idea:** run the monotonic stack once over `nums2`, and save each number's next greater in a `Map`. Then look up each number of `nums1`. Here the stack can hold **values**: the numbers are all different, and the `Map` is keyed by value, so we don't need positions.
+
+```js
+function nextGreaterElement(nums1, nums2) {
+    // number → its next greater number in nums2
+    const nextGreaterOf = new Map();
+    const stack = [];
+
+    for (const current of nums2) {
+        while (stack.length > 0 && stack[stack.length - 1] < current) {
+            const waiting = stack.pop();
+            nextGreaterOf.set(waiting, current);
+        }
+
+        stack.push(current);
+    }
+
+    const answer = [];
+    for (const number of nums1) {
+        if (nextGreaterOf.has(number)) {
+            answer.push(nextGreaterOf.get(number));
+        } else {
+            answer.push(-1);
+        }
+    }
+
+    return answer;
+}
+
+console.log(nextGreaterElement([4, 1, 2], [1, 3, 4, 2])); // [ -1, 3, -1 ]
+console.log(nextGreaterElement([2, 4], [1, 2, 3, 4])); // [ 3, -1 ]
+```
+
+**Time:** O(n + m) · **Space:** O(n), where `n` is the length of `nums2` and `m` the length of `nums1`. One monotonic-stack pass over `nums2`, then one O(1) map lookup per number in `nums1`.
+
+### 2. Daily Temperatures
+
+**Problem:** you get one temperature per day. For each day, how many days do you wait for a **warmer** day? If there is none, 0. `[30, 38, 30, 36, 35, 40]` gives `[1, 4, 1, 2, 1, 0]`.
+
+**Idea:** this is "next greater", but the answer is a **distance**. The stack holds the days still waiting for a warmer day. When a warmer day comes, each popped day's answer is `today - waitingDay`.
+
+| Day | Temp | Popped days, with their answer | Stack after (days) |
+| --- | --- | --- | --- |
+| 0 | 30 | | [0] |
+| 1 | 38 | day 0: 1 - 0 = **1** | [1] |
+| 2 | 30 | | [1, 2] |
+| 3 | 36 | day 2: 3 - 2 = **1** | [1, 3] |
+| 4 | 35 | | [1, 3, 4] |
+| 5 | 40 | day 4: **1**, day 3: **2**, day 1: **4** | [5] |
+| end | | day 5 never gets warmer: **0** | |
+
+Look at day 5: one warm day answers three waiting days at once.
+
+```js
+function dailyTemperatures(temperatures) {
+    // 0 for every day, until we find a warmer one.
+    const answer = new Array(temperatures.length).fill(0);
+
+    // Days still waiting for a warmer day.
+    const stack = [];
+
+    for (let day = 0; day < temperatures.length; day++) {
+        const today = temperatures[day];
+
+        while (stack.length > 0) {
+            const waitingDay = stack[stack.length - 1];
+
+            if (temperatures[waitingDay] >= today) {
+                break;
+            }
+
+            // Today is the first warmer day for waitingDay.
+            stack.pop();
+            answer[waitingDay] = day - waitingDay;
+        }
+
+        stack.push(day);
+    }
+
+    return answer;
+}
+
+console.log(dailyTemperatures([30, 38, 30, 36, 35, 40])); // [ 1, 4, 1, 2, 1, 0 ]
+console.log(dailyTemperatures([30, 40, 50, 60])); // [ 1, 1, 1, 0 ]
+```
+
+**Time:** O(n) · **Space:** O(n). Each day is pushed once and popped at most once.
+
+### 3. Largest Rectangle in Histogram
+
+**Problem:** a histogram has bars of width 1. Given their heights, find the area of the **largest rectangle** that fits inside. For `[2, 1, 5, 6, 2, 3]` the answer is **10**. This one is rated Hard, so we'll build it in steps.
+
+The `X` cells below are the best rectangle: height 5 (the shorter of the two bars), width 2.
+
+```text
+         #
+      X  X
+      X  X
+      X  X     #
+#     X  X  #  #
+#  #  X  X  #  #
+0  1  2  3  4  5    <- index
+```
+
+**Step 1: the idea for one bar.** Pick a bar and use its **full height**. How wide can the rectangle be? It can stretch left and right until it hits a **shorter** bar. So for each bar we need:
+
+- the nearest **shorter bar on the left** (or -1 if there is none, like a wall just before the start);
+- the nearest **shorter bar on the right** (or `n` if there is none, a wall just after the end).
+
+Then `width = right - left - 1` and `area = height × width`. The answer is the biggest area.
+
+| index | 0 | 1 | 2 | 3 | 4 | 5 |
+| --- | --- | --- | --- | --- | --- | --- |
+| height | 2 | 1 | 5 | 6 | 2 | 3 |
+| shorter bar on the left | -1 | -1 | 1 | 2 | 1 | 4 |
+| shorter bar on the right | 1 | 6 | 4 | 4 | 6 | 6 |
+| width | 1 | 6 | 2 | 1 | 4 | 1 |
+| area | 2 | 6 | **10** | 6 | 8 | 3 |
+
+Scanning left and right from every bar would be O(n²). Monotonic stacks find all the shorter neighbors in O(n).
+
+**Step 2: the shorter bar on the right.** This is "next smaller": pop while the top is **taller** than the current bar.
+
+```js
+// For each bar, the index of the first shorter bar to its right.
+// If there is none, heights.length (just past the end).
+function nextShorter(heights) {
+    const result = new Array(heights.length).fill(heights.length);
+    const stack = [];
+
+    for (let i = 0; i < heights.length; i++) {
+        while (stack.length > 0) {
+            const topIndex = stack[stack.length - 1];
+
+            if (heights[topIndex] <= heights[i]) {
+                break;
+            }
+
+            // Bar i is the first shorter bar for topIndex.
+            stack.pop();
+            result[topIndex] = i;
+        }
+
+        stack.push(i);
+    }
+
+    return result;
+}
+
+console.log(nextShorter([2, 1, 5, 6, 2, 3])); // [ 1, 6, 4, 4, 6, 6 ]
+```
+
+**Step 3: the shorter bar on the left.** This is "previous smaller": pop every bar that is as tall or taller than the current bar. Whatever is left on top is shorter, and it's the nearest one.
+
+```js
+// For each bar, the index of the nearest shorter bar to its left.
+// If there is none, -1 (just before the start).
+function previousShorter(heights) {
+    const result = new Array(heights.length).fill(-1);
+    const stack = [];
+
+    for (let i = 0; i < heights.length; i++) {
+        while (stack.length > 0) {
+            const topIndex = stack[stack.length - 1];
+
+            if (heights[topIndex] < heights[i]) {
+                break;
+            }
+
+            // As tall or taller: it can't be a "shorter bar" for i or later.
+            stack.pop();
+        }
+
+        // What is left on top is shorter than bar i.
+        if (stack.length > 0) {
+            result[i] = stack[stack.length - 1];
+        }
+
+        stack.push(i);
+    }
+
+    return result;
+}
+
+console.log(previousShorter([2, 1, 5, 6, 2, 3])); // [ -1, -1, 1, 2, 1, 4 ]
+```
+
+**Step 4: put it together.**
+
+```js
+function largestRectangleArea(heights) {
+    const leftShorter = previousShorter(heights);
+    const rightShorter = nextShorter(heights);
+    let largest = 0;
+
+    for (let i = 0; i < heights.length; i++) {
+        // The bar stretches between its two shorter neighbors.
+        const width = rightShorter[i] - leftShorter[i] - 1;
+        const area = heights[i] * width;
+        largest = Math.max(largest, area);
+    }
+
+    return largest;
+}
+
+console.log(largestRectangleArea([2, 1, 5, 6, 2, 3])); // 10
+console.log(largestRectangleArea([2, 4])); // 4
+console.log(largestRectangleArea([3, 3, 3])); // 9
+```
+
+**Time:** O(n) · **Space:** O(n). Three passes, and in each one every index is pushed and popped at most once. The two helper arrays and the stack are O(n).
+
+It can also be done in **one pass** with one stack: when a bar is popped, the bar that popped it marks its right edge, and the new top marks its left edge. The Big O is the same, and the step-by-step version above is easier to get right under pressure.
+
+## How to spot it
+
+- The words **next greater**, **next smaller**, **previous** greater or smaller, **nearest taller**.
+- "How many days **until** a warmer day", "how many days in a row was the price **at most** today's" (Online Stock Span).
+- For each item, you need the **first** item to its left or right that is bigger or smaller.
+- Your first idea is a nested loop that **scans forward until it finds a bigger item**: O(n²). A monotonic stack makes it O(n).
+- An area limited by the **shortest bar**: Largest Rectangle in Histogram, Maximal Rectangle.
+- More practice: Remove K Digits, Sum of Subarray Minimums, Car Fleet.
+
+## Common mistakes
+
+- **Storing values when you need positions.** For distances or for writing the answer in place, store **indexes**.
+- **`<` vs `<=` with equal values.** Decide whether an equal value counts. For "next greater", an equal value is not greater, so it keeps waiting.
+- **Forgetting the items left on the stack.** Fill the answer array with the default (-1 or 0) first, so leftovers are already right.
+- **Saying O(n²)** because of the `while` inside the `for`. Each index is pushed and popped once: O(n).
+- **Reading the top of an empty stack.** Always check `stack.length > 0` first.
+- **Histogram widths off by one.** Use -1 and `n` as the walls, and `width = right - left - 1`.
+
+## In the interview
+
+- Start with the O(n²) idea in one sentence, then say why a stack removes the repeated scanning.
+- Say what the stack holds, and its order: "indexes of days still waiting; their temperatures go down".
+- Explain the O(n) with "pushed once, popped once".
+
+> "For each day I need the next warmer day. I'll walk left to right and keep a stack of the days still waiting. Their temperatures go down from bottom to top. When a warmer day comes, I pop every colder day and set its answer to the difference in days. Each day is pushed and popped once, so it's O(n) time and O(n) space."
+
+**Likely follow-up:** "What if the array is circular, so the last number can look at the start again?" (Next Greater Element II)
+
+**Answer:** "I walk the array twice, using `i % n` as the index, and only push during the first pass. On the second pass, numbers still waiting near the end can find bigger numbers at the start. It's still O(n)."
+
+<Callout title="Remember this" type="success">
+  - **Monotonic stack = a stack kept in order.** Before pushing, pop everything that would break the order.
+  - **Next greater:** pop while the top is smaller. Each popped item's answer is the current item.
+  - Store **indexes**, not values: you need the position to write the answer and to measure distances.
+  - It's **O(n)**: every index is pushed once and popped at most once, even with a `while` inside the `for`.
+  - **Daily Temperatures:** answer = today's index minus the popped day's index.
+  - **Histogram:** for each bar, find the nearest shorter bar on both sides; `width = right - left - 1`.
+</Callout>

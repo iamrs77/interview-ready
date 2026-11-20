@@ -2,11 +2,555 @@
 title: "1D Dynamic Programming"
 description: "DP with one changing value."
 icon: Footprints
-planned: true
 ---
 
-- House robber
-- Coin change
-- Longest increasing subsequence
-- Word break
-- Maximum subarray (Kadane's algorithm)
+## The idea
+
+In **1D DP**, only **one value changes** as the problem gets smaller: a position in an array or string, or an amount of money. So the answers fit in a plain array: `dp[i]` is the answer for a smaller version of the problem.
+
+Think of walking down a street of houses with a **notepad**. At each house you write one number: "the best I can do up to here". When you reach house 10, you don't rethink houses 1 to 9. You just read the last line or two of your notepad and add one step.
+
+Every problem on this page is solved with the [DP recipe](./dp-basics.mdx) from the basics page: **1. what `dp[i]` means, 2. the recurrence, 3. base cases, 4. order of filling.**
+
+## How it works
+
+### Two kinds of `dp[i]`
+
+In step 1 of the recipe, `dp[i]` almost always means one of two things. Knowing which one tells you **where the final answer is**.
+
+| `dp[i]` means... | Example | Where the answer is |
+| --- | --- | --- |
+| the best for the **first `i` items** (or amount `i`) | House Robber, Coin Change, Word Break, Decode Ways | the last cell, `dp[n]` |
+| the best that **ends exactly at index `i`** | Maximum Subarray, Longest Increasing Subsequence | the **biggest cell** anywhere in `dp` |
+
+Why "ends exactly at `i`"? For subarrays and subsequences, the next item can only join if it knows the **last item** you picked. "Ends at `i`" pins that down.
+
+### Why `dp` often has `n + 1` cells
+
+For "the first `i` items", we make `dp` one cell longer than the input. `dp[0]` stands for **nothing yet**: no houses, an empty string, an amount of 0. Its answer is easy, so it makes a clean base case.
+
+```js
+const houses = [2, 7, 9];
+
+// dp[0] = no houses, dp[1] = first house, ..., dp[3] = all three.
+const dp = new Array(houses.length + 1).fill(0);
+
+console.log(dp.length); // 4
+
+// The price: house number i lives at index i - 1.
+const i = 2;
+console.log(houses[i - 1]); // 7
+```
+
+### Every 1D problem is one choice, repeated
+
+At each `i` you make one small choice, and the recurrence just tries every option:
+
+| Problem | The choice at each `i` |
+| --- | --- |
+| House Robber | rob this house, or skip it |
+| Coin Change | which coin is the last one |
+| Longest Increasing Subsequence | which earlier number comes just before this one |
+| Word Break | where the last word starts |
+| Maximum Subarray | extend the subarray before, or start fresh here |
+| Decode Ways | read one digit, or two digits |
+
+## Classic problems
+
+### 1. House Robber
+
+**Problem:** each house has some money. You can't rob two houses **next to each other** (the alarm goes off). Find the most money you can take. `[2, 7, 9, 3, 1]` → **12** (houses with 2, 9 and 1).
+
+**Idea:** at each house, choose. **Skip it**, and keep the best total from the houses before. Or **rob it**, add its money, and then the house just before is off limits, so add the best total from two houses back.
+
+1. **What `dp[i]` means:** the most money from the first `i` houses.
+2. **Recurrence:** `dp[i] = max(dp[i - 1], dp[i - 2] + houses[i - 1])` (skip, or rob house `i`).
+3. **Base cases:** `dp[0] = 0` (no houses), `dp[1] = houses[0]` (rob the only house).
+4. **Order:** `i` from 2 up to `n`. **Answer:** `dp[n]`.
+
+The table for `[2, 7, 9, 3, 1]`:
+
+| i | money of house i | skip: dp[i - 1] | rob: dp[i - 2] + money | dp[i] |
+| --- | --- | --- | --- | --- |
+| 0 | - | - | - | 0 |
+| 1 | 2 | - | - | 2 |
+| 2 | 7 | 2 | 0 + 7 = 7 | 7 |
+| 3 | 9 | 7 | 2 + 9 = 11 | 11 |
+| 4 | 3 | 11 | 7 + 3 = 10 | 11 |
+| 5 | 1 | 11 | 11 + 1 = 12 | **12** |
+
+**Top-down (memoization).** `best(i)` follows the recipe directly. It's a helper inside `robMemo`, so it can see `houses` and `memo`.
+
+```js
+function robMemo(houses) {
+    const memo = {};
+
+    // best(i) = the most money from the first i houses.
+    function best(i) {
+        if (i === 0) {
+            return 0;
+        }
+
+        if (i === 1) {
+            return houses[0];
+        }
+
+        if (memo[i] !== undefined) {
+            return memo[i];
+        }
+
+        const skip = best(i - 1);
+        const take = best(i - 2) + houses[i - 1];
+
+        memo[i] = Math.max(skip, take);
+        return memo[i];
+    }
+
+    return best(houses.length);
+}
+
+console.log(robMemo([2, 7, 9, 3, 1])); // 12
+```
+
+**Bottom-up (tabulation).** The same recipe, filled with a loop.
+
+```js
+function rob(houses) {
+    const count = houses.length;
+
+    // dp[i] = the most money from the first i houses.
+    const dp = new Array(count + 1).fill(0);
+
+    // Base cases.
+    dp[0] = 0;
+    dp[1] = houses[0];
+
+    for (let i = 2; i <= count; i++) {
+        // House number i is at index i - 1.
+        const money = houses[i - 1];
+
+        const skip = dp[i - 1];
+        const take = dp[i - 2] + money;
+
+        dp[i] = Math.max(skip, take);
+    }
+
+    return dp[count];
+}
+
+console.log(rob([2, 7, 9, 3, 1])); // 12
+console.log(rob([1, 2, 3, 1])); // 4
+```
+
+**Saving space.** `dp[i]` only reads the last two cells, so two variables are enough.
+
+```js
+function robTwoValues(houses) {
+    // Best totals two houses back and one house back.
+    let twoBack = 0;
+    let oneBack = 0;
+
+    for (const money of houses) {
+        const skip = oneBack;
+        const take = twoBack + money;
+        const current = Math.max(skip, take);
+
+        twoBack = oneBack;
+        oneBack = current;
+    }
+
+    return oneBack;
+}
+
+console.log(robTwoValues([2, 7, 9, 3, 1])); // 12
+```
+
+**Time:** O(n), one step per house. **Space:** O(n) for the memo or table, O(1) with two variables.
+
+### 2. Coin Change
+
+**Problem:** given coin values and an amount, find the **fewest coins** that add up to the amount. You can use each coin as many times as you like. Return `-1` if it can't be done. `coins = [1, 3, 4]`, `amount = 6` → **2** (3 + 3).
+
+**Why not greedy?** Taking the biggest coin first gives 4 + 1 + 1 = **3** coins. But 3 + 3 is only **2**. The obvious choice can be wrong, so we try every coin.
+
+**Idea:** to make amount `i`, some coin was the **last one** added. If that coin is `coin`, the rest (`i - coin`) was made the best way possible. Try every coin and keep the smallest count.
+
+1. **What `dp[i]` means:** the fewest coins that add up to amount `i`.
+2. **Recurrence:** `dp[i] = min(dp[i - coin] + 1)` over every coin with `coin <= i`.
+3. **Base cases:** `dp[0] = 0` (no coins for amount 0). Every other cell starts at `Infinity`, which means "not possible yet".
+4. **Order:** `i` from 1 up to `amount`. **Answer:** `dp[amount]`, or `-1` if it's still `Infinity`.
+
+The table for `coins = [1, 3, 4]`, `amount = 6`. Each column shows `dp[i - coin] + 1`, or `-` when the coin is too big:
+
+| i | last coin 1 | last coin 3 | last coin 4 | dp[i] |
+| --- | --- | --- | --- | --- |
+| 0 | - | - | - | 0 |
+| 1 | dp[0] + 1 = 1 | - | - | 1 |
+| 2 | dp[1] + 1 = 2 | - | - | 2 |
+| 3 | dp[2] + 1 = 3 | dp[0] + 1 = 1 | - | 1 |
+| 4 | dp[3] + 1 = 2 | dp[1] + 1 = 2 | dp[0] + 1 = 1 | 1 |
+| 5 | dp[4] + 1 = 2 | dp[2] + 1 = 3 | dp[1] + 1 = 2 | 2 |
+| 6 | dp[5] + 1 = 3 | dp[3] + 1 = 2 | dp[2] + 1 = 3 | **2** |
+
+```js
+function coinChange(coins, amount) {
+    // dp[i] = fewest coins for amount i. Infinity = not possible yet.
+    const dp = new Array(amount + 1).fill(Infinity);
+
+    // Base case: 0 coins make the amount 0.
+    dp[0] = 0;
+
+    for (let i = 1; i <= amount; i++) {
+        for (const coin of coins) {
+            // Only coins that fit into this amount.
+            if (coin <= i) {
+                // This coin + the fewest coins for what's left.
+                const withThisCoin = dp[i - coin] + 1;
+                dp[i] = Math.min(dp[i], withThisCoin);
+            }
+        }
+    }
+
+    if (dp[amount] === Infinity) {
+        return -1;
+    }
+
+    return dp[amount];
+}
+
+console.log(coinChange([1, 3, 4], 6)); // 2
+console.log(coinChange([1, 2, 5], 11)); // 3
+console.log(coinChange([2], 3)); // -1
+```
+
+**Time:** O(amount × coins), because each of the `amount` cells tries every coin. **Space:** O(amount) for the table.
+
+Counting the **number of ways** to make the amount is a different problem: see Coin Change II on the [Knapsack](./knapsack.mdx) page.
+
+### 3. Longest Increasing Subsequence
+
+**Problem:** find the length of the longest **strictly increasing subsequence**. A subsequence keeps the order but may skip items. `[10, 9, 2, 5, 3, 7, 101, 18]` → **4** (for example 2, 3, 7, 101).
+
+**Idea:** a number can join a subsequence only if the subsequence ends on a **smaller** number. So for each number, look back at every earlier, smaller number and extend the longest one.
+
+1. **What `dp[i]` means:** the length of the longest increasing subsequence that **ends at index `i`**.
+2. **Recurrence:** `dp[i] = 1 + max(dp[before])` over every `before < i` with `nums[before] < nums[i]`. If there is none, `dp[i] = 1`.
+3. **Base cases:** every `dp[i]` starts at 1 (the number on its own).
+4. **Order:** `i` from left to right; for each `i`, look at every `before` from 0 to `i - 1`. **Answer:** the **biggest** `dp[i]`, not `dp[n - 1]`.
+
+The table for `[10, 9, 2, 5, 3, 7, 101, 18]`:
+
+| i | nums[i] | smaller numbers before it (their dp) | dp[i] |
+| --- | --- | --- | --- |
+| 0 | 10 | none | 1 |
+| 1 | 9 | none | 1 |
+| 2 | 2 | none | 1 |
+| 3 | 5 | 2 (1) | 2 |
+| 4 | 3 | 2 (1) | 2 |
+| 5 | 7 | 2 (1), 5 (2), 3 (2) | 3 |
+| 6 | 101 | all of them, best is 7 (3) | **4** |
+| 7 | 18 | 10 (1), 9 (1), 2 (1), 5 (2), 3 (2), 7 (3) | **4** |
+
+The biggest cell is 4.
+
+```js
+function lengthOfLIS(nums) {
+    // dp[i] = longest increasing subsequence ending at index i.
+    // Base case: each number alone has length 1.
+    const dp = new Array(nums.length).fill(1);
+    let longest = 1;
+
+    for (let i = 1; i < nums.length; i++) {
+        // Look back at every earlier number.
+        for (let before = 0; before < i; before++) {
+            // nums[i] can extend a subsequence ending on a smaller number.
+            if (nums[before] < nums[i]) {
+                const extended = dp[before] + 1;
+                dp[i] = Math.max(dp[i], extended);
+            }
+        }
+
+        // The longest one can end anywhere, so track the biggest cell.
+        longest = Math.max(longest, dp[i]);
+    }
+
+    return longest;
+}
+
+console.log(lengthOfLIS([10, 9, 2, 5, 3, 7, 101, 18])); // 4
+console.log(lengthOfLIS([0, 1, 0, 3, 2, 3])); // 4
+console.log(lengthOfLIS([7, 7, 7, 7])); // 1
+```
+
+**Time:** O(n²), because each number looks back at all the numbers before it. **Space:** O(n) for the table.
+
+**Faster: O(n log n) with binary search.** Keep an array `tails`, where `tails[k]` is the **smallest possible last number** of an increasing subsequence of length `k + 1`. A small last number is good: more numbers can follow it. For each number, find the first tail that is `>=` it and replace it. If there is none, the number makes a longer subsequence, so add it at the end.
+
+```js
+function lengthOfLISFast(nums) {
+    // tails[k] = smallest last number of an increasing run of length k + 1.
+    const tails = [];
+
+    for (const num of nums) {
+        // Binary search for the first tail that is >= num.
+        let left = 0;
+        let right = tails.length;
+
+        while (left < right) {
+            const middle = Math.floor((left + right) / 2);
+
+            if (tails[middle] < num) {
+                left = middle + 1;
+            } else {
+                right = middle;
+            }
+        }
+
+        // Replace that tail. If left === tails.length, this adds num.
+        tails[left] = num;
+    }
+
+    return tails.length;
+}
+
+console.log(lengthOfLISFast([10, 9, 2, 5, 3, 7, 101, 18])); // 4
+```
+
+How `tails` changes for the same input:
+
+| num | what happens | tails |
+| --- | --- | --- |
+| 10 | add | `[10]` |
+| 9 | replace 10 | `[9]` |
+| 2 | replace 9 | `[2]` |
+| 5 | add | `[2, 5]` |
+| 3 | replace 5 | `[2, 3]` |
+| 7 | add | `[2, 3, 7]` |
+| 101 | add | `[2, 3, 7, 101]` |
+| 18 | replace 101 | `[2, 3, 7, 18]` |
+
+The length is 4. Careful: `tails` is **not** a real subsequence from the input. Only its length is right.
+
+**Time:** O(n log n): one binary search (log n) per number. **Space:** O(n). See [Binary Search](../searching-sorting/binary-search.mdx) for the search itself.
+
+### 4. Word Break
+
+**Problem:** can a string be split into words from a dictionary? Words can be reused. `"leetcode"` with `["leet", "code"]` → **true** ("leet" + "code").
+
+**Idea:** the first `i` letters can be split if there's some point `start` where the letters **before** `start` can be split, and the letters from `start` to `i` form **one dictionary word**.
+
+1. **What `dp[i]` means:** can the first `i` letters be split into words? (In the code, `i` is called `end`, because it's where the last word ends.)
+2. **Recurrence:** `dp[end] = true` if, for some `start < end`, `dp[start]` is true and `text.slice(start, end)` is a word.
+3. **Base cases:** `dp[0] = true` (the empty start needs no words).
+4. **Order:** `end` from 1 up to `n`. **Answer:** `dp[n]`.
+
+The table for `"leetcode"`:
+
+| i | first i letters | a split that works | dp[i] |
+| --- | --- | --- | --- |
+| 0 | "" | nothing to split | true |
+| 1 to 3 | "l", "le", "lee" | none | false |
+| 4 | "leet" | dp[0] is true + "leet" is a word | true |
+| 5 to 7 | "leetc", "leetco", "leetcod" | none | false |
+| 8 | "leetcode" | dp[4] is true + "code" is a word | **true** |
+
+```js
+function wordBreak(text, wordList) {
+    const words = new Set(wordList);
+
+    // dp[end] = can the first `end` letters be split into words?
+    const dp = new Array(text.length + 1).fill(false);
+    dp[0] = true;
+
+    for (let end = 1; end <= text.length; end++) {
+        // Try every place where the last word could start.
+        for (let start = 0; start < end; start++) {
+            const lastWord = text.slice(start, end);
+
+            // The part before must split, and the rest must be a word.
+            if (dp[start] && words.has(lastWord)) {
+                dp[end] = true;
+                break;
+            }
+        }
+    }
+
+    return dp[text.length];
+}
+
+const animals = ["cats", "dog", "sand", "and", "cat"];
+
+console.log(wordBreak("leetcode", ["leet", "code"])); // true
+console.log(wordBreak("applepenapple", ["apple", "pen"])); // true
+console.log(wordBreak("catsandog", animals)); // false
+```
+
+The `Set` makes each "is this a word?" check O(1) on average. `break` stops early: one working split is enough.
+
+**Time:** O(n³): there are about n² pairs of `start` and `end`, and each `slice` copies up to `n` letters. **Space:** O(n) for the table, plus the set of words.
+
+### 5. Maximum Subarray (Kadane's algorithm)
+
+**Problem:** find the biggest sum of a **contiguous** subarray (at least one number). `[-2, 1, -3, 4, -1, 2, 1, -5, 4]` → **6** (the part `[4, -1, 2, 1]`).
+
+**Idea:** at each number, choose. **Extend** the best subarray that ended just before, or **start fresh** here. If the sum before is negative, it only drags you down, so start fresh.
+
+1. **What `dp[i]` means:** the best sum of a subarray that **ends exactly at index `i`**.
+2. **Recurrence:** `dp[i] = max(nums[i], dp[i - 1] + nums[i])` (start fresh, or extend).
+3. **Base cases:** `dp[0] = nums[0]`.
+4. **Order:** `i` from 1 up to `n - 1`. **Answer:** the **biggest** `dp[i]`.
+
+The table for `[-2, 1, -3, 4, -1, 2, 1, -5, 4]`:
+
+| i | nums[i] | start fresh | extend: dp[i - 1] + nums[i] | dp[i] | best so far |
+| --- | --- | --- | --- | --- | --- |
+| 0 | -2 | - | - | -2 | -2 |
+| 1 | 1 | 1 | -2 + 1 = -1 | 1 | 1 |
+| 2 | -3 | -3 | 1 - 3 = -2 | -2 | 1 |
+| 3 | 4 | 4 | -2 + 4 = 2 | 4 | 4 |
+| 4 | -1 | -1 | 4 - 1 = 3 | 3 | 4 |
+| 5 | 2 | 2 | 3 + 2 = 5 | 5 | 5 |
+| 6 | 1 | 1 | 5 + 1 = 6 | 6 | **6** |
+| 7 | -5 | -5 | 6 - 5 = 1 | 1 | 6 |
+| 8 | 4 | 4 | 1 + 4 = 5 | 5 | 6 |
+
+```js
+function maxSubArrayTable(nums) {
+    // dp[i] = best sum of a subarray that ends exactly at index i.
+    const dp = new Array(nums.length).fill(0);
+
+    // Base case: the only subarray ending at 0 is [nums[0]].
+    dp[0] = nums[0];
+    let best = dp[0];
+
+    for (let i = 1; i < nums.length; i++) {
+        const startFresh = nums[i];
+        const extend = dp[i - 1] + nums[i];
+
+        dp[i] = Math.max(startFresh, extend);
+        best = Math.max(best, dp[i]);
+    }
+
+    return best;
+}
+
+console.log(maxSubArrayTable([-2, 1, -3, 4, -1, 2, 1, -5, 4])); // 6
+```
+
+**Saving space: this is Kadane's algorithm.** `dp[i]` only reads `dp[i - 1]`, so one variable (`current`) is enough.
+
+```js
+function maxSubArray(nums) {
+    // Best sum ending here, and the best sum seen anywhere.
+    let current = nums[0];
+    let best = nums[0];
+
+    for (let i = 1; i < nums.length; i++) {
+        // Start fresh at nums[i], or extend the run before it.
+        current = Math.max(nums[i], current + nums[i]);
+        best = Math.max(best, current);
+    }
+
+    return best;
+}
+
+console.log(maxSubArray([-2, 1, -3, 4, -1, 2, 1, -5, 4])); // 6
+console.log(maxSubArray([-3, -1, -2])); // -1
+```
+
+**Time:** O(n), one pass. **Space:** O(n) for the table, O(1) for Kadane.
+
+### 6. Decode Ways
+
+**Problem:** letters are coded as numbers: `"1"` is A, `"2"` is B, ... `"26"` is Z. Given a string of digits, count the ways to decode it. `"226"` → **3**: `2 2 6` (BBF), `22 6` (VF), `2 26` (BZ).
+
+**Idea:** this is Climbing Stairs with rules. At each point you read **one digit** or **two digits**. One digit works if it's not `"0"`. Two digits work if they make a number from 10 to 26.
+
+1. **What `dp[i]` means:** the number of ways to decode the first `i` digits.
+2. **Recurrence:** `dp[i] = (dp[i - 1] if the last digit is 1-9) + (dp[i - 2] if the last two digits are 10-26)`.
+3. **Base cases:** `dp[0] = 1` (one way to decode nothing). `dp[1] = 1` if the first digit is not `"0"`, else 0.
+4. **Order:** `i` from 2 up to `n`. **Answer:** `dp[n]`.
+
+The table for `"226"`:
+
+| i | first i digits | last digit alone | last two digits | dp[i] |
+| --- | --- | --- | --- | --- |
+| 0 | "" | - | - | 1 |
+| 1 | "2" | "2" is fine | - | 1 |
+| 2 | "22" | "2" is fine → + dp[1] = 1 | "22" is fine → + dp[0] = 1 | 2 |
+| 3 | "226" | "6" is fine → + dp[2] = 2 | "26" is fine → + dp[1] = 1 | **3** |
+
+```js
+function numDecodings(digits) {
+    const count = digits.length;
+
+    // dp[i] = ways to decode the first i digits.
+    const dp = new Array(count + 1).fill(0);
+
+    // Base cases. There is no letter for "0".
+    dp[0] = 1;
+    if (digits[0] !== "0") {
+        dp[1] = 1;
+    }
+
+    for (let i = 2; i <= count; i++) {
+        // The last digit on its own: "1" to "9".
+        if (digits[i - 1] !== "0") {
+            dp[i] = dp[i] + dp[i - 1];
+        }
+
+        // The last two digits together: "10" to "26".
+        const twoDigits = Number(digits.slice(i - 2, i));
+        if (twoDigits >= 10 && twoDigits <= 26) {
+            dp[i] = dp[i] + dp[i - 2];
+        }
+    }
+
+    return dp[count];
+}
+
+console.log(numDecodings("226")); // 3
+console.log(numDecodings("11106")); // 2
+console.log(numDecodings("06")); // 0
+```
+
+In `"11106"`, the `"0"` can't stand alone, so it must pair up as `"10"`. That leaves only `1 1 10 6` (AAJF) and `11 10 6` (KJF). `"06"` is 0 ways: `"0"` is not a letter, and `"06"` is not 10-26.
+
+**Time:** O(n), one step per digit. **Space:** O(n) for the table. Like Climbing Stairs, `dp[i]` only reads the last two cells, so two variables bring it down to O(1).
+
+## How to spot it
+
+- The input is **one array or one string**, or **one amount**, and the problem asks for a **count, a min/max, or yes/no**.
+- You can describe a smaller version with **one number**: "the first `i` houses", "amount `i`", "the subarray ending at `i`".
+- **"Can't pick neighbours"** → House Robber. **"Fewest coins"** → Coin Change. **"Contiguous subarray, biggest sum"** → Kadane. **"Subsequence, increasing"** → LIS. **"Split into dictionary words"** → Word Break. **"Read one or two at a time"** → Decode Ways / Climbing Stairs.
+- If the problem needs **two** changing values (two strings, a grid, items and a weight limit), it's [2D DP](./two-d-dp.mdx) or [Knapsack](./knapsack.mdx).
+
+## Common mistakes
+
+- **Returning `dp[n - 1]` for an "ends at `i`" problem.** For LIS and Kadane, the best can end anywhere. Track the biggest cell.
+- **Off by one with `n + 1` cells.** House number `i` is `houses[i - 1]`, and word end `end` uses `text.slice(start, end)` (the end is not included).
+- **Starting Coin Change with 0 instead of `Infinity`.** `Math.min` would always pick the fake 0.
+- **Starting Kadane's `best` at 0.** For `[-3, -1, -2]` it returns 0, but the answer is -1. Start with `nums[0]`.
+- **Forgetting the `"0"` rules in Decode Ways.** `"0"` alone is not a letter, and `"06"` is not a two-digit letter.
+- **Thinking `tails` in the fast LIS is the subsequence.** Only its length is the answer.
+
+## In the interview
+
+- Name the **choice** first: "At each house I either rob it or skip it."
+- Then say the recipe: what `dp[i]` means, the recurrence, the base cases, the order. Say clearly whether `dp[i]` means "first `i` items" or "ends at `i`".
+- Fill the table for the example by hand. It takes a minute and shows the interviewer you understand it.
+
+> "Let `dp[i]` be the fewest coins that make amount `i`. The last coin I add is one of the coins, so `dp[i]` is the minimum of `dp[i - coin] + 1` over all coins that fit. `dp[0]` is 0 and the rest start at Infinity. I fill from 1 up to the amount. That's amount × coins work."
+
+**Likely follow-up:** "LIS is O(n²). Can you do better?"
+
+**Answer:** "Yes, O(n log n). I keep `tails`, the smallest last number for each length. For each number I binary search for the first tail that's `>=` it and replace it, or add it at the end. The length of `tails` is the answer."
+
+<Callout title="Remember this" type="success">
+  - 1D DP = **one changing value** (an index or an amount), so the answers fit in one array.
+  - `dp[i]` means **"best for the first `i` items"** (answer: `dp[n]`) or **"best ending at `i`"** (answer: the biggest cell).
+  - **House Robber:** `max(skip, rob + dp[i - 2])`. **Coin Change:** `min(dp[i - coin] + 1)`, start with Infinity.
+  - **Kadane:** `current = max(num, current + num)`. A negative running sum means start fresh. O(n) time, O(1) space.
+  - **LIS:** O(n²) by looking back at every smaller number; O(n log n) with `tails` + binary search.
+  - **Word Break:** `dp[end]` is true if `dp[start]` is true and `slice(start, end)` is a word. **Decode Ways:** one digit (1-9) + two digits (10-26).
+</Callout>

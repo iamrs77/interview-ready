@@ -2,9 +2,459 @@
 title: "Greedy"
 description: "Take the best choice now, and prove it works."
 icon: Coins
-planned: true
 ---
 
-- When greedy works (and when it doesn't)
-- Jump game
-- Gas station
+## The idea
+
+A **greedy** algorithm makes the choice that looks **best right now**, at every step, and never goes back to change it. It hopes that many good small choices add up to the best answer overall.
+
+Think of a **shop assistant giving change** with US coins (25, 10, 5 and 1 cent). For 41 cents, they grab the biggest coin that fits, again and again: 25, then 10, then 5, then 1. Four coins, and they never stop to plan. That is greedy.
+
+The hard part is not the code, which is usually one short loop. The hard part is knowing **when greedy gives the right answer**, and saying why.
+
+## How it works
+
+### "Local best choice" in plain words
+
+- **Local** means "looking only at this step". The shop assistant only asks: "What is the biggest coin that fits **now**?"
+- **Global** means "the best answer for the whole problem": the fewest coins in total.
+- Greedy works when the local best choice is **always part of** a global best answer.
+
+Here is the shop assistant as code. The coins are sorted from biggest to smallest.
+
+```js
+function greedyChange(coins, amount) {
+    const used = [];
+    let remaining = amount;
+
+    for (const coin of coins) {
+        // Take this coin as many times as it fits.
+        while (remaining >= coin) {
+            used.push(coin);
+            remaining = remaining - coin;
+        }
+    }
+
+    return used;
+}
+
+console.log(greedyChange([25, 10, 5, 1], 41)); // [ 25, 10, 5, 1 ]
+console.log(greedyChange([25, 10, 5, 1], 30)); // [ 25, 5 ]
+```
+
+How `greedyChange([25, 10, 5, 1], 41)` runs:
+
+| Step | Coin | Remaining before | Fits? | Remaining after |
+| --- | --- | --- | --- | --- |
+| 1 | 25 | 41 | yes, take it | 16 |
+| 2 | 25 | 16 | no, move on | 16 |
+| 3 | 10 | 16 | yes, take it | 6 |
+| 4 | 5 | 6 | yes, take it | 1 |
+| 5 | 1 | 1 | yes, take it | 0 |
+
+### When greedy fails: coins [1, 3, 4] for 6
+
+Now change the coins to 4, 3 and 1, and ask for 6 cents.
+
+```js
+console.log(greedyChange([4, 3, 1], 6)); // [ 4, 1, 1 ]
+```
+
+| Way | Coins | How many |
+| --- | --- | --- |
+| Greedy: biggest coin first | 4 + 1 + 1 | 3 |
+| Best answer | 3 + 3 | **2** |
+
+Greedy grabbed the 4 because it looked best right now. But that left 2 cents, which only two 1s can pay. Taking a smaller coin first would have been better. Greedy can't see that, because it never looks ahead and never undoes a choice.
+
+So "fewest coins" for **any** set of coins is not a greedy problem. It needs [dynamic programming](../dynamic-programming/one-d-dp.mdx), which tries every coin at every amount. Greedy only happens to work for coin sets like the US one.
+
+### How to convince the interviewer it works
+
+You have two tools. Use the first one before you write any code.
+
+**1. Try to break it.** Make up 2 or 3 small, tricky inputs and run your rule by hand. If one gives a wrong answer (like `[1, 3, 4]` for 6), greedy is wrong. Say so, and move to DP or backtracking.
+
+**2. The exchange argument.** If you can't break it, explain why it is safe:
+
+> "Take any best answer. If it didn't make my greedy choice, swap its choice for mine. The answer doesn't get worse. So some best answer always makes my greedy choice, and I can repeat this for every step."
+
+Let's use it on a small problem: **you have a budget. Buy as many toys as you can.** The greedy rule: buy the cheapest toys first.
+
+**Why it is safe:** suppose a best answer buys an expensive toy but skips a cheaper one. Swap them. You still have the same number of toys, and you spent **less** money. So buying the cheapest first is never worse.
+
+```js
+function maxToys(prices, budget) {
+    // Copy, then sort cheapest first, so the input is not changed.
+    const sortedPrices = [...prices].sort((a, b) => a - b);
+
+    let count = 0;
+    let moneyLeft = budget;
+
+    for (const price of sortedPrices) {
+        // The cheapest toy left is too expensive: nothing else fits.
+        if (price > moneyLeft) {
+            break;
+        }
+
+        moneyLeft = moneyLeft - price;
+        count++;
+    }
+
+    return count;
+}
+
+console.log(maxToys([1, 12, 5, 111, 200, 1000, 10], 50)); // 4
+```
+
+It buys the toys for 1, 5, 10 and 12 (28 in total). The next one costs 111, which is more than the 22 left.
+
+**Time:** O(n log n) · **Space:** O(n). The sort costs n log n and the loop is one pass. The sorted copy holds n prices.
+
+### The greedy recipe
+
+1. **What choice do I make at each step?** (Which coin? Which toy? Where to jump?)
+2. **What is "best right now"?** Often it becomes obvious after sorting: cheapest first, earliest end first.
+3. **Try to break it** with small inputs.
+4. **Say why it is safe** in one sentence, then code it: usually one loop with a "best so far" or "farthest so far" variable.
+
+Greedy is fast because it never goes back: most greedy solutions are **O(n)**, or **O(n log n)** if they sort first.
+
+## Classic problems
+
+### 1. Jump Game
+
+**Problem:** each number says the **longest** jump you can make from that index. Starting at index 0, can you reach the last index? `[2, 3, 1, 1, 4]` → `true`. `[3, 2, 1, 0, 4]` → `false`, because every path lands on the 0 and gets stuck.
+
+**Idea:** you don't need to know which jumps to make. Just keep `farthest`: the farthest index you can reach so far. Walk left to right. If you reach an index that is past `farthest`, you are stuck. This is safe because you can always jump **shorter** than the maximum, so every index up to `farthest` is reachable.
+
+```js
+function canJump(nums) {
+    // The farthest index we can reach so far.
+    let farthest = 0;
+
+    for (let i = 0; i < nums.length; i++) {
+        // We can't even get to this index: stuck.
+        if (i > farthest) {
+            return false;
+        }
+
+        const reachFromHere = i + nums[i];
+        farthest = Math.max(farthest, reachFromHere);
+    }
+
+    return true;
+}
+
+console.log(canJump([2, 3, 1, 1, 4])); // true
+console.log(canJump([3, 2, 1, 0, 4])); // false
+```
+
+How `canJump([3, 2, 1, 0, 4])` runs:
+
+| i | nums[i] | i > farthest? | i + nums[i] | farthest after |
+| --- | --- | --- | --- | --- |
+| 0 | 3 | no (0 ≤ 0) | 3 | 3 |
+| 1 | 2 | no | 3 | 3 |
+| 2 | 1 | no | 3 | 3 |
+| 3 | 0 | no | 3 | 3 |
+| 4 | 4 | **yes** (4 > 3) | - | return `false` |
+
+**Time:** O(n) · **Space:** O(1). One pass over the array, and only one extra number.
+
+### 2. Jump Game II
+
+**Problem:** same jumps, but now you can always reach the end. What is the **fewest** number of jumps? `[2, 3, 1, 1, 4]` → `2` (index 0 → 1 → 4).
+
+**Idea:** think in **zones**. With 0 jumps you are at index 0. With 1 jump you can reach indexes 1 to 2. With 2 jumps you can reach indexes 3 to 4. Walk through one zone at a time, and while you do, note the farthest index any spot in it can reach. That farthest index is the end of the next zone. Each time you finish a zone, you add one jump.
+
+- `currentEnd` is the last index of the zone you are walking through.
+- `farthest` is the farthest index you can reach with **one more** jump.
+
+```js
+function minJumps(nums) {
+    let jumps = 0;
+    let currentEnd = 0;
+    let farthest = 0;
+
+    // Stop BEFORE the last index: once we can get there, we're done.
+    for (let i = 0; i < nums.length - 1; i++) {
+        const reachFromHere = i + nums[i];
+        farthest = Math.max(farthest, reachFromHere);
+
+        // End of this zone: we must jump to get any further.
+        if (i === currentEnd) {
+            jumps++;
+            currentEnd = farthest;
+        }
+    }
+
+    return jumps;
+}
+
+console.log(minJumps([2, 3, 1, 1, 4])); // 2
+console.log(minJumps([1, 1, 1, 1])); // 3
+```
+
+How `minJumps([2, 3, 1, 1, 4])` runs:
+
+| i | i + nums[i] | farthest | i === currentEnd? | jumps | currentEnd |
+| --- | --- | --- | --- | --- | --- |
+| start | - | 0 | - | 0 | 0 |
+| 0 | 2 | 2 | yes | 1 | 2 |
+| 1 | 4 | 4 | no | 1 | 2 |
+| 2 | 3 | 4 | yes | 2 | 4 |
+| 3 | 4 | 4 | no | 2 | 4 |
+
+The loop stops at index 3. The answer is **2**.
+
+**Time:** O(n) · **Space:** O(1). Each index is visited once, and we only keep three numbers.
+
+### 3. Gas Station
+
+**Problem:** gas stations sit in a circle. At station `i` you fill up `gas[i]`, and driving to the next station uses `cost[i]`. Your tank starts empty. Return the station where you can start and drive the full circle, or `-1` if there is none. `gas = [1, 2, 3, 4, 5]`, `cost = [3, 4, 5, 1, 2]` → `3`.
+
+**Idea:** two facts make this one pass.
+
+1. If the **total** gas is less than the **total** cost, no start can work. Return `-1`.
+2. Drive from station 0 and keep a `tank`. If the tank goes below 0 after station `i`, then **no station from `start` to `i` can be the answer**. At each of those stations you arrived with 0 or more gas. Starting there instead only takes that gas away, so you would run out at `i` or earlier. So the next start to try is `i + 1`.
+
+```js
+function canCompleteCircuit(gas, cost) {
+    let totalLeft = 0;
+    let tank = 0;
+    let start = 0;
+
+    for (let i = 0; i < gas.length; i++) {
+        // Gas we get at station i, minus gas to reach the next one.
+        const gain = gas[i] - cost[i];
+
+        totalLeft = totalLeft + gain;
+        tank = tank + gain;
+
+        // We ran out before station i + 1.
+        // No station from start to i works, so try i + 1.
+        if (tank < 0) {
+            start = i + 1;
+            tank = 0;
+        }
+    }
+
+    // Less gas than cost in total: no start can work.
+    if (totalLeft < 0) {
+        return -1;
+    }
+
+    return start;
+}
+
+console.log(canCompleteCircuit([1, 2, 3, 4, 5], [3, 4, 5, 1, 2])); // 3
+console.log(canCompleteCircuit([2, 3, 4], [3, 4, 3])); // -1
+```
+
+How the first example runs. The gains are `[-2, -2, -2, 3, 3]`:
+
+| i | gain | tank | tank < 0? | start |
+| --- | --- | --- | --- | --- |
+| 0 | -2 | -2 | yes, reset tank to 0 | 1 |
+| 1 | -2 | -2 | yes, reset tank to 0 | 2 |
+| 2 | -2 | -2 | yes, reset tank to 0 | 3 |
+| 3 | 3 | 3 | no | 3 |
+| 4 | 3 | 6 | no | 3 |
+
+`totalLeft` is 0, which is not below 0, so the answer is **3**. We never check the drive back around from station 4 to station 3. We don't need to: the total is not negative, so the gas left over from stations 3 and 4 covers the stations before 3.
+
+**Time:** O(n) · **Space:** O(1). One pass, and three numbers. Trying every start would be O(n²).
+
+### 4. Maximum Subarray, the greedy way
+
+**Problem:** find the biggest sum of a run of numbers next to each other. `[-2, 1, -3, 4, -1, 2, 1, -5, 4]` → `6`, from `[4, -1, 2, 1]`.
+
+**Idea:** walk left to right with a running sum. If the running sum drops **below 0**, throw it away and start fresh, because a negative start only makes whatever comes next smaller. Keep the best sum you have seen. This is **Kadane's algorithm**. The [1D DP page](../dynamic-programming/one-d-dp.mdx) shows it as DP; it is the same code.
+
+```js
+function maxSubArray(nums) {
+    let best = nums[0];
+    let runningSum = 0;
+
+    for (const number of nums) {
+        runningSum = runningSum + number;
+
+        if (runningSum > best) {
+            best = runningSum;
+        }
+
+        // A negative sum only drags down what comes next. Drop it.
+        if (runningSum < 0) {
+            runningSum = 0;
+        }
+    }
+
+    return best;
+}
+
+console.log(maxSubArray([-2, 1, -3, 4, -1, 2, 1, -5, 4])); // 6
+console.log(maxSubArray([-3, -1, -2])); // -1
+```
+
+How the first example runs:
+
+| number | runningSum after adding | best | Below 0? |
+| --- | --- | --- | --- |
+| -2 | -2 | -2 | yes, reset to 0 |
+| 1 | 1 | 1 | no |
+| -3 | -2 | 1 | yes, reset to 0 |
+| 4 | 4 | 4 | no |
+| -1 | 3 | 4 | no |
+| 2 | 5 | 5 | no |
+| 1 | **6** | **6** | no |
+| -5 | 1 | 6 | no |
+| 4 | 5 | 6 | no |
+
+**Time:** O(n) · **Space:** O(1). One pass, and two numbers.
+
+### 5. Partition Labels
+
+**Problem:** cut a string into as many parts as possible, so that each letter appears in **only one** part. Return the size of each part. `"ababcbacadefegdehijhklij"` → `[9, 7, 8]`.
+
+**Idea:** a part can't end until it holds **every copy** of each letter inside it. So first, write down the **last** index of every letter. Then walk the string and stretch `partEnd` to the last index of each letter you meet. When you reach `partEnd`, every letter in the part is finished: cut there. Cutting as early as possible gives the most parts.
+
+```js
+function partitionLabels(text) {
+    // Step 1: the last index where each letter appears.
+    const lastIndex = new Map();
+
+    for (let i = 0; i < text.length; i++) {
+        lastIndex.set(text[i], i);
+    }
+
+    // Step 2: grow each part until it holds all copies of its letters.
+    const sizes = [];
+    let partStart = 0;
+    let partEnd = 0;
+
+    for (let i = 0; i < text.length; i++) {
+        const letterEnd = lastIndex.get(text[i]);
+        partEnd = Math.max(partEnd, letterEnd);
+
+        // Every letter in this part ends here: cut.
+        if (i === partEnd) {
+            sizes.push(partEnd - partStart + 1);
+            partStart = i + 1;
+        }
+    }
+
+    return sizes;
+}
+
+console.log(partitionLabels("ababcbacadefegdehijhklij")); // [ 9, 7, 8 ]
+console.log(partitionLabels("abacdd")); // [ 3, 1, 2 ]
+```
+
+How `partitionLabels("abacdd")` runs. The last indexes are a → 2, b → 1, c → 3, d → 5:
+
+| i | Letter | Its last index | partEnd | i === partEnd? |
+| --- | --- | --- | --- | --- |
+| 0 | a | 2 | 2 | no |
+| 1 | b | 1 | 2 | no |
+| 2 | a | 2 | 2 | yes, cut `"aba"` (size 3) |
+| 3 | c | 3 | 3 | yes, cut `"c"` (size 1) |
+| 4 | d | 5 | 5 | no |
+| 5 | d | 5 | 5 | yes, cut `"dd"` (size 2) |
+
+Each letter covers a range, from its first index to its last. So this is really an [intervals](./intervals.mdx) problem: merge the overlapping ranges.
+
+**Time:** O(n) · **Space:** O(1). Two passes over the string. The map holds at most 26 letters, however long the string is.
+
+### 6. Hand of Straights (in short)
+
+**Problem:** can you split a hand of cards into groups of `groupSize` cards in a row? `[1, 2, 3, 6, 2, 3, 4, 7, 8]` with `groupSize` 3 → `true`: `[1, 2, 3]`, `[2, 3, 4]`, `[6, 7, 8]`.
+
+**Idea:** look at the **smallest** card left. No smaller card exists to go before it, so it **must start** a group. Count the cards, then go from the smallest card up. Each copy of a card that is still left starts its own group, so take that many of each of the next `groupSize` cards.
+
+First, count the cards.
+
+```js
+function countCards(hand) {
+    const counts = new Map();
+
+    for (const card of hand) {
+        const oldCount = counts.get(card) || 0;
+        counts.set(card, oldCount + 1);
+    }
+
+    return counts;
+}
+```
+
+Then build the groups, smallest card first.
+
+```js
+function isNStraightHand(hand, groupSize) {
+    const counts = countCards(hand);
+    const cards = [...counts.keys()].sort((a, b) => a - b);
+
+    for (const card of cards) {
+        // Each copy of this card left must start a new group.
+        const groupsToStart = counts.get(card);
+
+        for (let next = card; next < card + groupSize; next++) {
+            const have = counts.get(next) || 0;
+
+            // Not enough of this card to finish every group.
+            if (have < groupsToStart) {
+                return false;
+            }
+
+            counts.set(next, have - groupsToStart);
+        }
+    }
+
+    return true;
+}
+
+console.log(isNStraightHand([1, 2, 3, 6, 2, 3, 4, 7, 8], 3)); // true
+console.log(isNStraightHand([1, 2, 3, 4, 5], 4)); // false
+```
+
+When `groupsToStart` is 0 (all copies were used by earlier groups), the inner loop takes 0 of each card, so nothing changes.
+
+**Time:** O(n log n + n · k), where `k` is `groupSize` · **Space:** O(n). Sorting the different card values costs n log n. Then each value runs a loop of `k` steps. The map holds up to n values.
+
+## How to spot it
+
+- The problem asks for the **minimum** or **maximum** of something, and a simple rule seems to pick the next step: cheapest first, biggest coin first, farthest jump.
+- "**Can you reach** the end?", "Is it possible?", "fewest jumps / steps".
+- The problem gets easy **after sorting**: by price, by end time, by deadline.
+- You can solve it in one pass with a "**best so far**" or "**farthest so far**" variable.
+- **Warning sign:** if a choice now can block a better choice later (odd coin sets, 0/1 [knapsack](../dynamic-programming/knapsack.mdx)), greedy is wrong. Try a small counterexample, then use DP.
+
+## Common mistakes
+
+- **Trusting greedy without testing it.** "Biggest coin first" looks right until coins `[1, 3, 4]` and amount 6. Always try to break your rule first.
+- **Jump Game II: looping to the very last index.** With `i < nums.length` instead of `i < nums.length - 1`, `[2, 3, 1, 1, 4]` returns 3, because it counts one extra jump when `currentEnd` lands right on the last index.
+- **Maximum Subarray: starting `best` at 0.** For `[-3, -1, -2]` that returns 0, which isn't a real sum. Start at `nums[0]`, and update `best` **before** you reset the running sum.
+- **Gas Station: skipping the total check.** Without it, `[2, 3, 4]` / `[3, 4, 3]` returns station 2 instead of `-1`.
+- **Partition Labels: using the first index of a letter** instead of the last. The part must stretch to the **last** copy.
+- **Sorting the caller's array by accident.** `sort()` changes the original. Copy first: `[...prices].sort(...)`.
+
+## In the interview
+
+- Say the greedy rule in one sentence, then **why it is safe**: an exchange argument, or "every index up to `farthest` is reachable".
+- Say that you tried to break it with a small example. Interviewers like to hear that you checked.
+- If you can't explain why it works, say so, and offer DP as the safe choice.
+
+> "I keep the farthest index I can reach so far. Every index up to it is reachable, because I can always jump shorter. If I ever stand on an index past it, I'm stuck and return false. That's one pass, so O(n) time and O(1) space."
+
+**Likely follow-up:** "How do you know greedy is right here, and not just lucky on the examples?"
+
+**Answer:** "I tried to break it first, and then I used an exchange argument. Take any best answer that doesn't make my choice at some step. Swap its choice for mine, and it is still valid and just as good. So some best answer always agrees with greedy. If I had found a counterexample, like coins 1, 3 and 4 for amount 6, I'd switch to DP."
+
+<Callout title="Remember this" type="success">
+  - **Greedy = take the best choice right now, and never go back.** Usually one loop, O(n), or O(n log n) with a sort.
+  - Greedy is not always right: coins **[1, 3, 4] for 6** gives 4 + 1 + 1 (3 coins), but 3 + 3 (2 coins) is best. That needs DP.
+  - **Try to break it** with small inputs first. Then explain it with an **exchange argument**: swapping a best answer's choice for mine never makes it worse.
+  - **Jump Game:** keep `farthest`; stuck if `i > farthest`. **Jump Game II:** count zones, jump when `i === currentEnd`, loop to `n - 2`.
+  - **Gas Station:** total gas < total cost → `-1`; if the tank goes negative at `i`, start again at `i + 1`.
+  - **Kadane:** add the number, update `best`, drop the running sum when it goes below 0. **Partition Labels:** stretch the part to each letter's last index.
+</Callout>

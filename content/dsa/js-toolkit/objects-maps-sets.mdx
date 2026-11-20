@@ -2,10 +2,447 @@
 title: "Objects, Maps and Sets"
 description: "Key-value storage in JavaScript, and which one to pick."
 icon: Braces
-planned: true
 ---
 
-- Object vs Map: when to use which
-- Map and Set methods tables
-- Counting with a Map
-- Removing duplicates with a Set
+## The idea
+
+Sometimes you want to find a value **by a name**, not by a position. Think of the **contacts on your phone**: you type "Mum" and get the number straight away, without scrolling through every contact.
+
+JavaScript gives you three tools for this:
+
+- an **Object** and a **Map** store **key → value** pairs, like contacts: name → phone number;
+- a **Set** stores only keys, like a **guest list**: each name is on it once, and you can quickly check "is this person on the list?".
+
+All three find a key in **O(1) on average**, because they use hashing. That's why they turn so many O(n²) solutions into O(n). How hashing works: [Hash Maps and Sets](../arrays-hashing/hash-maps-and-sets.mdx).
+
+## Objects
+
+An object is the quickest way to write down one record, like a person.
+
+```js
+const person = {
+    name: "Asha",
+    age: 27,
+};
+
+// Read with a dot, or with brackets and a string
+console.log(person.name); // Asha
+console.log(person["age"]); // 27
+
+// Add and update
+person.city = "Toronto";
+person.age = 28;
+
+// Delete
+delete person.city;
+
+// Check if a key exists
+console.log("age" in person); // true
+console.log(Object.hasOwn(person, "city")); // false
+```
+
+When the key is in a **variable**, you must use brackets. `person.key` looks for a key named "key".
+
+```js
+const person = { name: "Asha", age: 28 };
+const field = "name";
+
+console.log(person[field]); // Asha
+console.log(person.field); // undefined
+```
+
+### Object methods
+
+The examples use `obj = { a: 1, b: 2 }`. **n** = number of keys.
+
+| Method | What it does | Example | Cost |
+| --- | --- | --- | --- |
+| `obj.key` or `obj[key]` | Read a value | `obj.a` → `1` | O(1) |
+| `obj[key] = value` | Add or update | `obj.c = 3` | O(1) |
+| `delete obj[key]` | Remove a key | `delete obj.a` | O(1) |
+| `key in obj` | Does the key exist? Also finds built-in keys like `"toString"` | `"a" in obj` → `true` | O(1) |
+| `Object.hasOwn(obj, key)` | Does the key exist? Only your own keys. (Older: `obj.hasOwnProperty(key)`) | `Object.hasOwn(obj, "toString")` → `false` | O(1) |
+| `Object.keys(obj)` | Array of keys, **always strings** | `Object.keys(obj)` → `["a", "b"]` | O(n) |
+| `Object.values(obj)` | Array of values | `Object.values(obj)` → `[1, 2]` | O(n) |
+| `Object.entries(obj)` | Array of `[key, value]` pairs | `Object.entries(obj)` → `[["a", 1], ["b", 2]]` | O(n) |
+| `Object.fromEntries(pairs)` | Object from `[key, value]` pairs | `Object.fromEntries([["a", 1]])` → `{ a: 1 }` | O(n) |
+| `for (const key in obj)` | Loop over the keys | | O(n) |
+
+### Trap: object keys are always strings
+
+Any key you use is turned into a string. A number becomes text. An object becomes the text `"[object Object]"`.
+
+```js
+const seen = {};
+
+seen[1] = "one";
+
+// The number 1 was turned into the string "1".
+console.log(seen["1"]); // one
+console.log(1 in seen); // true
+console.log(Object.keys(seen)); // [ '1' ]
+
+// Every object turns into the same text, "[object Object]".
+const point = { x: 1 };
+seen[point] = "a point";
+console.log(Object.keys(seen)); // [ '1', '[object Object]' ]
+```
+
+This bites when you read the keys back and treat them as numbers.
+
+```js
+const counts = { 3: 2, 7: 1 };
+
+for (const key of Object.keys(counts)) {
+    console.log(key + 1);
+}
+// 31
+// 71
+```
+
+`"3" + 1` is `"31"`, not 4. Turn the key back into a number first: `Number(key) + 1`.
+
+### Trap: `in` finds built-in keys
+
+Every object comes with built-in keys like `toString` and `constructor`. So `in` says "yes" for words you never added. Count the words of a text that contains "constructor", and it breaks:
+
+```js
+const words = ["constructor", "map"];
+const counts = {};
+
+for (const word of words) {
+    if (word in counts) {
+        counts[word]++;
+    } else {
+        counts[word] = 1;
+    }
+}
+
+console.log(counts); // { constructor: NaN, map: 1 }
+```
+
+`"constructor" in counts` was already `true`, so the code added 1 to a built-in function and got `NaN`. Use a **Map**, or `Object.hasOwn(counts, word)`.
+
+### Trap: objects reorder number-like keys
+
+An object puts keys that look like numbers **first, in number order**, then the other keys in the order you added them. A Map keeps the **exact order you added** them.
+
+```js
+const obj = {};
+obj.b = 1;
+obj[2] = 1;
+obj.a = 1;
+obj[1] = 1;
+console.log(Object.keys(obj)); // [ '1', '2', 'b', 'a' ]
+
+const map = new Map();
+map.set("b", 1);
+map.set(2, 1);
+map.set("a", 1);
+map.set(1, 1);
+console.log([...map.keys()]); // [ 'b', 2, 'a', 1 ]
+```
+
+## Map
+
+A Map is made for lookups. Keys can be **anything** (numbers stay numbers), it keeps the **order you added** them, and it has a `size`.
+
+```js
+const ages = new Map();
+
+ages.set("Asha", 27);
+ages.set("Ben", 31);
+
+console.log(ages.get("Asha")); // 27
+console.log(ages.get("Zoe")); // undefined
+console.log(ages.has("Ben")); // true
+console.log(ages.size); // 2
+
+ages.delete("Ben");
+console.log(ages); // Map(1) { 'Asha' => 27 }
+```
+
+### Map methods
+
+**n** = number of entries.
+
+| Method | What it does | Example | Cost |
+| --- | --- | --- | --- |
+| `new Map()` | Empty map | `const map = new Map()` | O(1) |
+| `new Map(pairs)` | Map from `[key, value]` pairs | `new Map([["a", 1]])` | O(n) |
+| `map.set(key, value)` | Add or update | `map.set("a", 1)` | O(1) |
+| `map.get(key)` | Value for key, or undefined | `map.get("a")` → `1` | O(1) |
+| `map.has(key)` | Does the key exist? | `map.has("a")` → `true` | O(1) |
+| `map.delete(key)` | Remove a key. Returns true if it was there | `map.delete("a")` → `true` | O(1) |
+| `map.size` | Number of entries (no brackets) | `map.size` → `0` | O(1) |
+| `map.clear()` | Remove everything | `map.clear()` | O(n) |
+| `map.keys()`, `map.values()`, `map.entries()` | Iterators, in the order you added | `[...map.keys()]` → `["a", "b"]` | O(n) to loop |
+| `for (const [key, value] of map)` | Loop over the pairs | | O(n) |
+| `map.forEach((value, key) => ...)` | Loop: **value first**, then key | | O(n) |
+
+All the O(1) costs are **on average**. Use `Array.from(map.keys())` or `[...map.keys()]` when you need a real array.
+
+Looping over a Map:
+
+```js
+const ages = new Map([
+    ["Asha", 27],
+    ["Ben", 31],
+]);
+
+for (const [name, age] of ages) {
+    console.log(name, age);
+}
+// Asha 27
+// Ben 31
+
+// forEach gives the VALUE first, then the key.
+ages.forEach((age, name) => {
+    console.log(name, age);
+});
+// Asha 27
+// Ben 31
+```
+
+Map keys keep their type. But arrays and objects are matched **by reference**: a new `[0, 1]` is a different key, even with the same numbers inside.
+
+```js
+const map = new Map();
+
+map.set(1, "number one");
+map.set("1", "text one");
+console.log(map.size); // 2
+
+map.set([0, 1], "a cell");
+console.log(map.has([0, 1])); // false
+```
+
+The fix is a string key like `"0,1"`: see the patterns below.
+
+Converting between an object and a Map:
+
+```js
+const prices = { tea: 2, cake: 5 };
+
+const priceMap = new Map(Object.entries(prices));
+console.log(priceMap.get("cake")); // 5
+
+const backToObject = Object.fromEntries(priceMap);
+console.log(backToObject); // { tea: 2, cake: 5 }
+```
+
+## Set
+
+A Set holds each value **once**. Adding the same value again does nothing.
+
+```js
+const seen = new Set();
+
+seen.add("a");
+seen.add("b");
+seen.add("a");
+
+console.log(seen.size); // 2
+console.log(seen.has("a")); // true
+
+seen.delete("a");
+console.log(seen); // Set(1) { 'b' }
+```
+
+### Set methods
+
+**n** = number of values.
+
+| Method | What it does | Example | Cost |
+| --- | --- | --- | --- |
+| `new Set()` | Empty set | `const set = new Set()` | O(1) |
+| `new Set(array)` | Set from an array. Duplicates are dropped | `new Set([1, 1, 2])` → `Set(2) { 1, 2 }` | O(n) |
+| `set.add(value)` | Add a value | `set.add(3)` | O(1) |
+| `set.has(value)` | Is the value there? | `set.has(3)` → `true` | O(1) |
+| `set.delete(value)` | Remove a value. Returns true if it was there | `set.delete(3)` → `true` | O(1) |
+| `set.size` | Number of values (no brackets) | `set.size` → `2` | O(1) |
+| `set.clear()` | Remove everything | `set.clear()` | O(n) |
+| `[...set]` or `Array.from(set)` | Array of the values, in the order you added | `[...new Set([1, 1, 2])]` → `[1, 2]` | O(n) |
+| `for (const value of set)` | Loop over the values | | O(n) |
+
+A Set also has `keys()`, `values()` and `entries()`. For a Set, `keys()` and `values()` are the same thing. You rarely need them: just loop over the set.
+
+The big win: `set.has(x)` is O(1), while `array.includes(x)` is O(n).
+
+### Removing duplicates
+
+```js
+const numbers = [1, 2, 2, 3, 4, 4];
+
+const unique = new Set(numbers);
+console.log(unique); // Set(4) { 1, 2, 3, 4 }
+
+const uniqueArray = [...unique];
+console.log(uniqueArray); // [ 1, 2, 3, 4 ]
+```
+
+That's O(n), and the values stay in the order they first appeared.
+
+## Which one to pick
+
+| You need to... | Pick | Why |
+| --- | --- | --- |
+| Count things, or look up a value by key | **Map** | Any key type, keeps order, has `size`, no built-in keys |
+| Only remember "have I seen this?" | **Set** | No values to store |
+| Describe one record: a person, a point | **Object** | Short to write: `person.name` |
+| Count lowercase letters only | **Array of 26** | Simplest and fastest: see [Strings](./strings.mdx) |
+| Return the result as JSON | **Object** | `JSON.stringify(map)` gives `"{}"` |
+
+And the main differences between an Object and a Map:
+
+| | Object | Map |
+| --- | --- | --- |
+| Key types | Strings only (others are turned into strings) | Anything |
+| Order of keys | Number-like keys first, then in the order added | Always the order added |
+| Size | `Object.keys(obj).length`: O(n) | `map.size`: O(1) |
+| Built-in keys | Yes: `"toString" in obj` is `true` | None |
+| Loop | `for...in`, or `Object.entries` | `for...of` |
+
+## Patterns you will write again and again
+
+**Count with a Map** (a frequency map).
+
+```js
+const fruits = ["apple", "pear", "apple", "fig", "apple"];
+const counts = new Map();
+
+for (const fruit of fruits) {
+    // get() gives undefined the first time, so start from 0.
+    const oldCount = counts.get(fruit) || 0;
+    counts.set(fruit, oldCount + 1);
+}
+
+console.log(counts); // Map(3) { 'apple' => 3, 'pear' => 1, 'fig' => 1 }
+```
+
+**Find the most common item** by looping over the counts.
+
+```js
+const counts = new Map([["apple", 3], ["pear", 1], ["fig", 1]]);
+
+let bestItem = null;
+let bestCount = 0;
+
+for (const [item, count] of counts) {
+    if (count > bestCount) {
+        bestItem = item;
+        bestCount = count;
+    }
+}
+
+console.log(bestItem, bestCount); // apple 3
+```
+
+**Seen before? Use a Set.** Returns `true` as soon as a value shows up twice.
+
+```js
+function hasDuplicate(numbers) {
+    const seen = new Set();
+
+    for (const number of numbers) {
+        if (seen.has(number)) {
+            return true;
+        }
+
+        seen.add(number);
+    }
+
+    return false;
+}
+
+console.log(hasDuplicate([1, 2, 3, 1])); // true
+console.log(hasDuplicate([1, 2, 3])); // false
+```
+
+**Remember where you saw a value: value → index.** This is the heart of "Two Sum".
+
+```js
+function twoSum(numbers, target) {
+    // value -> the index where we saw it
+    const indexByValue = new Map();
+
+    for (let i = 0; i < numbers.length; i++) {
+        const needed = target - numbers[i];
+
+        if (indexByValue.has(needed)) {
+            return [indexByValue.get(needed), i];
+        }
+
+        indexByValue.set(numbers[i], i);
+    }
+
+    return [];
+}
+
+console.log(twoSum([2, 7, 11, 15], 9)); // [ 0, 1 ]
+```
+
+**Group by a key.** Here, words with the same sorted letters go in the same group ("Group Anagrams").
+
+```js
+function groupAnagrams(words) {
+    const groups = new Map();
+
+    for (const word of words) {
+        const letters = word.split("");
+        letters.sort();
+        const key = letters.join("");
+
+        if (!groups.has(key)) {
+            groups.set(key, []);
+        }
+
+        groups.get(key).push(word);
+    }
+
+    return [...groups.values()];
+}
+
+const words = ["eat", "tea", "tan", "nat", "ate"];
+console.log(groupAnagrams(words)); // [ [ 'eat', 'tea', 'ate' ], [ 'tan', 'nat' ] ]
+```
+
+**Store grid cells as a string key.** Arrays are matched by reference, so turn the cell into text like `"2,3"`.
+
+```js
+const visited = new Set();
+
+const row = 2;
+const col = 3;
+visited.add(`${row},${col}`);
+
+console.log(visited.has("2,3")); // true
+console.log(visited.has([2, 3])); // false
+```
+
+## Common mistakes
+
+- **`map[key] = value` on a Map.** It doesn't add an entry, just a normal property on the Map object, and `map.size` stays 0. Always use `set` and `get`.
+- **`if (counts[char])` to check a key.** A count of 0 is falsy, so this says "not there". Use `has` or `in`.
+- **Using objects or arrays as object keys.** They all become strings. Use a Map, or a string key like `"2,3"`.
+- **Forgetting that `Object.keys` gives strings.** Turn them back with `Number(key)`.
+- **`map.forEach((key, value) => ...)`.** The order is value first, then key.
+- **`set.has([2, 3])`** to find an array. A new array is never "the same" array. Use string keys.
+- **`JSON.stringify(map)`.** It gives `"{}"`. Turn it into an object first with `Object.fromEntries(map)`.
+
+## In the interview
+
+Say why you use the map: "I'll keep a Map from value to index. Each lookup is O(1) on average, so one pass makes this O(n) instead of the O(n²) double loop. The Map costs O(n) extra space."
+
+**Likely follow-up:** "Is a hash map lookup always O(1)?"
+
+**Answer:** "On average, yes. In the worst case, when many keys land in the same bucket, a lookup can take O(n). That is very rare, so we say O(1) on average."
+
+<Callout title="Remember this" type="success">
+  - Object, Map and Set find a key in **O(1) on average**. Array `includes` is O(n).
+  - **Object keys are always strings**: `obj[1]` is `obj["1"]`, and `Object.keys` gives strings.
+  - Pick a **Map** for counting and lookups: any key type, keeps the **order you added**, has `size`, no built-in keys like `"toString"`.
+  - Use `map.get` and `map.set`, never `map[key]`. `forEach` gives the **value first**, then the key.
+  - `[...new Set(arr)]` removes duplicates in O(n).
+  - Arrays as Map or Set keys are matched **by reference**: use a string key like `"2,3"`.
+</Callout>

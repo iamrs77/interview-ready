@@ -2,10 +2,395 @@
 title: "Two Pointers"
 description: "Two indexes that move toward each other or together."
 icon: ArrowLeftRight
-planned: true
 ---
 
-- What a pointer is: a variable that holds an index
-- Opposite ends on a sorted array
-- Fast and slow writers (remove duplicates)
-- Classic problems: 3Sum, container with most water
+## The idea
+
+**Two pointers** means you keep **two indexes** into the same array or string, and move them by simple rules. One pass with two pointers often replaces two nested loops, so O(n²) becomes O(n).
+
+Think of checking if a word reads the same backwards, like "level". You put **one finger on the first letter** and **one finger on the last letter**. Same letter? Move both fingers one step in, and compare again. You stop when the fingers meet. Those two fingers are the two pointers.
+
+## How it works
+
+### What a pointer is
+
+A pointer is just a **variable that holds an index**. It doesn't hold the value itself. You read the value with `numbers[left]`.
+
+```js
+const numbers = [10, 20, 30, 40, 50];
+
+let left = 0;
+let right = numbers.length - 1;
+
+console.log(left, right); // 0 4
+console.log(numbers[left], numbers[right]); // 10 50
+```
+
+| Index | 0 | 1 | 2 | 3 | 4 |
+| --- | --- | --- | --- | --- | --- |
+| Value | 10 | 20 | 30 | 40 | 50 |
+| Pointer | `left` | | | | `right` |
+
+### Moving toward each other
+
+`left++` moves the left pointer one step forward. `right--` moves the right pointer one step back. The loop runs **while `left < right`**, so it stops when the pointers meet or cross.
+
+```js
+const numbers = [10, 20, 30, 40, 50];
+
+let left = 0;
+let right = numbers.length - 1;
+
+while (left < right) {
+    console.log(numbers[left], numbers[right]);
+
+    left++;
+    right--;
+}
+// 10 50
+// 20 40
+```
+
+Why `<` and not `<=`? With 5 items, the middle item (30) has no partner. With `<=`, both pointers would stop on 30, and you would compare an item with itself.
+
+The first real use: **reverse an array in place**. Swap the two ends, then step both pointers in.
+
+```js
+function reverseInPlace(items) {
+    let left = 0;
+    let right = items.length - 1;
+
+    while (left < right) {
+        // Swap the two ends.
+        const temp = items[left];
+        items[left] = items[right];
+        items[right] = temp;
+
+        // Step both pointers toward the middle.
+        left++;
+        right--;
+    }
+}
+
+const letters = ["a", "b", "c", "d", "e"];
+reverseInPlace(letters);
+
+console.log(letters); // [ 'e', 'd', 'c', 'b', 'a' ]
+```
+
+**Time:** O(n) · **Space:** O(1). Each item is touched once (n/2 swaps), and we only keep two index variables.
+
+### Opposite ends on a sorted array
+
+**Problem (Two Sum II):** the array is **sorted**. Find two numbers that add up to `target`, and return their indexes. `[1, 3, 4, 6, 8, 11]` with target 10 gives `[2, 3]`, because 4 + 6 = 10.
+
+Put `left` on the smallest number and `right` on the biggest. Add them up:
+
+- **Sum too small?** We need a bigger number. Move `left` up.
+- **Sum too big?** We need a smaller number. Move `right` down.
+- **Sum just right?** Done.
+
+| Step | left | right | Sum | Move |
+| --- | --- | --- | --- | --- |
+| 1 | 0 | 5 | 1 + 11 = 12 | too big: `right--` |
+| 2 | 0 | 4 | 1 + 8 = 9 | too small: `left++` |
+| 3 | 1 | 4 | 3 + 8 = 11 | too big: `right--` |
+| 4 | 1 | 3 | 3 + 6 = 9 | too small: `left++` |
+| 5 | 2 | 3 | 4 + 6 = 10 | found it: `[2, 3]` |
+
+**Why is it safe to skip numbers?** At step 1, 11 plus the **smallest** number left (1) is already too big. So 11 plus anything else is too big too, and 11 can never be part of the answer. Dropping it with `right--` loses nothing. The same logic works the other way for `left++`. Each step throws away one number for good.
+
+```js
+function twoSumSorted(numbers, target) {
+    let left = 0;
+    let right = numbers.length - 1;
+
+    while (left < right) {
+        const sum = numbers[left] + numbers[right];
+
+        if (sum === target) {
+            return [left, right];
+        }
+
+        if (sum < target) {
+            // Too small: we need a bigger number.
+            left++;
+        } else {
+            // Too big: we need a smaller number.
+            right--;
+        }
+    }
+
+    // No pair adds up to target.
+    return [];
+}
+
+console.log(twoSumSorted([1, 3, 4, 6, 8, 11], 10)); // [ 2, 3 ]
+console.log(twoSumSorted([1, 2, 5], 100)); // []
+```
+
+**Time:** O(n) · **Space:** O(1). Every step moves one pointer, so they meet after at most n steps. LeetCode 167 counts indexes from 1, so there you return `[left + 1, right + 1]`.
+
+The unsorted Two Sum needs a [hash map](../arrays-hashing/hash-maps-and-sets.mdx), which costs O(n) memory. When the array is sorted, two pointers do it with O(1) memory.
+
+### Same direction: a slow writer and a fast reader
+
+The pointers can also move the **same way**. `fast` reads every item. `slow` marks the place where the next item we keep will be **written**. This changes an array in place without a second array.
+
+**Problem (Remove Duplicates from Sorted Array):** keep each value once at the front of the array, and return how many values are kept. `[1, 1, 2, 3, 3]` gives 3, and the array starts with `[1, 2, 3]`.
+
+The array is sorted, so copies sit next to each other. A value is **new** when it differs from the last value we kept.
+
+```js
+function removeDuplicates(numbers) {
+    if (numbers.length === 0) {
+        return 0;
+    }
+
+    // numbers[0] is always kept, so the next write goes to index 1.
+    let slow = 1;
+
+    for (let fast = 1; fast < numbers.length; fast++) {
+        const lastKept = numbers[slow - 1];
+
+        // A new value: write it at slow, then move slow forward.
+        if (numbers[fast] !== lastKept) {
+            numbers[slow] = numbers[fast];
+            slow++;
+        }
+    }
+
+    // slow is now the number of values we kept.
+    return slow;
+}
+
+const numbers = [1, 1, 2, 3, 3];
+const keptCount = removeDuplicates(numbers);
+
+console.log(keptCount); // 3
+console.log(numbers.slice(0, keptCount)); // [ 1, 2, 3 ]
+```
+
+It starts with `slow = 1`:
+
+| fast | `numbers[fast]` | Last kept | What happens | slow after | Array after |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 1 | 1 | same: skip | 1 | `[1, 1, 2, 3, 3]` |
+| 2 | 2 | 1 | new: write at index 1 | 2 | `[1, 2, 2, 3, 3]` |
+| 3 | 3 | 2 | new: write at index 2 | 3 | `[1, 2, 3, 3, 3]` |
+| 4 | 3 | 3 | same: skip | 3 | `[1, 2, 3, 3, 3]` |
+
+The items after index `slow - 1` are leftovers. LeetCode only checks the first `slow` items.
+
+**Time:** O(n) · **Space:** O(1). `fast` walks the array once, and we write into the same array. The same shape solves **Move Zeroes** (write every non-zero forward, then fill the rest with 0) and **Remove Element**. Linked lists use another kind of fast and slow pointers, where `fast` jumps two steps: see [Fast and Slow Pointers](../linked-lists/fast-slow-pointers.mdx).
+
+## Classic problems
+
+### 1. Valid Palindrome
+
+**Problem:** after making every letter lowercase and dropping everything that isn't a letter or a digit, does the text read the same both ways? `"A man, a plan, a canal: Panama"` is `true`. `"race a car"` is `false`.
+
+**Idea:** the two fingers from the start of the page. Skip any character that isn't a letter or digit, and compare in lowercase. We never build a cleaned copy, so we use O(1) memory.
+
+**Step 1: a helper that says "is this a letter or a digit?"**
+
+```js
+function isLetterOrDigit(char) {
+    const lower = char.toLowerCase();
+
+    const isLetter = lower >= "a" && lower <= "z";
+    const isDigit = char >= "0" && char <= "9";
+
+    return isLetter || isDigit;
+}
+
+console.log(isLetterOrDigit("A")); // true
+console.log(isLetterOrDigit(",")); // false
+```
+
+**Step 2: the two pointers.**
+
+```js
+function isPalindrome(text) {
+    let left = 0;
+    let right = text.length - 1;
+
+    while (left < right) {
+        // Skip anything that isn't a letter or a digit.
+        if (!isLetterOrDigit(text[left])) {
+            left++;
+        } else if (!isLetterOrDigit(text[right])) {
+            right--;
+        } else {
+            // Both are letters or digits: compare them.
+            if (text[left].toLowerCase() !== text[right].toLowerCase()) {
+                return false;
+            }
+
+            left++;
+            right--;
+        }
+    }
+
+    return true;
+}
+
+console.log(isPalindrome("A man, a plan, a canal: Panama")); // true
+console.log(isPalindrome("race a car")); // false
+```
+
+**Time:** O(n) · **Space:** O(1). Each loop pass moves at least one pointer, so there are at most n passes, and we keep only two indexes.
+
+### 2. 3Sum
+
+**Problem:** find every **unique** triplet of numbers that adds up to 0. `[-1, 0, 1, 2, -1, -4]` gives `[[-1, -1, 2], [-1, 0, 1]]`.
+
+**Idea:** sort first: `[-4, -1, -1, 0, 1, 2]`. Then take each number in turn as the **first** number. Now you need two numbers to its right that add up to `-first`. That is Two Sum II on a sorted array: two pointers. To avoid repeat triplets, skip a number when it is the same as the one before it.
+
+**Step 1: find all pairs for one first number.** This is the two-pointer part.
+
+```js
+// Find pairs after firstIndex that add up to -sorted[firstIndex].
+function addTripletsFor(sorted, firstIndex, triplets) {
+    const first = sorted[firstIndex];
+    let left = firstIndex + 1;
+    let right = sorted.length - 1;
+
+    while (left < right) {
+        const sum = first + sorted[left] + sorted[right];
+
+        if (sum < 0) {
+            left++;
+        } else if (sum > 0) {
+            right--;
+        } else {
+            triplets.push([first, sorted[left], sorted[right]]);
+            left++;
+            right--;
+
+            // Skip copies of the number we just used on the left.
+            while (left < right && sorted[left] === sorted[left - 1]) {
+                left++;
+            }
+        }
+    }
+}
+```
+
+**Step 2: sort, then try each first number once.**
+
+```js
+function threeSum(numbers) {
+    // Sort a copy, smallest first, so the input stays the same.
+    const sorted = [...numbers].sort((a, b) => a - b);
+    const triplets = [];
+
+    for (let i = 0; i < sorted.length - 2; i++) {
+        // Same first number as last time? Its triplets are already found.
+        if (i > 0 && sorted[i] === sorted[i - 1]) {
+            continue;
+        }
+
+        addTripletsFor(sorted, i, triplets);
+    }
+
+    return triplets;
+}
+
+console.log(threeSum([-1, 0, 1, 2, -1, -4])); // [ [ -1, -1, 2 ], [ -1, 0, 1 ] ]
+console.log(threeSum([0, 0, 0, 0])); // [ [ 0, 0, 0 ] ]
+```
+
+How it runs on the sorted array `[-4, -1, -1, 0, 1, 2]`:
+
+| First number | What the two pointers find |
+| --- | --- |
+| -4 (index 0) | Every pair sums too small. Nothing. |
+| -1 (index 1) | `[-1, -1, 2]`, then `[-1, 0, 1]` |
+| -1 (index 2) | Skipped: same as the number before it |
+| 0 (index 3) | Only 1 and 2 are left: too big. Nothing. |
+
+**Time:** O(n²) · **Space:** O(n). Sorting is O(n log n). Then each of the n first numbers runs one O(n) two-pointer pass, and n × n is the biggest part. The sorted copy takes O(n) memory (not counting the answer).
+
+### 3. Container With Most Water
+
+**Problem:** `heights[i]` is the height of a wall at position `i`. Pick two walls. The water between them is **width × the shorter wall**. Find the most water. `[1, 8, 6, 2, 5, 4, 8, 3, 7]` gives 49: the walls at index 1 (height 8) and index 8 (height 7), so width 7 × height 7.
+
+**Idea:** start with the widest container, one pointer at each end. The **shorter wall** decides the water level. Moving the taller wall in can never help: the width gets smaller, and the water is still stuck at the short wall's height. So always move the **shorter** wall, hoping to find a taller one.
+
+```js
+function maxArea(heights) {
+    let left = 0;
+    let right = heights.length - 1;
+    let best = 0;
+
+    while (left < right) {
+        const width = right - left;
+        const height = Math.min(heights[left], heights[right]);
+        const water = width * height;
+
+        best = Math.max(best, water);
+
+        // Move the shorter wall: it is the one holding the water down.
+        if (heights[left] < heights[right]) {
+            left++;
+        } else {
+            right--;
+        }
+    }
+
+    return best;
+}
+
+console.log(maxArea([1, 8, 6, 2, 5, 4, 8, 3, 7])); // 49
+```
+
+The first few steps:
+
+| Step | left (height) | right (height) | Width | Water | Move |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 0 (1) | 8 (7) | 8 | 8 × 1 = 8 | left is shorter: `left++` |
+| 2 | 1 (8) | 8 (7) | 7 | 7 × 7 = **49** | right is shorter: `right--` |
+| 3 | 1 (8) | 7 (3) | 6 | 6 × 3 = 18 | right is shorter: `right--` |
+| 4 | 1 (8) | 6 (8) | 5 | 5 × 8 = 40 | same height: `right--` |
+
+Nothing later beats 49.
+
+**Time:** O(n) · **Space:** O(1). Each step moves one pointer inward, so there are at most n - 1 steps.
+
+## How to spot it
+
+- The array is **sorted** (or you may sort it), and you need a **pair or triplet** with a given sum: opposite ends.
+- **Palindrome**, reverse, or compare the two ends of something: opposite ends.
+- **"In place"**, "O(1) extra space", "remove duplicates", "move zeroes": a slow writer and a fast reader.
+- Pick **two positions** to get the most of something that depends on the distance between them: opposite ends, and move the weaker side.
+- The brute force is **two nested loops over pairs**, and the input has an order you can use.
+- A **range of items in a row** with a rule, like "longest substring": that's the cousin pattern, [Sliding Window](./sliding-window.mdx).
+
+## Common mistakes
+
+- **`while (left <= right)`** when the two pointers must be two different items. Use `<`.
+- **A loop pass that moves no pointer.** That is an infinite loop. Every branch must move at least one pointer.
+- **Opposite ends on an unsorted array.** The "too small, move left" rule only works because the array is sorted.
+- **Sorting when the problem wants the original indexes.** Sorting moves the items. Use a hash map instead, or keep `[value, index]` pairs.
+- **3Sum repeats.** Forgetting to skip copies gives the same triplet twice. Skipping with `sorted[i] === sorted[i + 1]` is also wrong: it skips the first copy and loses `[-1, -1, 2]`.
+- **`right = numbers.length`** instead of `numbers.length - 1`. `numbers[numbers.length]` is `undefined`.
+
+## In the interview
+
+Say why each pointer moves:
+
+> "The array is sorted, so I'll put one pointer at each end. If the sum is too small, I move left up to get a bigger number. If it's too big, I move right down. Each step rules out one number for good, so it's O(n) time and O(1) extra space."
+
+**Likely follow-up:** "What if the array isn't sorted?"
+
+**Answer:** "If I only need the values, I can sort first: O(n log n). If I need the original indexes, sorting would move them, so I'd use a hash map instead: O(n) time and O(n) space."
+
+<Callout title="Remember this" type="success">
+  - A **pointer is a variable that holds an index**. Read the value with `numbers[left]`.
+  - **Opposite ends** need sorted data: sum too small → `left++`, too big → `right--`. O(n) time, O(1) space.
+  - **Slow writer, fast reader** changes an array in place: `slow` is where the next kept item goes.
+  - Loop **while `left < right`**, and move at least one pointer on every pass.
+  - **3Sum = sort + fix the first number + two pointers.** O(n²). Skip copies to avoid repeat triplets.
+  - Container With Most Water: **move the shorter wall**.
+</Callout>

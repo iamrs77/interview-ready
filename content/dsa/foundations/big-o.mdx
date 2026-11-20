@@ -2,9 +2,427 @@
 title: "Big O Notation"
 description: "How to measure time and space, and say it in an interview."
 icon: TrendingUp
-planned: true
 ---
 
-- Time and space complexity
-- Common classes: O(1), O(log n), O(n), O(n log n), O(n²)
-- How to find the Big O of your code
+## The idea
+
+Big O tells you **how the work grows when the input grows**. It does not measure seconds. It answers one question: "If I give this code 10 times more data, how much more work does it do?"
+
+Think of hosting a party with `n` guests:
+
+- **Switching on the lights** takes the same effort for 5 guests or 500. That is **O(1)**.
+- **Giving each guest a gift** takes one gift per guest. Twice the guests, twice the work. That is **O(n)**.
+- **Every guest saying hello to every other guest** grows much faster. 10 guests make 90 hellos. 1,000 guests make 999,000. That is **O(n²)**.
+
+`n` is the **size of the input**: the length of the array, the number of characters in the string, or the number of nodes in the tree.
+
+## Time and space
+
+You measure two things:
+
+- **Time complexity:** how the number of steps grows with `n`.
+- **Space complexity:** how much **extra** memory the code needs as `n` grows: new arrays, maps, strings, and the call stack in recursion. The input itself is usually not counted.
+
+Big O means the **worst case**, unless someone says otherwise. Searching an array for a number is O(n). Sometimes you find it in the first box, but sometimes it is at the very end, or not there at all.
+
+This function walks the array once and keeps only one extra variable.
+
+```js
+// Time O(n): the loop runs once per item.
+// Space O(1): one extra variable, however long the array is.
+function sum(numbers) {
+    let total = 0;
+
+    for (const number of numbers) {
+        total = total + number;
+    }
+
+    return total;
+}
+
+console.log(sum([4, 5, 6])); // 15
+```
+
+This one also walks the array once, but it builds a new array that grows with the input.
+
+```js
+// Time O(n): the loop runs once per item.
+// Space O(n): the new array is as long as the input.
+function doubleAll(numbers) {
+    const doubled = [];
+
+    for (const number of numbers) {
+        doubled.push(number * 2);
+    }
+
+    return doubled;
+}
+
+console.log(doubleAll([4, 5, 6])); // [ 8, 10, 12 ]
+```
+
+## The common classes
+
+From fastest to slowest.
+
+### O(1): constant
+
+The work stays the same, whatever the size. Reading one item by its index is O(1).
+
+```js
+function getFirst(numbers) {
+    return numbers[0];
+}
+
+console.log(getFirst([7, 3, 9])); // 7
+```
+
+### O(log n): logarithmic
+
+The work grows very slowly, because each step **throws away half** of what is left. Think of guessing a number from 1 to 100 when someone says "higher" or "lower". Each guess cuts the range in half, so you never need more than 7 guesses.
+
+`log n` means: how many times can you cut `n` in half before only 1 is left?
+
+```js
+// Counts how many times we can cut the size in half until 1 is left.
+function countHalvings(size) {
+    let steps = 0;
+
+    while (size > 1) {
+        size = Math.floor(size / 2);
+        steps++;
+    }
+
+    return steps;
+}
+
+console.log(countHalvings(8)); // 3
+console.log(countHalvings(1000000)); // 19
+```
+
+A million items need only about 20 steps. [Binary Search](../searching-sorting/binary-search.mdx) works this way.
+
+### O(n): linear
+
+The work grows at the same speed as the input. One loop over the array is O(n).
+
+```js
+function findMax(numbers) {
+    let max = numbers[0];
+
+    for (const number of numbers) {
+        if (number > max) {
+            max = number;
+        }
+    }
+
+    return max;
+}
+
+console.log(findMax([3, 9, 2, 7])); // 9
+```
+
+### O(n log n): "n log n"
+
+Good sorting algorithms split the array in half again and again (that is `log n` levels), and do `n` steps of work on each level. JavaScript's `sort` is O(n log n).
+
+```js
+const numbers = [5, 2, 9, 1];
+
+// The compare function sorts numbers from small to big.
+numbers.sort((first, second) => first - second);
+
+console.log(numbers); // [ 1, 2, 5, 9 ]
+```
+
+If your solution starts with "sort the array", it is at least O(n log n). See [Sorting](../searching-sorting/sorting.mdx).
+
+### O(n²): quadratic
+
+A loop inside a loop over the same array. For each item, you look at the other items.
+
+```js
+// Prints every pair of different items.
+function printPairs(items) {
+    for (let i = 0; i < items.length; i++) {
+        for (let j = i + 1; j < items.length; j++) {
+            console.log(items[i], items[j]);
+        }
+    }
+}
+
+printPairs(["a", "b", "c"]);
+// a b
+// a c
+// b c
+```
+
+The inner loop starts at `i + 1`, so it runs about n²/2 times in total. That is still O(n²), because Big O drops the "/2" (see the rules below).
+
+### O(2ⁿ): exponential
+
+Each call makes two more calls. Adding just one more item **doubles** the work. Plain recursive Fibonacci is the classic example; [Recursion](./recursion.mdx) draws its call tree.
+
+```js
+// Each call makes two more calls.
+function fib(number) {
+    if (number <= 1) {
+        return number;
+    }
+
+    return fib(number - 1) + fib(number - 2);
+}
+
+console.log(fib(10)); // 55
+```
+
+This is fine for small inputs, and hopeless for `n` = 100.
+
+### How fast they grow
+
+Roughly how many steps each class needs:
+
+| Big O | n = 10 | n = 1,000 | n = 1,000,000 |
+| --- | --- | --- | --- |
+| O(1) | 1 | 1 | 1 |
+| O(log n) | 3 | 10 | 20 |
+| O(n) | 10 | 1,000 | 1,000,000 |
+| O(n log n) | 33 | 10,000 | 20,000,000 |
+| O(n²) | 100 | 1,000,000 | 1,000,000,000,000 |
+| O(2ⁿ) | 1,024 | a number with 302 digits | far too big to write |
+
+A common rough guess is that a computer does about **100 million simple steps per second**. So with a million items, O(n log n) takes a fraction of a second, but O(n²) takes about 3 hours.
+
+That makes the input size in a problem a useful hint:
+
+| If `n` is up to | You can usually afford |
+| --- | --- |
+| about 20 | O(2ⁿ): trying every option is OK |
+| a few thousand | O(n²) |
+| 100,000 to 1,000,000 | O(n log n) or O(n) |
+| more than that | O(n), O(log n) or O(1) |
+
+## The rules
+
+### 1. Drop the constants
+
+Two loops, one after the other, over the same array take `n + n = 2n` steps. That is still **O(n)**. Big O cares about the **shape** of the growth, not the exact count.
+
+```js
+// Two loops, one after the other: 2n steps. Still O(n).
+function minAndMax(numbers) {
+    let min = numbers[0];
+    for (const number of numbers) {
+        if (number < min) {
+            min = number;
+        }
+    }
+
+    let max = numbers[0];
+    for (const number of numbers) {
+        if (number > max) {
+            max = number;
+        }
+    }
+
+    return [min, max];
+}
+
+console.log(minAndMax([3, 9, 2, 7])); // [ 2, 9 ]
+```
+
+More examples: O(2n) is O(n). O(n / 2) is O(n). O(500) is O(1).
+
+### 2. Keep only the biggest term
+
+O(n² + n) is **O(n²)**. With a million items, n² is a trillion steps, and the extra million from `n` hardly changes anything.
+
+More examples: O(n + log n) is O(n). O(n² + n log n) is O(n²).
+
+### 3. One after another: add. One inside another: multiply
+
+- A loop **after** another loop: **add** the costs, O(a + b).
+- A loop **inside** another loop: **multiply** the costs, O(a × b).
+
+When there are **two different inputs**, give them two letters, `a` and `b`. Calling both of them `n` hides the real cost.
+
+Two loops one after the other add up.
+
+```js
+// One after the other: O(a + b).
+function printBoth(listA, listB) {
+    for (const item of listA) {
+        console.log(item);
+    }
+
+    for (const item of listB) {
+        console.log(item);
+    }
+}
+
+printBoth([1, 2], ["x"]);
+// 1
+// 2
+// x
+```
+
+A loop inside a loop multiplies.
+
+```js
+// One inside the other: O(a × b).
+function printAllPairs(listA, listB) {
+    for (const itemA of listA) {
+        for (const itemB of listB) {
+            console.log(itemA, itemB);
+        }
+    }
+}
+
+printAllPairs([1, 2], ["x", "y"]);
+// 1 x
+// 1 y
+// 2 x
+// 2 y
+```
+
+## How to find the Big O of your code
+
+Go through these steps every time:
+
+1. **Name `n`.** What grows? The array length, the string length, the number of nodes. Two inputs get two letters.
+2. **Cost each line.** Most lines are O(1). Watch for **hidden loops**: `includes`, `indexOf`, `slice`, `shift`, `splice` and spread (`[...numbers]`) all walk the array, so each is O(n).
+3. **Count how many times each loop runs.** Cost of the body × number of runs. A loop whose counter doubles or halves (`i = i * 2`) runs only `log n` times.
+4. **Combine.** Nested: multiply. One after another: add.
+5. **Simplify.** Drop the constants, keep the biggest term.
+6. **Do space too.** Count new arrays, maps, sets and strings that grow with `n`. For recursion, count how deep the calls go.
+
+Let's try it on this function. It checks whether any number appears twice.
+
+```js
+function hasDuplicate(numbers) {
+    const seen = [];
+
+    for (const number of numbers) {
+        if (seen.includes(number)) {
+            return true;
+        }
+        seen.push(number);
+    }
+
+    return false;
+}
+
+console.log(hasDuplicate([3, 1, 4, 1])); // true
+console.log(hasDuplicate([3, 1, 4])); // false
+```
+
+Here `n` is the length of `numbers`. Cost each line:
+
+| Line | Cost of one run | Runs | Total |
+| --- | --- | --- | --- |
+| `const seen = []` | O(1) | 1 | O(1) |
+| `seen.includes(number)` | O(n), it walks `seen` | n | O(n²) |
+| `seen.push(number)` | O(1) | n | O(n) |
+
+Add them up: O(1) + O(n²) + O(n). Keep the biggest term: **O(n²) time**. The `seen` array can grow to `n` items: **O(n) space**.
+
+The slow part is the hidden loop inside `includes`. A `Set` finds a value in O(1) on average, so swap the array for a set.
+
+```js
+function hasDuplicate(numbers) {
+    const seen = new Set();
+
+    for (const number of numbers) {
+        if (seen.has(number)) {
+            return true;
+        }
+        seen.add(number);
+    }
+
+    return false;
+}
+
+console.log(hasDuplicate([3, 1, 4, 1])); // true
+console.log(hasDuplicate([3, 1, 4])); // false
+```
+
+Now the loop runs `n` times and each run is O(1): **O(n) time**. The set still holds up to `n` items: **O(n) space**. More in [Hash Maps and Sets](../arrays-hashing/hash-maps-and-sets.mdx).
+
+## Amortized O(1)
+
+Some operations are cheap almost every time, but slow once in a while. `push` is the classic one. Most pushes drop the item into the next free box: O(1). Now and then the hidden storage is full, so JavaScript makes a bigger block and copies every item into it: O(n) for that one push. Because the block grows by a lot each time (often doubling), these big copies get rarer and rarer, and the total work for `n` pushes stays under about `3n` steps. Spread over all the pushes, each one costs O(1) on average. That is what **amortized O(1)** means: cheap on average over many calls, even if one call is slow. [How Arrays Work in Memory](./how-memory-works.mdx) shows it step by step.
+
+## Big O of common JavaScript operations
+
+**Arrays**
+
+| Operation | Time | Why |
+| --- | --- | --- |
+| `arr[i]`, `arr.length` | O(1) | jumps straight to the box |
+| `arr.push(value)`, `arr.pop()` | O(1) | works at the end; `push` is amortized O(1) |
+| `arr.shift()`, `arr.unshift(value)` | O(n) | every other item moves one place |
+| `arr.includes(value)`, `indexOf`, `find` | O(n) | checks the items one by one |
+| `arr.splice(index, 1)` | O(n) | the items after `index` move |
+| `arr.slice()`, `[...arr]`, `concat` | O(n) | makes a copy |
+| `map`, `filter`, `forEach`, `reduce` | O(n) | one pass over the items |
+| `arr.sort()` | O(n log n) | splits in halves, `n` work per level |
+
+**Maps, sets and objects**
+
+| Operation | Time | Why |
+| --- | --- | --- |
+| `map.get(key)`, `map.set`, `map.has`, `map.delete` | O(1) on average | hashing jumps to the right spot |
+| `set.has(value)`, `set.add`, `set.delete` | O(1) on average | same as a map, keys only |
+| `obj[key]` | O(1) on average | objects are hash tables too |
+| `map.size`, `set.size` | O(1) | the size is stored, not counted |
+| `Object.keys(obj)` | O(n) | builds a new array of all the keys |
+
+"On average" because in rare cases many keys land in the same spot and a lookup slows down. In interviews you can treat them as O(1).
+
+**Strings**
+
+| Operation | Time | Why |
+| --- | --- | --- |
+| `str[i]`, `str.length` | O(1) | same as an array |
+| `str.slice`, `str.split`, `str.includes` | O(n) | walks or copies the characters |
+| `str + other` | O(n) | builds a new string |
+
+## Common mistakes
+
+- **Hidden loops inside a loop.** `includes`, `indexOf`, `shift`, `slice` or `splice` inside a `for` loop make O(n²) code that looks like O(n).
+- **Calling two loops O(n²) when one comes after the other.** That is O(n + n) = O(n). Only nested loops multiply.
+- **Using `n` for two different inputs.** Two arrays mean O(a + b) or O(a × b).
+- **Forgetting the sort.** If you sort first, your "O(n)" solution is really O(n log n).
+- **Forgetting space.** `slice` and spread make copies, and each waiting recursive call takes memory on the call stack.
+- **Calling `sort()` with no compare function on numbers.** It sorts them as text:
+
+```js
+const numbers = [10, 9, 1];
+
+numbers.sort();
+console.log(numbers); // [ 1, 10, 9 ]
+
+numbers.sort((first, second) => first - second);
+console.log(numbers); // [ 1, 9, 10 ]
+```
+
+## In the interview
+
+- Say the Big O of the **brute-force** idea first, then improve it.
+- Always give **both** time and space, and say what `n` is.
+- Give the reason in one line, not just the answer.
+
+> "Checking every pair with two loops is O(n²) time and O(1) space. The slow part is searching for each number again and again. If I keep the numbers I've seen in a Set, each check is O(1), so the whole thing is one pass: O(n) time, and O(n) space for the set."
+
+**Likely follow-up:** "Can you do better than O(n log n)?"
+
+**Answer:** "The O(n log n) comes from sorting. If I only need to find or count values, a hash map does it in one pass, which is O(n) time. The price is O(n) extra space for the map."
+
+<Callout title="Remember this" type="success">
+  - **Big O = how the work grows** as the input grows, not seconds. Always say **time and space**.
+  - Fastest to slowest: **O(1), O(log n), O(n), O(n log n), O(n²), O(2ⁿ)**.
+  - **Drop the constants, keep the biggest term.** One loop after another: **add**. One inside another: **multiply**.
+  - Watch for **hidden loops**: `includes`, `indexOf`, `shift`, `slice`, `splice` are O(n). `Map` and `Set` lookups are O(1).
+  - **Cutting in half each step = O(log n).** Sorting = O(n log n).
+  - `push` is **amortized O(1)**: a big copy once in a while, cheap on average.
+</Callout>

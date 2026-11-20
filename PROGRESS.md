@@ -272,81 +272,82 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 
 ## DSA
 
-**Written: 0 of 44**
+**Written: 45 of 45**
 
 ### Guide
-- ⬜ Start Here
-- ⬜ How to Solve a Problem in an Interview
-- ⬜ Cheat Sheet
+- ✅ Start Here
+- ✅ How to Solve a Problem in an Interview
+- ✅ Cheat Sheet
+- ✅ Last-Minute Revision
 
 ### 1. Foundations
-- ⬜ Big O Notation
-- ⬜ How Arrays Work in Memory
-- ⬜ Recursion
+- ✅ Big O Notation
+- ✅ How Arrays Work in Memory
+- ✅ Recursion
 
 ### 2. JavaScript Toolkit
-- ⬜ Strings in JavaScript
-- ⬜ Arrays in JavaScript
-- ⬜ Objects, Maps and Sets
-- ⬜ Numbers and Math
+- ✅ Strings in JavaScript
+- ✅ Arrays in JavaScript
+- ✅ Objects, Maps and Sets
+- ✅ Numbers and Math
 
 ### 3. Arrays and Hashing
-- ⬜ Arrays and Strings
-- ⬜ Hash Maps and Sets
-- ⬜ Prefix Sum
+- ✅ Arrays and Strings
+- ✅ Hash Maps and Sets
+- ✅ Prefix Sum
 
 ### 4. Two Pointers and Sliding Window
-- ⬜ Two Pointers
-- ⬜ Sliding Window
+- ✅ Two Pointers
+- ✅ Sliding Window
 
 ### 5. Binary Search and Sorting
-- ⬜ Binary Search
-- ⬜ Sorting
+- ✅ Binary Search
+- ✅ Sorting
 
 ### 6. Stacks and Queues
-- ⬜ Stacks
-- ⬜ Monotonic Stack
-- ⬜ Queues and Deques
+- ✅ Stacks
+- ✅ Monotonic Stack
+- ✅ Queues and Deques
 
 ### 7. Linked Lists
-- ⬜ Linked Lists
-- ⬜ Fast and Slow Pointers
+- ✅ Linked Lists
+- ✅ Fast and Slow Pointers
 
 ### 8. Trees
-- ⬜ Tree Basics
-- ⬜ Binary Trees and DFS
-- ⬜ Tree BFS
-- ⬜ Binary Search Trees
-- ⬜ Tries
+- ✅ Tree Basics
+- ✅ Binary Trees and DFS
+- ✅ Tree BFS
+- ✅ Binary Search Trees
+- ✅ Tries
 
 ### 9. Heaps
-- ⬜ Heaps and Priority Queues
-- ⬜ Top K and Merge K
+- ✅ Heaps and Priority Queues
+- ✅ Top K and Merge K
 
 ### 10. Graphs
-- ⬜ Graph Basics
-- ⬜ Graph BFS and DFS
-- ⬜ Topological Sort
-- ⬜ Union-Find
-- ⬜ Shortest Paths
+- ✅ Graph Basics
+- ✅ Graph BFS and DFS
+- ✅ Topological Sort
+- ✅ Union-Find
+- ✅ Shortest Paths
 
 ### 11. Backtracking
-- ⬜ Backtracking
-- ⬜ Backtracking on Grids
+- ✅ Backtracking
+- ✅ Backtracking on Grids
 
 ### 12. Dynamic Programming
-- ⬜ Dynamic Programming Basics
-- ⬜ 1D Dynamic Programming
-- ⬜ 2D Dynamic Programming
-- ⬜ Knapsack
+- ✅ Dynamic Programming Basics
+- ✅ 1D Dynamic Programming
+- ✅ 2D Dynamic Programming
+- ✅ Knapsack
 
 ### 13. Greedy and Intervals
-- ⬜ Greedy
-- ⬜ Intervals
+- ✅ Greedy
+- ✅ Intervals
 
 ### 14. Math and Bits
-- ⬜ Bit Manipulation
-- ⬜ Math and Matrices
+- ✅ Bit Manipulation
+- ✅ Math and Matrices
 
 ## To do
 - [x] **System Design Cheat Sheet:** written last, from all the finished lessons.

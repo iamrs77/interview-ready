@@ -2,10 +2,362 @@
 title: "Strings in JavaScript"
 description: "The string methods you use in coding problems, and what each one costs."
 icon: Type
-planned: true
 ---
 
-- Methods table: includes, indexOf, slice, split, replace, trim, and more
-- Strings cannot be changed: why building a string in a loop can be slow
-- Characters and their codes: charCodeAt, String.fromCharCode
-- Reversing and comparing strings
+## The idea
+
+A string is a row of characters. Each character has a position number, its **index**, starting at 0.
+
+Think of a line of text **printed on paper**. You can read any letter by its position, or copy a piece of the line. But you can't rub out one letter and write a new one: to "change" the line, you print a new one. JavaScript strings work the same way. You can read them, but you can't change them.
+
+In coding problems you use strings all the time: check a palindrome, count letters, compare two words. So you need the methods at your fingertips, and you need to know what each one costs.
+
+## What a string looks like
+
+Each character sits at an index. The last index is `length - 1`.
+
+| Index | 0 | 1 | 2 | 3 | 4 |
+| --- | --- | --- | --- | --- | --- |
+| Character | h | e | l | l | o |
+
+Reading a character by its index is O(1): JavaScript jumps straight to it.
+
+```js
+const word = "hello";
+
+console.log(word.length); // 5
+console.log(word[0]); // h
+console.log(word[4]); // o
+console.log(word.at(-1)); // o
+
+// An index that doesn't exist gives undefined, not an error.
+console.log(word[10]); // undefined
+```
+
+There are two ways to loop through the characters.
+
+```js
+const word = "cat";
+
+// With an index: use this when you need the position.
+for (let i = 0; i < word.length; i++) {
+    console.log(i, word[i]);
+}
+// 0 c
+// 1 a
+// 2 t
+
+// Without an index: use this when you only need the character.
+for (const char of word) {
+    console.log(char);
+}
+// c
+// a
+// t
+```
+
+## String methods
+
+Every string method returns a **new** value. None of them changes the original string.
+
+In the Cost column: **n** = length of the string, **m** = length of the text you pass in, **k** = length of the new string. See [Big O](../foundations/big-o.mdx) if these are new to you.
+
+### Read and search
+
+| Method | What it does | Example | Cost |
+| --- | --- | --- | --- |
+| `s.length` | Number of characters | `"abc".length` → `3` | O(1) |
+| `s[i]` or `s.charAt(i)` | Character at index i | `"abc"[1]` → `"b"` | O(1) |
+| `s.at(i)` | Like `s[i]`, but a negative i counts from the end | `"abc".at(-1)` → `"c"` | O(1) |
+| `s.includes(t)` | Is t inside s? | `"hello".includes("ell")` → `true` | O(n × m) |
+| `s.indexOf(t)` | First index of t, or -1 | `"hello".indexOf("l")` → `2` | O(n × m) |
+| `s.lastIndexOf(t)` | Last index of t, or -1 | `"hello".lastIndexOf("l")` → `3` | O(n × m) |
+| `s.startsWith(t)` | Does s begin with t? | `"hello".startsWith("he")` → `true` | O(m) |
+| `s.endsWith(t)` | Does s end with t? | `"hello".endsWith("lo")` → `true` | O(m) |
+
+`includes` and `indexOf` hide a loop: they may try to match t at almost every position. When t is one character, that is just **O(n)**.
+
+### Cut, join and change
+
+| Method | What it does | Example | Cost |
+| --- | --- | --- | --- |
+| `s.slice(start, end)` | Piece from start up to, **not including**, end. Negative numbers count from the end | `"hello".slice(1, 3)` → `"el"` | O(k) |
+| `s.substring(start, end)` | Like `slice`, but no negative numbers | `"hello".substring(1, 3)` → `"el"` | O(k) |
+| `s.split(sep)` | Cut into an array at each sep | `"a,b,c".split(",")` → `["a", "b", "c"]` | O(n) |
+| `s.split("")` | Cut into single characters | `"abc".split("")` → `["a", "b", "c"]` | O(n) |
+| `arr.join(sep)` | Glue an array into one string (an array method) | `["a", "b"].join("-")` → `"a-b"` | O(k) |
+| `s + t` or `s.concat(t)` | Join two strings | `"ab" + "cd"` → `"abcd"` | O(n + m) |
+| `s.replace(a, b)` | Replace the **first** a only | `"a-b-c".replace("-", "+")` → `"a+b-c"` | O(n) |
+| `s.replaceAll(a, b)` | Replace every a | `"a-b-c".replaceAll("-", "+")` → `"a+b+c"` | O(n) |
+| `s.trim()` | Remove spaces at both ends | `"  hi  ".trim()` → `"hi"` | O(n) |
+| `s.toLowerCase()` | All letters to small letters | `"AbC".toLowerCase()` → `"abc"` | O(n) |
+| `s.toUpperCase()` | All letters to capitals | `"abc".toUpperCase()` → `"ABC"` | O(n) |
+| `s.repeat(times)` | s written again and again | `"ab".repeat(3)` → `"ababab"` | O(k) |
+| `s.padStart(size, fill)` | Add fill at the start until the length is size | `"7".padStart(3, "0")` → `"007"` | O(k) |
+
+### Characters and compare
+
+| Method | What it does | Example | Cost |
+| --- | --- | --- | --- |
+| `s.charCodeAt(i)` | Code number of the character at i | `"a".charCodeAt(0)` → `97` | O(1) |
+| `String.fromCharCode(code)` | Character for a code number | `String.fromCharCode(98)` → `"b"` | O(1) |
+| `s === t` | Same text? | `"abc" === "abc"` → `true` | O(n) |
+| `s < t` | Does s come first, by character codes? | `"apple" < "banana"` → `true` | O(n) |
+| `s.localeCompare(t)` | Negative, 0 or positive, like a dictionary | `"a".localeCompare("b")` → `-1` | O(n) |
+| `[...s]` or `Array.from(s)` | Array of characters | `[..."hi"]` → `["h", "i"]` | O(n) |
+
+## Strings can't be changed
+
+You can't change one character of a string. The line below does nothing, and doesn't even warn you. (In strict mode, it throws a `TypeError`.)
+
+```js
+let word = "cat";
+
+word[0] = "b";
+console.log(word); // cat
+
+// To "change" a string, build a new one and store it.
+word = "b" + word.slice(1);
+console.log(word); // bat
+```
+
+Methods give back a new string. If you don't save the result, it's lost.
+
+```js
+const name = "hello";
+
+name.toUpperCase();
+console.log(name); // hello
+
+const loudName = name.toUpperCase();
+console.log(loudName); // HELLO
+```
+
+To change many characters, turn the string into an array, change the array, and join it back.
+
+```js
+const word = "hello";
+
+const letters = word.split("");
+letters[0] = "j";
+
+const newWord = letters.join("");
+console.log(newWord); // jello
+```
+
+### Why building a string in a loop can be slow
+
+Each `result += letter` makes a **new** string. In theory it copies everything built so far: 1 letter, then 2, then 3, and so on. That adds up to **O(n²)** for n letters.
+
+JavaScript engines (like V8 in Chrome and Node) are clever about `+=` and often skip the copy, so in practice it's usually fast. But in an interview, the safe habit is: **push the pieces into an array, then call `join("")` once**. That is O(n) in every language, and interviewers like to hear that you know it.
+
+```js
+const letters = ["a", "b", "c"];
+
+// Can be slow: each += may copy the whole string so far.
+let result = "";
+for (const letter of letters) {
+    result += letter.toUpperCase();
+}
+console.log(result); // ABC
+
+// The safe habit: collect the parts, then join once.
+const parts = [];
+for (const letter of letters) {
+    parts.push(letter.toUpperCase());
+}
+console.log(parts.join("")); // ABC
+```
+
+## Characters and their codes
+
+Every character is stored as a number, its **code**. Letters in a row have codes in a row. Three ranges are worth remembering:
+
+| Characters | Codes |
+| --- | --- |
+| `"a"` to `"z"` | 97 to 122 |
+| `"A"` to `"Z"` | 65 to 90 |
+| `"0"` to `"9"` | 48 to 57 |
+
+The most useful trick: **subtract the code of `"a"`** to turn a letter into its place in the alphabet, from 0 to 25.
+
+```js
+console.log("a".charCodeAt(0)); // 97
+console.log("b".charCodeAt(0)); // 98
+console.log(String.fromCharCode(99)); // c
+
+// The place of a letter in the alphabet: a = 0, b = 1, ..., z = 25
+const letter = "d";
+const place = letter.charCodeAt(0) - "a".charCodeAt(0);
+console.log(place); // 3
+
+// And back again: place 3 is "d".
+const sameLetter = String.fromCharCode(place + 97);
+console.log(sameLetter); // d
+```
+
+Because the codes are in order, you can check what kind of character you have with `>=` and `<=`. Problems like "Valid Palindrome" need this.
+
+```js
+function isLetterOrDigit(char) {
+    const lower = char.toLowerCase();
+
+    const isLetter = lower >= "a" && lower <= "z";
+    const isDigit = lower >= "0" && lower <= "9";
+
+    return isLetter || isDigit;
+}
+
+console.log(isLetterOrDigit("B")); // true
+console.log(isLetterOrDigit("7")); // true
+console.log(isLetterOrDigit(",")); // false
+```
+
+## Comparing and reversing
+
+`===` checks if two strings have the same text. `<` and `>` compare them **character by character, by code**. That gives two surprises.
+
+```js
+console.log("abc" === "abc"); // true
+console.log("apple" < "banana"); // true
+
+// Capitals come before small letters (65-90 before 97-122).
+console.log("Zoo" < "apple"); // true
+
+// Text is compared one character at a time, so "1" < "9" decides it.
+console.log("10" < "9"); // true
+```
+
+So compare numbers as numbers, and lower-case both strings first when case shouldn't matter.
+
+Strings have no `reverse()` method. Arrays do. So split, reverse, then join.
+
+```js
+const word = "hello";
+
+const letters = word.split("");
+letters.reverse();
+
+const reversed = letters.join("");
+console.log(reversed); // olleh
+```
+
+This is O(n) time and O(n) extra space for the array. One small catch: `split("")` cuts some emoji into two broken halves. `[...word]` keeps them whole. Interview inputs are almost always plain letters, so this rarely matters.
+
+## Patterns you will write again and again
+
+**Count characters with a Map.** Works for any character. See [Objects, Maps and Sets](./objects-maps-sets.mdx).
+
+```js
+function countChars(text) {
+    const counts = new Map();
+
+    for (const char of text) {
+        // get() gives undefined the first time, so start from 0.
+        const oldCount = counts.get(char) || 0;
+        counts.set(char, oldCount + 1);
+    }
+
+    return counts;
+}
+
+console.log(countChars("hello")); // Map(4) { 'h' => 1, 'e' => 1, 'l' => 2, 'o' => 1 }
+```
+
+**Count lowercase letters with an array of 26.** Slot 0 is `"a"`, slot 25 is `"z"`. Faster than a Map when the input is only `a` to `z`.
+
+```js
+function countLetters(word) {
+    const counts = new Array(26).fill(0);
+
+    for (const char of word) {
+        const place = char.charCodeAt(0) - 97;
+        counts[place]++;
+    }
+
+    return counts;
+}
+
+const counts = countLetters("banana");
+
+// counts[0] is "a", counts[1] is "b", counts[13] is "n"
+console.log(counts[0], counts[1], counts[13]); // 3 1 2
+```
+
+**Check a palindrome with two pointers.** O(n) time and O(1) space, because nothing is copied. See [Two Pointers](../two-pointers/two-pointers.mdx).
+
+```js
+function isPalindrome(text) {
+    let left = 0;
+    let right = text.length - 1;
+
+    while (left < right) {
+        if (text[left] !== text[right]) {
+            return false;
+        }
+
+        left++;
+        right--;
+    }
+
+    return true;
+}
+
+console.log(isPalindrome("racecar")); // true
+console.log(isPalindrome("hello")); // false
+```
+
+**Sort the letters** to check anagrams: two words are anagrams when their sorted letters match. Sorting costs O(n log n). The default `sort()` is fine here, because it sorts single letters as text.
+
+```js
+function sortLetters(word) {
+    const letters = word.split("");
+    letters.sort();
+
+    return letters.join("");
+}
+
+console.log(sortLetters("listen")); // eilnst
+console.log(sortLetters("silent")); // eilnst
+```
+
+**Split a sentence into words**, even with extra spaces. `/\s+/` means "one or more spaces".
+
+```js
+const sentence = "  the sky   is blue ";
+
+const words = sentence.trim().split(/\s+/);
+console.log(words); // [ 'the', 'sky', 'is', 'blue' ]
+
+// split(" ") would give empty strings for the extra spaces.
+console.log("a  b".split(" ")); // [ 'a', '', 'b' ]
+```
+
+## Common mistakes
+
+- **`word[0] = "x"`** to change a character. It silently does nothing. Build a new string, or work on an array.
+- **Calling a method and not saving the result.** `name.trim()` alone changes nothing; write `name = name.trim()`.
+- **`replace` with a string changes only the first match.** Use `replaceAll` for all of them.
+- **`slice(start, end)` doesn't include `end`.** `"hello".slice(0, 2)` is `"he"`. Off-by-one errors live here.
+- **`"abc".reverse()`.** Strings have no `reverse`; you get "reverse is not a function". Split first.
+- **`includes` or `indexOf` inside a loop.** Each call is a hidden loop, so the whole thing becomes O(n²).
+- **Forgetting about case.** `"A" === "a"` is `false`. Lower-case both sides first when the problem says to ignore case.
+
+## In the interview
+
+Say the cost of hidden loops out loud: "`includes` is O(n) by itself, so inside my loop this is O(n²). I'll count the characters in a Map first instead."
+
+When you need to change characters: "Strings in JavaScript can't be changed, so I'll turn it into an array, work on that, and join it at the end."
+
+**Likely follow-up:** "Why not just build the answer with `+=`?"
+
+**Answer:** "Each `+=` makes a new string, which can mean copying everything so far: O(n²) in the worst case. Engines often optimize it, but pushing parts into an array and joining once is always O(n)."
+
+<Callout title="Remember this" type="success">
+  - Strings **can't be changed**. Every method returns a **new** string, so save the result.
+  - `s[i]` and `s.length` are **O(1)**. `includes`, `indexOf`, `slice` and `split` are hidden loops: **O(n)**.
+  - Build big strings with an **array + `join("")`**, not `+=` in a loop.
+  - `"a"` is 97 and `"A"` is 65: `char.charCodeAt(0) - 97` turns a letter into a slot from 0 to 25.
+  - `replace` changes only the **first** match, and `split(" ")` can give empty strings.
+  - Strings compare **character by character**: `"10" < "9"` is `true`.
+</Callout>

@@ -2,9 +2,414 @@
 title: "Knapsack"
 description: "Pick items to fit a limit: the classic DP family."
 icon: Backpack
-planned: true
 ---
 
-- 0/1 knapsack
-- Partition equal subset sum
-- Target sum
+## The idea
+
+In a **knapsack** problem, you have **items** and a **limit**. Each item has a size (weight) and a worth (value). You choose which items to take so that they fit the limit and give the best result.
+
+Think of packing a **cabin bag with a 7 kg limit**. A laptop, a camera, a book, a jacket: each has a weight, and each matters to you a different amount. Each item is either **in the bag or not**: you can't pack half a laptop. That's why it's called **0/1 knapsack**: 0 = leave it, 1 = take it.
+
+Many interview problems are knapsack in disguise: "split the array into two equal halves", "put + or - in front of each number", "how many ways to make change". Once you see the items and the limit, the same table solves them all, using the [DP recipe](./dp-basics.mdx).
+
+## How it works
+
+### The example
+
+Four items and a bag that holds **7 kg**:
+
+| Item | Weight (kg) | Value |
+| --- | --- | --- |
+| A | 1 | 1 |
+| B | 3 | 4 |
+| C | 4 | 5 |
+| D | 5 | 7 |
+
+**Why not greedy?** Taking the best value per kg first: D (7 for 5 kg), then only 2 kg are left, so A. Total value **8**. But B + C weigh exactly 7 kg and are worth **9**. The obvious choice was wrong, so we need DP.
+
+### The recipe
+
+For each item, there are only two choices: **skip it** or **take it**. Two things change as we go: how many items we have looked at, and how much room is left. So the table is 2D.
+
+1. **What `dp[i][capacity]` means:** the best value using only the **first `i` items**, in a bag that holds `capacity` kg.
+2. **Recurrence:** for item `i` (with `weight` and `value`):
+   - **skip it:** `dp[i - 1][capacity]` (the best without it);
+   - **take it** (only if `weight <= capacity`): `value + dp[i - 1][capacity - weight]` (its value + the best for the room left, **without** this item);
+   - `dp[i][capacity]` = the bigger of the two.
+3. **Base cases:** `dp[0][capacity] = 0` (no items, no value).
+4. **Order:** `i` from 1 up to the number of items (row by row); `capacity` from 0 up to the limit. **Answer:** `dp[count][limit]`, the bottom-right cell.
+
+Notice "take it" reads from row `i - 1`. That's what stops an item from being taken twice.
+
+### The table, filled
+
+One row per item added. Columns are the bag size, 0 to 7 kg:
+
+| Items used | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| + A (1 kg, 1) | 0 | 1 | 1 | 1 | 1 | 1 | 1 | 1 |
+| + B (3 kg, 4) | 0 | 1 | 1 | 4 | 5 | 5 | 5 | 5 |
+| + C (4 kg, 5) | 0 | 1 | 1 | 4 | 5 | 6 | 6 | 9 |
+| + D (5 kg, 7) | 0 | 1 | 1 | 4 | 5 | 7 | 8 | **9** |
+
+Two cells, worked out:
+
+- **Row C, 7 kg.** Skip C: the cell above = 5. Take C: 5 + (row B, 7 - 4 = 3 kg) = 5 + 4 = **9**. The best is 9 (B + C).
+- **Row D, 7 kg.** Skip D: the cell above = 9. Take D: 7 + (row C, 7 - 5 = 2 kg) = 7 + 1 = 8. The best is still **9**.
+
+### The code
+
+The code fills the same table, row by row.
+
+```js
+function knapsack(weights, values, limit) {
+    const count = weights.length;
+    const rows = count + 1;
+    const cols = limit + 1;
+
+    // dp[i][capacity] = best value from the first i items
+    // in a bag of size `capacity`. Row 0 (no items) stays 0.
+    const dp = Array.from({ length: rows }, () => new Array(cols).fill(0));
+
+    for (let i = 1; i <= count; i++) {
+        // Item number i is at index i - 1.
+        const weight = weights[i - 1];
+        const value = values[i - 1];
+
+        for (let capacity = 0; capacity <= limit; capacity++) {
+            // Skip the item: the best without it.
+            const skip = dp[i - 1][capacity];
+            dp[i][capacity] = skip;
+
+            // Take the item if it fits: its value + best for the room left.
+            if (weight <= capacity) {
+                const take = value + dp[i - 1][capacity - weight];
+                dp[i][capacity] = Math.max(skip, take);
+            }
+        }
+    }
+
+    return dp[count][limit];
+}
+
+console.log(knapsack([1, 3, 4, 5], [1, 4, 5, 7], 7)); // 9
+```
+
+**Time:** O(n × limit), one step per cell (n items, limit + 1 sizes). **Space:** O(n × limit) for the table.
+
+### Saving space: one row, filled backwards
+
+Each row only reads the row **above** it. So we can keep a single row, `dp[capacity]`, and update it in place for each item. But there's a catch: we must loop `capacity` **downward**.
+
+Why? "Take it" reads `dp[capacity - weight]`, a cell to the **left**. Going down, that cell has not been updated yet for this item, so it still means "without this item". Going up, it was already updated, so the item gets taken **again**.
+
+Here is one item (2 kg, value 3) and a bag of 4 kg, starting from `dp = [0, 0, 0, 0, 0]`:
+
+| Loop | capacity (in order) | reads dp[capacity - 2] | new dp[capacity] |
+| --- | --- | --- | --- |
+| going **up** | 2 | dp[0] = 0 | 3 |
+| going **up** | 3 | dp[1] = 0 | 3 |
+| going **up** | 4 | dp[2] = **3** (already has the item!) | **6** (item used twice) |
+| going **down** | 4 | dp[2] = 0 | 3 |
+| going **down** | 3 | dp[1] = 0 | 3 |
+| going **down** | 2 | dp[0] = 0 | 3 |
+
+```js
+function knapsackOneRow(weights, values, limit) {
+    // dp[capacity] = best value for this bag size, using the items so far.
+    const dp = new Array(limit + 1).fill(0);
+
+    for (let i = 0; i < weights.length; i++) {
+        const weight = weights[i];
+        const value = values[i];
+
+        // Go DOWN, so dp[capacity - weight] doesn't include this item yet.
+        for (let capacity = limit; capacity >= weight; capacity--) {
+            const skip = dp[capacity];
+            const take = value + dp[capacity - weight];
+            dp[capacity] = Math.max(skip, take);
+        }
+    }
+
+    return dp[limit];
+}
+
+console.log(knapsackOneRow([1, 3, 4, 5], [1, 4, 5, 7], 7)); // 9
+```
+
+**Time:** O(n × limit), the same. **Space:** O(limit), just one row.
+
+## Classic problems
+
+### 1. Partition Equal Subset Sum
+
+**Problem:** can you split the array into two groups with the **same sum**? `[1, 5, 11, 5]` → **true** (`[1, 5, 5]` and `[11]`). `[1, 2, 3, 5]` → **false**.
+
+**Idea:** if the total is odd, it can't be split. If it's even, each group must add up to `total / 2`. So the question becomes: **can some of the numbers add up to exactly `total / 2`?** If one group hits it, the rest is the other half. That's 0/1 knapsack: each number is an item (used at most once), and `total / 2` is the limit. We just want yes or no instead of a best value.
+
+1. **What `dp[sum]` means:** can some of the numbers seen so far add up to exactly `sum`?
+2. **Recurrence:** for each number `num`: `dp[sum] = dp[sum] || dp[sum - num]` (already possible without it, or possible by adding it).
+3. **Base cases:** `dp[0] = true` (pick nothing). The rest start `false`.
+4. **Order:** for each number, `sum` from the target **down** to `num` (each number used once). **Answer:** `dp[target]`.
+
+The table for `[1, 5, 11, 5]`. The total is 22, so the target is 11:
+
+| After number | Sums that are now possible (`dp[sum]` is true) |
+| --- | --- |
+| (start) | 0 |
+| 1 | 0, 1 |
+| 5 | 0, 1, 5, 6 |
+| 11 | 0, 1, 5, 6, **11** |
+| 5 | 0, 1, 5, 6, 10, **11** |
+
+`dp[11]` is true, so the answer is true.
+
+```js
+function canPartition(nums) {
+    let total = 0;
+    for (const num of nums) {
+        total = total + num;
+    }
+
+    // An odd total can't be split into two equal halves.
+    if (total % 2 === 1) {
+        return false;
+    }
+    const target = total / 2;
+
+    // dp[sum] = can some of the numbers so far add up to exactly sum?
+    const dp = new Array(target + 1).fill(false);
+    dp[0] = true;
+
+    for (const num of nums) {
+        // Go DOWN so each number is used at most once.
+        for (let sum = target; sum >= num; sum--) {
+            if (dp[sum - num]) {
+                dp[sum] = true;
+            }
+        }
+    }
+
+    return dp[target];
+}
+
+console.log(canPartition([1, 5, 11, 5])); // true
+console.log(canPartition([1, 2, 3, 5])); // false
+```
+
+**Time:** O(n × target), every number walks over every sum up to the target. **Space:** O(target) for one row.
+
+### 2. Target Sum
+
+**Problem:** put a `+` or `-` in front of every number. Count the ways to make the total equal `target`. `[1, 1, 1, 1, 1]`, target 3 → **5** (make any one of the five numbers negative, e.g. `-1 + 1 + 1 + 1 + 1`).
+
+**First idea: memoization.** Go through the numbers one by one. For each, try `+` and try `-`. The state is two values: which number we are at, and the running total. Save each state's answer.
+
+```js
+function findTargetSumWays(nums, target) {
+    const memo = {};
+
+    // ways(index, total) = ways to sign the rest so we end on target.
+    function ways(index, total) {
+        // Every number has a sign now: did we hit the target?
+        if (index === nums.length) {
+            if (total === target) {
+                return 1;
+            }
+            return 0;
+        }
+
+        const key = index + "," + total;
+        if (memo[key] !== undefined) {
+            return memo[key];
+        }
+
+        const withPlus = ways(index + 1, total + nums[index]);
+        const withMinus = ways(index + 1, total - nums[index]);
+
+        memo[key] = withPlus + withMinus;
+        return memo[key];
+    }
+
+    return ways(0, 0);
+}
+
+console.log(findTargetSumWays([1, 1, 1, 1, 1], 3)); // 5
+```
+
+**Time:** O(n × total), because there are n indexes and the running total has at most 2 × total + 1 values. **Space:** O(n × total) for the memo.
+
+**Faster idea: turn it into knapsack.** Split the numbers into a **plus group** and a **minus group**. Then:
+
+- plus − minus = target
+- plus + minus = total (every number is in one group)
+- add the two lines: 2 × plus = target + total, so **plus = (target + total) / 2**
+
+So we only need to **count the groups of numbers that add up to `(target + total) / 2`**. For `[1, 1, 1, 1, 1]`, target 3: total = 5, so the plus group must add up to (3 + 5) / 2 = **4**. If `target + total` is odd or negative, the answer is 0.
+
+1. **What `dp[sum]` means:** the number of ways to pick some of the numbers seen so far that add up to `sum`.
+2. **Recurrence:** for each number `num`: `dp[sum] = dp[sum] + dp[sum - num]` (ways without it + ways with it).
+3. **Base cases:** `dp[0] = 1` (one way to make 0: pick nothing).
+4. **Order:** for each number, `sum` from the target **down** to `num`. **Answer:** `dp[plusSum]`.
+
+The table for `[1, 1, 1, 1, 1]`, plus sum 4:
+
+| After number | dp[0] | dp[1] | dp[2] | dp[3] | dp[4] |
+| --- | --- | --- | --- | --- | --- |
+| (start) | 1 | 0 | 0 | 0 | 0 |
+| 1st 1 | 1 | 1 | 0 | 0 | 0 |
+| 2nd 1 | 1 | 2 | 1 | 0 | 0 |
+| 3rd 1 | 1 | 3 | 3 | 1 | 0 |
+| 4th 1 | 1 | 4 | 6 | 4 | 1 |
+| 5th 1 | 1 | 5 | 10 | 10 | **5** |
+
+```js
+function findTargetSumWaysFast(nums, target) {
+    let total = 0;
+    for (const num of nums) {
+        total = total + num;
+    }
+
+    // The plus group must add up to (target + total) / 2.
+    const doubled = target + total;
+    if (doubled < 0 || doubled % 2 === 1) {
+        return 0;
+    }
+    const plusSum = doubled / 2;
+
+    // dp[sum] = ways to pick some numbers that add up to sum.
+    const dp = new Array(plusSum + 1).fill(0);
+    dp[0] = 1;
+
+    for (const num of nums) {
+        // Go DOWN: each number is used at most once.
+        for (let sum = plusSum; sum >= num; sum--) {
+            dp[sum] = dp[sum] + dp[sum - num];
+        }
+    }
+
+    return dp[plusSum];
+}
+
+console.log(findTargetSumWaysFast([1, 1, 1, 1, 1], 3)); // 5
+console.log(findTargetSumWaysFast([1], 2)); // 0
+```
+
+**Time:** O(n × plusSum), every number walks over every sum. **Space:** O(plusSum) for one row.
+
+### 3. Unbounded knapsack: Coin Change II
+
+**Problem:** count the ways to make an amount with coins. You can use **each coin as many times as you like**. `amount = 5`, `coins = [1, 2, 5]` → **4**: `5`, `2 + 2 + 1`, `2 + 1 + 1 + 1`, `1 + 1 + 1 + 1 + 1`.
+
+**Idea:** this is knapsack where items can be **reused**. That's called **unbounded knapsack**. The only code change: loop the amount **upward**. Going up, `dp[i - coin]` may already include this coin, and that's exactly what we want now: the coin can be used again.
+
+1. **What `dp[i]` means:** the number of ways to make amount `i` with the coins seen so far.
+2. **Recurrence:** for each coin: `dp[i] = dp[i] + dp[i - coin]` (ways without this coin + ways that use it at least once more).
+3. **Base cases:** `dp[0] = 1` (one way to make 0: no coins).
+4. **Order:** coins in the **outer** loop; amount `i` from `coin` **up** to `amount`. **Answer:** `dp[amount]`.
+
+The table for `amount = 5`, `coins = [1, 2, 5]`:
+
+| After coin | dp[0] | dp[1] | dp[2] | dp[3] | dp[4] | dp[5] |
+| --- | --- | --- | --- | --- | --- | --- |
+| (start) | 1 | 0 | 0 | 0 | 0 | 0 |
+| 1 | 1 | 1 | 1 | 1 | 1 | 1 |
+| 2 | 1 | 1 | 2 | 2 | 3 | 3 |
+| 5 | 1 | 1 | 2 | 2 | 3 | **4** |
+
+```js
+function change(amount, coins) {
+    // dp[i] = ways to make amount i with the coins so far.
+    const dp = new Array(amount + 1).fill(0);
+
+    // Base case: one way to make 0 (use no coins).
+    dp[0] = 1;
+
+    // Coins in the OUTER loop: each mix of coins is counted once.
+    for (const coin of coins) {
+        // Go UP: this coin may be used again and again.
+        for (let i = coin; i <= amount; i++) {
+            dp[i] = dp[i] + dp[i - coin];
+        }
+    }
+
+    return dp[amount];
+}
+
+console.log(change(5, [1, 2, 5])); // 4
+console.log(change(3, [2])); // 0
+```
+
+**Time:** O(coins × amount), each coin walks over every amount. **Space:** O(amount).
+
+**The loop order matters.** With coins outside, `1 + 2` and `2 + 1` are the **same** way (each mix is built in coin order). Swap the loops and you count every **order** separately. That's a different problem (LeetCode 377, "Combination Sum IV"):
+
+```js
+function countOrders(amount, coins) {
+    const dp = new Array(amount + 1).fill(0);
+    dp[0] = 1;
+
+    // Amount OUTSIDE: 1 + 2 and 2 + 1 count as two different ways.
+    for (let i = 1; i <= amount; i++) {
+        for (const coin of coins) {
+            if (coin <= i) {
+                dp[i] = dp[i] + dp[i - coin];
+            }
+        }
+    }
+
+    return dp[amount];
+}
+
+console.log(countOrders(5, [1, 2, 5])); // 9
+```
+
+### 0/1 or unbounded?
+
+|  | 0/1 knapsack | Unbounded knapsack |
+| --- | --- | --- |
+| Each item can be used | at most once | as many times as you like |
+| One-row loop over the limit | **down** (from the limit to the weight) | **up** (from the weight to the limit) |
+| Why | `dp[c - weight]` must not include this item yet | `dp[c - weight]` may include it again |
+| Examples | knapsack, Partition Equal Subset Sum, Target Sum | Coin Change, Coin Change II |
+
+The 2D table version is safe for 0/1 without thinking about direction, because "take it" reads the row above. The one-row version is where the direction matters.
+
+## How to spot it
+
+- You **choose a subset** of items, and there's a **limit**: a weight, a budget, a target sum.
+- **"Split into two groups with equal sum"** or "the smallest difference between two groups" → subset sum with `total / 2`.
+- **"Put + or - in front of each number"** → split into a plus group and a minus group → count subsets.
+- **"Each item at most once"** → 0/1 (loop down). **"Unlimited coins / reuse allowed"** → unbounded (loop up).
+- The question is one of: **best value** (max), **is it possible** (true/false), or **how many ways** (count). The table is the same; only the base case and the `max` / `||` / `+` change.
+
+## Common mistakes
+
+- **Wrong loop direction in the one-row version.** Up for 0/1 reuses items; down for unbounded forbids reuse.
+- **Wrong base case.** Best value: `dp[0] = 0`. Is it possible: `dp[0] = true`. How many ways: `dp[0] = 1`.
+- **Forgetting the quick checks.** Partition: an odd total is `false` right away. Target Sum: if `target + total` is odd or negative, the answer is 0.
+- **Swapping the loops in Coin Change II.** Amount outside counts orders (9), not combinations (4).
+- **In the 2D version, forgetting to copy "skip"** when the item doesn't fit. The cell must still get `dp[i - 1][capacity]`, not stay 0.
+- **Using greedy** (biggest value, or best value per kg). It fails, as the 7 kg example shows.
+
+## In the interview
+
+- Say it out loud: **"This is 0/1 knapsack in disguise."** Then name the items, the limit, and what you want (max, yes/no, or count).
+- Start with the 2D recipe. Then offer the one-row version and explain **why the loop goes down**.
+- For Partition and Target Sum, explain the reduction first: "each half must be `total / 2`", or "the plus group must be `(target + total) / 2`".
+
+> "Each number is an item I can use once, and the limit is half the total. Let `dp[sum]` be whether some numbers so far add up to `sum`. For each number, `dp[sum]` becomes true if `dp[sum - num]` was true. I loop `sum` downward so each number is used once. That's O(n × target) time and O(target) space."
+
+**Likely follow-up:** "Which items did you actually pick?"
+
+**Answer:** "Keep the 2D table and walk back from the bottom-right cell. If `dp[i][capacity]` is different from the cell above, `dp[i - 1][capacity]`, then item `i` was taken: write it down and subtract its weight from `capacity`. Then move up one row. Repeat until row 0."
+
+<Callout title="Remember this" type="success">
+  - **0/1 knapsack:** items, a limit, and for each item **skip it or take it**. `dp[i][c] = max(dp[i - 1][c], value + dp[i - 1][c - weight])`.
+  - Greedy (best value per kg) **fails**. Time is O(n × limit).
+  - **One row:** loop the limit **down** for 0/1 (each item once), **up** for unbounded (reuse allowed).
+  - **Partition Equal Subset Sum** = can a subset reach `total / 2`? **Target Sum** = count subsets that reach `(target + total) / 2`.
+  - Base case by goal: max value → `0`, possible → `true`, count ways → `1`.
+  - **Coin Change II:** coins in the outer loop counts combinations; amount outside counts orders.
+</Callout>
