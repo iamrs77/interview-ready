@@ -1,0 +1,89 @@
+---
+title: "Checkout, Revert and Reset"
+description: "Three ways to go back: look, undo safely, or move the branch back."
+icon: Undo2
+---
+
+## The idea
+
+Git has three commands for going back in time, and each one is for a different job:
+
+- **Checkout:** "I want to **look at** an old version."
+- **Revert:** "I want to **undo** a commit but keep the history."
+- **Reset:** "I want to **move the branch back** and remove commits from its history."
+
+You get the commit IDs for all three from `git log --oneline`.
+
+## How it works
+
+### git checkout: look at an old version
+
+```bash
+# Look at the project as it was at this commit.
+git checkout 9f8e7d6
+
+# Come back to your branch.
+git checkout main
+```
+
+When you check out a commit directly, you are no longer on your branch. This is called **detached HEAD**. To return to your branch, use `git checkout <branch-name>`.
+
+### git revert: undo a commit safely
+
+```bash
+git revert a1b2c3d
+```
+
+Git makes a **new commit** that does the opposite of the changes in `a1b2c3d`. The original commit is **not deleted** from the history.
+
+```text
+Before:  A --- B --- C            main
+After:   A --- B --- C --- R      main
+```
+
+`R` undoes what `C` did, and `C` is still in the history. Nothing is removed, so revert is safe on a branch that is already pushed and shared.
+
+### git reset: move the branch back
+
+```bash
+git reset 9f8e7d6
+```
+
+Moves the current branch back to a commit, and **removes the commits after it from the branch's history**.
+
+```text
+Before:  A --- B --- C --- D      main
+After:   A --- B                  main
+```
+
+After resetting to `B` (in real life, you use B's commit ID), the commits `C` and `D` are no longer on `main`. What happens to their **changes** depends on the mode:
+
+| Mode | The changes from C and D |
+| --- | --- |
+| `git reset --soft B` | Kept, and **staged** |
+| `git reset B` (same as `--mixed`, the default) | Kept in your files, but **unstaged** |
+| `git reset --hard B` | **Discarded**: removed from your files and the staging area |
+
+`--hard` also throws away any uncommitted changes you had. Be sure before you use it.
+
+With a file name instead of a commit, `git reset index.js` only unstages that file (see [Saving Changes](./saving-changes.mdx)).
+
+### Undo the last commit
+
+```bash
+# Undo the last commit, but keep its changes (staged).
+git reset --soft HEAD~1
+
+# Undo the last commit and throw its changes away.
+git reset --hard HEAD~1
+```
+
+`HEAD~1` means "one commit before where I am". `HEAD~2` is two commits back.
+
+<Callout title="Remember this" type="success">
+  - **Checkout** = look at an old version. **Revert** = undo but keep history. **Reset** = move the branch back.
+  - `git checkout <commit-id>` puts you in **detached HEAD**. `git checkout <branch>` takes you back.
+  - `git revert <commit-id>` adds a **new commit** that reverses it. Safe on shared branches.
+  - `git reset`: `--soft` keeps changes **staged**, `--mixed` (default) keeps them **unstaged**, `--hard` **discards** them.
+  - `git reset --soft HEAD~1` undoes the last commit and keeps its changes. `--hard HEAD~1` throws them away.
+</Callout>

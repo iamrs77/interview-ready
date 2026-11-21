@@ -1,13 +1,20 @@
 import {
   Activity,
   Binary,
+  Blocks,
   Box,
+  Boxes,
   Brackets,
+  Bug,
+  CircleQuestionMark,
   Coins,
   Compass,
+  Component,
   Database,
   Dumbbell,
   FileCode,
+  FileType,
+  GitBranch,
   Layers,
   Layers2,
   LayoutGrid,
@@ -22,11 +29,15 @@ import {
   Shapes,
   Share2,
   ShieldCheck,
+  Sparkles,
+  SquareFunction,
   Table,
+  Timer,
   TreeDeciduous,
   Triangle,
   Undo2,
   Workflow,
+  Wrench,
   Zap,
   type LucideIcon,
 } from 'lucide-react';
@@ -89,10 +100,33 @@ export const dsaSections = {
   'math-bits': { label: 'Math and Bits', icon: Binary, className: 'bg-slate-500/10 text-slate-700' },
 } satisfies Record<string, Section>;
 
+/** The same for JavaScript (folders in content/javascript). */
+export const jsSections = {
+  guide: { label: 'Guide', icon: Compass, className: 'bg-violet-500/10 text-violet-700' },
+  'core-basics': { label: 'Core Basics', icon: Blocks, className: 'bg-teal-500/10 text-teal-700' },
+  functions: { label: 'Functions', icon: SquareFunction, className: 'bg-sky-500/10 text-sky-700' },
+  'objects-arrays': { label: 'Objects and Arrays', icon: Boxes, className: 'bg-indigo-500/10 text-indigo-700' },
+  oop: { label: 'OOP in JavaScript', icon: Component, className: 'bg-cyan-500/10 text-cyan-700' },
+  async: { label: 'Asynchronous JavaScript', icon: Timer, className: 'bg-amber-500/10 text-amber-700' },
+  'modern-js': { label: 'Modern JavaScript', icon: Sparkles, className: 'bg-pink-500/10 text-pink-700' },
+  'json-storage': { label: 'JSON and Storage', icon: Database, className: 'bg-emerald-500/10 text-emerald-700' },
+  'memory-errors': { label: 'Memory, Errors and Performance', icon: Bug, className: 'bg-red-500/10 text-red-700' },
+  'write-your-own': { label: 'Write Your Own', icon: Wrench, className: 'bg-orange-500/10 text-orange-700' },
+  'guess-the-output': { label: 'Guess the Output', icon: CircleQuestionMark, className: 'bg-fuchsia-500/10 text-fuchsia-700' },
+  typescript: { label: 'TypeScript', icon: FileType, className: 'bg-blue-500/10 text-blue-700' },
+} satisfies Record<string, Section>;
+
+/** Git has no sections: every page is in the track root. */
+export const gitSections = {
+  guide: { label: 'Git', icon: GitBranch, className: 'bg-orange-500/10 text-orange-700' },
+} satisfies Record<string, Section>;
+
 /** Each track's sections, by track folder name. System Design is the default. */
 const sectionsByTrack: Record<string, Record<string, Section>> = {
   'low-level-design': lldSections,
   dsa: dsaSections,
+  javascript: jsSections,
+  git: gitSections,
 };
 
 /** Finds the section from a page's slugs, e.g. ['system-design', 'caching', 'redis']. */

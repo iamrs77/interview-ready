@@ -1,14 +1,16 @@
 import Link from 'next/link';
-import { ArrowRight, Binary, Boxes, Network, type LucideIcon } from 'lucide-react';
+import { ArrowRight, Binary, Boxes, FileCode, GitBranch, Network, type LucideIcon } from 'lucide-react';
 import { source, type Track } from '@/lib/source';
 import { TrackProgress } from '@/components/track-progress';
 import { ResetProgressButton } from '@/components/reset-progress-button';
 
-/** The tracks shown on the home page, in order. */
+/** The tracks shown on the home page, in the owner's chosen order. */
 const TRACK_CARDS: { track: Track; title: string; icon: LucideIcon; iconClass: string }[] = [
+  { track: 'dsa', title: 'DSA', icon: Binary, iconClass: 'bg-amber-500/10 text-amber-700' },
+  { track: 'javascript', title: 'JavaScript', icon: FileCode, iconClass: 'bg-yellow-500/15 text-yellow-700' },
   { track: 'system-design', title: 'System Design', icon: Network, iconClass: 'bg-indigo-500/10 text-indigo-600' },
   { track: 'low-level-design', title: 'Low-Level Design', icon: Boxes, iconClass: 'bg-teal-500/10 text-teal-700' },
-  { track: 'dsa', title: 'DSA', icon: Binary, iconClass: 'bg-amber-500/10 text-amber-700' },
+  { track: 'git', title: 'Git', icon: GitBranch, iconClass: 'bg-orange-500/10 text-orange-700' },
 ];
 
 export default function HomePage() {

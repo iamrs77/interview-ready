@@ -4,11 +4,14 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, dirname, relative, resolve, posix } from 'node:path';
 
-const TRACKS = ['system-design', 'low-level-design', 'dsa'];
+const TRACKS = ['system-design', 'low-level-design', 'dsa', 'git'];
 const PAGE_NAME = 'revision';
 
 // Pages with no lesson of their own to revise.
 const SKIPPED_PAGES = ['index', 'cheat-sheet', PAGE_NAME];
+
+// Tracks with no "Start Here" page: their index is the first lesson, so it is revised too.
+const LESSON_INDEX_TRACKS = ['git'];
 
 const CALLOUT_START = '<Callout title="Remember this" type="success">';
 const CALLOUT_END = '</Callout>';
@@ -88,7 +91,8 @@ function buildTrack(track) {
   const folderParts = [];
 
   for (const entry of root.pages) {
-    if (!isPageEntry(entry) || SKIPPED_PAGES.includes(entry)) {
+    const isLessonIndex = entry === 'index' && LESSON_INDEX_TRACKS.includes(track);
+    if (!isPageEntry(entry) || (SKIPPED_PAGES.includes(entry) && !isLessonIndex)) {
       continue;
     }
 
@@ -120,7 +124,9 @@ function buildTrack(track) {
     '',
     'The **Remember this** box of every lesson, in the same order as the sidebar. Click a title to open the lesson.',
   ];
-  const guide = guideParts.length > 0 ? ['', '## Guide', ...guideParts] : [];
+  // A track with no folders (like Git) is all top-level lessons, so it needs no "Guide" heading.
+  const guideHeading = folderParts.length > 0 ? ['', '## Guide'] : [];
+  const guide = guideParts.length > 0 ? [...guideHeading, ...guideParts] : [];
   const lines = [...header, ...guide, ...folderParts, ''];
 
   writeFileSync(join(trackDir, `${PAGE_NAME}.mdx`), lines.join('\n'));

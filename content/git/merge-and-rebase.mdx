@@ -1,0 +1,111 @@
+---
+title: "Merge and Rebase"
+description: "Two ways to bring one branch's work into another."
+icon: GitMerge
+---
+
+## The idea
+
+When your feature branch is ready, its commits need to get into `main`. There are two ways to do it: **merge** and **rebase**. Both bring the changes together. The difference is how the history looks afterwards.
+
+## How it works
+
+### Merge
+
+```bash
+git checkout main
+git merge feature
+```
+
+This merges the changes from `feature` into `main`. **`git merge` always brings the other branch into the branch you're on.**
+
+One of two things happens.
+
+**Fast-forward.** If `main` has no new commits since `feature` was created, Git just moves the `main` name forward to the last commit of `feature`. No new commit is made.
+
+```text
+A --- B                main
+       \
+        C --- D        feature
+```
+
+After `git merge feature`:
+
+```text
+A --- B --- C --- D    main, feature
+```
+
+**Merge commit.** If `main` has new commits too, Git makes a new **merge commit** (`M`) that joins the two lines. It's the merge point.
+
+```text
+A --- B --- C --- F --- G          main
+             \
+              D --- E              feature
+```
+
+After `git merge feature`:
+
+```text
+A --- B --- C --- F --- G --- M    main
+             \               /
+              D ----------- E      feature
+```
+
+### Rebase
+
+`git rebase <branch-name>` moves the commits of your **current branch** and puts them on top of `<branch-name>`.
+
+You are on `feature`, and you run:
+
+```bash
+git checkout feature
+git rebase main
+```
+
+Git basically says:
+
+> "Take my feature commits D and E, set them aside, move my branch to the latest `main`, and then put D and E back on top."
+
+So Git changes this:
+
+```text
+A --- B --- C --- F --- G          main
+             \
+              D --- E              feature
+```
+
+into this:
+
+```text
+A --- B --- C --- F --- G --- D' --- E'
+                        ↑             ↑
+                       main        feature
+```
+
+Notice that **D and E became D' and E'**. Git creates **new commits** with the same changes but a different parent, so they get new IDs.
+
+Rebase changes only `feature`. `main` still points to `G`. To bring the work into `main`, merge it now. It's a fast-forward, so there is no merge commit:
+
+```bash
+git checkout main
+git merge feature
+```
+
+### The golden rule of rebase
+
+**Don't rebase commits that you have already pushed and that others may be using.** Rebase replaces commits with new ones that have new IDs. Your teammates still have the old commits, and their history no longer matches yours.
+
+Rebase your own branch to bring it up to date with `main`. Use merge for branches others work on.
+
+### Easy way to remember
+
+- **Merge:** combine two branches, and create a merge point when needed.
+- **Rebase:** move your branch's commits to the latest point of another branch, for a straight-line history.
+
+<Callout title="Remember this" type="success">
+  - `git merge feature` brings `feature` into the **current** branch.
+  - **Fast-forward:** the current branch has no new commits, so Git just moves its name forward. Otherwise Git makes a **merge commit**.
+  - `git rebase main` (on `feature`) replays your commits **on top of** `main`. The history becomes a straight line.
+  - Rebased commits are **new commits** (D becomes D') with new IDs.
+  - **Golden rule:** never rebase commits that others already have. Merge is always safe.
+</Callout>

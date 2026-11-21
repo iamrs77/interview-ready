@@ -1,0 +1,98 @@
+---
+title: "Cherry-Pick"
+description: "Copy one commit from another branch onto yours."
+icon: Cherry
+---
+
+## The idea
+
+**Cherry-pick** takes the changes from **one specific commit** and applies them to your current branch.
+
+It's useful when you want **one particular change** from another branch, without bringing in the whole branch. For example, a bug fix made on one branch that another branch needs too.
+
+## How it works
+
+Suppose you have:
+
+```text
+branch-A:  A --- B --- C
+                  \
+branch-B:          D --- E --- F
+```
+
+You are working on `branch-A`, but commit `E` on `branch-B` has a change you also need. Instead of merging the whole of `branch-B`, you cherry-pick only commit `E`.
+
+### Steps
+
+**1. Switch to the branch where you want the change:**
+
+```bash
+git checkout branch-A
+```
+
+**2. Find the commit you want on `branch-B`:**
+
+```bash
+git log --oneline branch-B
+```
+
+Copy the ID of the commit you need.
+
+**3. Cherry-pick the commit:**
+
+```bash
+git cherry-pick <commit-id>
+```
+
+Git applies the changes from that commit to your current branch, as a new commit:
+
+```text
+branch-A:  A --- B --- C --- E'
+                  \
+branch-B:          D --- E --- F
+```
+
+`E'` has the same changes as `E`, but it's a new commit with a new ID. `branch-B` doesn't change.
+
+### Conflicts during a cherry-pick
+
+If the cherry-picked commit changes the same lines as your current branch, Git can't tell which version to keep, so it pauses the cherry-pick. Git marks the clash inside the file:
+
+```text
+<<<<<<< HEAD
+const price = 100;
+=======
+const price = 120;
+>>>>>>> a1b2c3d (Update price)
+```
+
+Above `=======` is your current branch's version. Below it is the version from the cherry-picked commit. Keep the right code, and delete the three marker lines.
+
+The steps:
+
+```bash
+# 1. See which files have conflicts.
+git status
+
+# 2. Open the files and resolve the conflicts.
+
+# 3. Stage the fixed files.
+git add <conflicted-file>
+
+# 4. Continue the cherry-pick.
+git cherry-pick --continue
+```
+
+To cancel and go back to how things were before the cherry-pick started:
+
+```bash
+git cherry-pick --abort
+```
+
+<Callout title="Remember this" type="success">
+  - `git cherry-pick <commit-id>` copies **one commit** onto your current branch.
+  - The copy is a **new commit** (E becomes E') with a new ID. The other branch doesn't change.
+  - Use it for one change, like a bug fix, without merging the whole branch.
+  - Find the ID with `git log --oneline <branch>`.
+  - Conflicts: fix → `git add` → `git cherry-pick --continue`, or `git cherry-pick --abort` to cancel.
+</Callout>
