@@ -3,24 +3,31 @@
 import { useDonePages } from '@/lib/progress';
 
 /*
- * Marks done lessons in the sidebar: green text and a green tick on the right.
+ * Marks done pages in the sidebar, from the "Mark as done" list:
+ * - a lesson's check icon (svg[data-lesson-check], added in track-layout.tsx) turns green;
+ * - a guide page (no check icon, like the Cheat Sheet) gets a green tick on the right instead;
+ * - the text of every done page turns green.
  * Fumadocs renders each sidebar item as <a data-active="true|false" href="...">, so a small
- * stylesheet built from the "Mark as done" list can style exactly those links.
+ * stylesheet can style exactly those links.
  * The a[data-active] markup copies Fumadocs 16.19 internals. Re-check after a Fumadocs upgrade:
- * done lessons should still show green text and a tick in the sidebar.
+ * done lessons should still show a green check in the sidebar.
  */
 export function SidebarDoneMarks() {
   const done = [...useDonePages()].filter((url) => /^\/learn\/[a-z0-9/-]+$/.test(url));
   if (done.length === 0) return null;
 
-  const links = done.map((url) => `a[data-active][href="${url}"]`);
   const notActive = done.map((url) => `a[data-active="false"][href="${url}"]`);
+  const checks = done.map((url) => `a[data-active][href="${url}"] svg[data-lesson-check]`);
+  const guideTicks = done.map((url) => `a[data-active][href="${url}"]:not(:has(svg[data-lesson-check]))::after`);
 
   const css = `
 ${notActive.join(',\n')} {
   color: #047857;
 }
-${links.map((selector) => `${selector}::after`).join(',\n')} {
+${checks.join(',\n')} {
+  color: #059669;
+}
+${guideTicks.join(',\n')} {
   content: "✓";
   margin-inline-start: auto;
   flex-shrink: 0;

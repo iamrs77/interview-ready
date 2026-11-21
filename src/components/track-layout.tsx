@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
+import { CircleCheck } from 'lucide-react';
 import { flattenTree } from 'fumadocs-core/page-tree';
+import type * as PageTree from 'fumadocs-core/page-tree';
 import { DocsLayout } from 'fumadocs-ui/layouts/docs';
 import type { LayoutTab } from 'fumadocs-ui/layouts/shared';
 import { baseOptions } from '@/lib/layout.shared';
@@ -7,6 +9,7 @@ import { getTrackFolder, source, TRACKS, type Track } from '@/lib/source';
 import { SidebarDoneMarks } from '@/components/sidebar-done-marks';
 import { JsPlayground, JsPlaygroundButton } from '@/components/js-playground';
 import { PLAYGROUND_TRACKS } from '@/lib/playground';
+import { SidebarFoldersToggle } from '@/components/sidebar-folders-toggle';
 
 /*
  * Fumadocs centers the whole layout, so on wide screens the sidebar gets empty space on its left.
@@ -32,7 +35,43 @@ const gridTemplate = `"sidebar . header toc ."
 function trackTree(track: Track) {
   const tree = source.getPageTree();
   const folder = getTrackFolder(track);
-  return folder ? { ...tree, children: folder.children } : tree;
+  return folder ? { ...tree, children: withLessonChecks(folder.children, track, false) } : tree;
+}
+
+// Top-level pages that are guides, not lessons. They keep their own icon.
+const GUIDE_PAGES = ['interview-framework', 'cheat-sheet', 'revision'];
+// In these tracks the first page is a lesson, not a "Start Here" guide.
+const TRACKS_WITH_LESSON_INDEX: Track[] = ['git'];
+
+function isLesson(track: Track, url: string, inSection: boolean): boolean {
+  if (inSection) {
+    return true;
+  }
+  const trackUrl = `/learn/${track}`;
+  if (url === trackUrl) {
+    return TRACKS_WITH_LESSON_INDEX.includes(track);
+  }
+  // Links to other places (Free Canvas, NeetCode 150) are not lessons.
+  if (!url.startsWith(`${trackUrl}/`)) {
+    return false;
+  }
+  return !GUIDE_PAGES.includes(url.slice(trackUrl.length + 1));
+}
+
+/**
+ * Lessons show one check icon instead of a topic icon: gray until the lesson is done, green after
+ * (the colors are in global.css and SidebarDoneMarks). Sections and guide pages keep their icons.
+ */
+function withLessonChecks(nodes: PageTree.Node[], track: Track, inSection: boolean): PageTree.Node[] {
+  return nodes.map((node) => {
+    if (node.type === 'folder') {
+      return { ...node, children: withLessonChecks(node.children, track, true) };
+    }
+    if (node.type === 'page' && isLesson(track, node.url, inSection)) {
+      return { ...node, icon: <CircleCheck data-lesson-check="" /> };
+    }
+    return node;
+  });
 }
 
 /**
@@ -59,7 +98,15 @@ export function TrackLayout({ track, children }: { track: Track; children: React
       tabs={trackTabs()}
       containerProps={{ style: { gridTemplate } }}
       // The JS Playground button sits under search, where the cursor already goes.
-      sidebar={{ banner: hasPlayground ? <JsPlaygroundButton /> : undefined }}
+      // "Collapse all / Expand all" sits right above the list of sections.
+      sidebar={{
+        banner: (
+          <>
+            {hasPlayground && <JsPlaygroundButton />}
+            <SidebarFoldersToggle />
+          </>
+        ),
+      }}
       {...baseOptions()}
     >
       <SidebarDoneMarks />
