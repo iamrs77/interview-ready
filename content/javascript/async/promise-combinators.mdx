@@ -1,11 +1,364 @@
 ---
 title: "Promise.all, allSettled, race and any"
-description: "Run many promises at once and pick how to wait."
+description: "Run many promises at once and pick how to wait for them."
 icon: ListChecks
-planned: true
 ---
 
-- Promise.all vs allSettled
-- Promise.race vs any
-- Timeouts with race
-- Limiting how many run at once
+## The idea
+
+Often you start **many** async jobs at once: load the user, their posts and their friends. Four built-in methods take a list of promises and give back **one** promise. They differ in **how they wait**.
+
+Think of **ordering party supplies from three shops**:
+
+- **all:** the party needs everything. If one shop fails, the whole plan fails.
+- **allSettled:** you want a full report: what came, and what didn't.
+- **race:** you take the first reply, good or bad.
+- **any:** you take the first shop that actually has it in stock.
+
+## How it works
+
+| Method | Fulfills when | Rejects when | Gives you |
+| --- | --- | --- | --- |
+| `Promise.all` | **all** fulfill | **one** rejects (the first one) | an array of values, in the input order |
+| `Promise.allSettled` | **all** settle, good or bad | never | an array of result objects |
+| `Promise.race` | the first to settle fulfills | the first to settle rejects | the first value, or the first error |
+| `Promise.any` | the first one fulfills | **all** reject | the first value, or an `AggregateError` |
+
+Every example below uses the same fake `request` helper. After `ms` milliseconds, it gives back `value`, or it fails if `value` is an `Error`. The examples use `await` at the top level, which works in ES modules.
+
+### Promise.all vs allSettled
+
+`Promise.all` waits for every promise and gives back their values in an array.
+
+```js
+// A fake request. After `ms`, it gives back `value`,
+// or fails if `value` is an Error.
+function request(ms, value) {
+    return new Promise((resolve, reject) => {
+        setTimeout(() => {
+            if (value instanceof Error) {
+                reject(value);
+            } else {
+                resolve(value);
+            }
+        }, ms);
+    });
+}
+
+const results = await Promise.all([
+    request(300, "user"),
+    request(100, "posts"),
+    request(200, "friends"),
+]);
+
+console.log(results); // [ 'user', 'posts', 'friends' ]
+```
+
+- `posts` finished first, but the results keep the order **you passed in**.
+- The three requests run at the same time. The total is about 300 ms (the slowest one), not 600 ms (all added up).
+
+But `Promise.all` **fails fast**. As soon as one promise rejects, the whole thing rejects:
+
+```js
+function request(ms, value) {
+    return new Promise((resolve, reject) => {
+        setTimeout(() => {
+            if (value instanceof Error) {
+                reject(value);
+            } else {
+                resolve(value);
+            }
+        }, ms);
+    });
+}
+
+try {
+    const results = await Promise.all([
+        request(300, "user"),
+        request(100, new Error("posts failed")),
+        request(200, "friends"),
+    ]);
+    console.log(results);
+} catch (error) {
+    console.log("Promise.all failed:", error.message);
+}
+// Promise.all failed: posts failed
+```
+
+- It rejects at 100 ms, the moment `posts` fails. It doesn't wait for the others.
+- The other two requests are **not stopped**. They keep running, and their results are thrown away.
+- You lose the results that did succeed.
+
+`Promise.allSettled` never rejects. It waits for **every** promise, and tells you how each one went:
+
+```js
+function request(ms, value) {
+    return new Promise((resolve, reject) => {
+        setTimeout(() => {
+            if (value instanceof Error) {
+                reject(value);
+            } else {
+                resolve(value);
+            }
+        }, ms);
+    });
+}
+
+const results = await Promise.allSettled([
+    request(300, "user"),
+    request(100, new Error("posts failed")),
+    request(200, "friends"),
+]);
+
+for (const result of results) {
+    if (result.status === "fulfilled") {
+        console.log("ok:", result.value);
+    } else {
+        console.log("failed:", result.reason.message);
+    }
+}
+// ok: user
+// failed: posts failed
+// ok: friends
+```
+
+Each result is `{ status: "fulfilled", value: ... }` or `{ status: "rejected", reason: ... }`.
+
+| Use | When | Real example |
+| --- | --- | --- |
+| `all` | You need every result. One failure means the whole job failed. | A checkout page needs the cart, the address and the prices. |
+| `allSettled` | Some results are better than none. | A dashboard with five panels: show the ones that loaded, and an error box for the rest. |
+
+### Promise.race vs any
+
+`Promise.race` settles the same way as the **first** promise to settle:
+
+```js
+function request(ms, value) {
+    return new Promise((resolve, reject) => {
+        setTimeout(() => {
+            if (value instanceof Error) {
+                reject(value);
+            } else {
+                resolve(value);
+            }
+        }, ms);
+    });
+}
+
+const fastest = await Promise.race([
+    request(300, "server A"),
+    request(100, "server B"),
+]);
+
+console.log(fastest); // server B
+```
+
+The difference shows when the fastest one **fails**. `race` takes that failure. `any` ignores failures and waits for the first **success**:
+
+```js
+function request(ms, value) {
+    return new Promise((resolve, reject) => {
+        setTimeout(() => {
+            if (value instanceof Error) {
+                reject(value);
+            } else {
+                resolve(value);
+            }
+        }, ms);
+    });
+}
+
+try {
+    await Promise.race([
+        request(300, "slow success"),
+        request(100, new Error("fast failure")),
+    ]);
+} catch (error) {
+    console.log("race:", error.message);
+}
+
+const firstSuccess = await Promise.any([
+    request(300, "slow success"),
+    request(100, new Error("fast failure")),
+]);
+console.log("any:", firstSuccess);
+// race: fast failure
+// any: slow success
+```
+
+If **every** promise fails, `Promise.any` rejects with an `AggregateError`. Its `errors` array holds all the reasons, in the input order (see [Error Handling](../memory-errors/error-handling.mdx)).
+
+```js
+function request(ms, value) {
+    return new Promise((resolve, reject) => {
+        setTimeout(() => {
+            if (value instanceof Error) {
+                reject(value);
+            } else {
+                resolve(value);
+            }
+        }, ms);
+    });
+}
+
+try {
+    await Promise.any([
+        request(100, new Error("server A is down")),
+        request(200, new Error("server B is down")),
+    ]);
+} catch (error) {
+    console.log(error.name); // AggregateError
+    console.log(error.errors.length); // 2
+    console.log(error.errors[0].message); // server A is down
+}
+```
+
+A real use for `any`: the same file is on several servers. Ask all of them, and use the first one that answers without an error.
+
+Two edge cases interviewers like:
+
+| Given | `all` | `allSettled` | `race` | `any` |
+| --- | --- | --- | --- | --- |
+| an empty array `[]` | fulfills with `[]` | fulfills with `[]` | stays pending **forever** | rejects with `AggregateError` |
+| a plain value, like `5` | treated as an already fulfilled promise | same | same | same |
+
+So `Promise.all([5, Promise.resolve(6)])` gives `[ 5, 6 ]`. To write these four methods yourself, see [Promise.all and Friends](../write-your-own/promise-polyfills.mdx).
+
+### Timeouts with race
+
+A request can hang for a long time. To give up after a few seconds, **race** the work against a timer that rejects. Whichever settles first wins.
+
+```js
+function wait(ms, value) {
+    return new Promise((resolve) => {
+        setTimeout(() => resolve(value), ms);
+    });
+}
+
+function withTimeout(promise, ms) {
+    let timerId;
+
+    const timeout = new Promise((resolve, reject) => {
+        timerId = setTimeout(() => {
+            reject(new Error("Timed out after " + ms + " ms"));
+        }, ms);
+    });
+
+    // Whoever settles first wins. Then stop the timer either way.
+    return Promise.race([promise, timeout]).finally(() => {
+        clearTimeout(timerId);
+    });
+}
+
+const fast = await withTimeout(wait(100, "fast answer"), 500);
+console.log(fast); // fast answer
+
+try {
+    await withTimeout(wait(1000, "slow answer"), 300);
+} catch (error) {
+    console.log(error.message); // Timed out after 300 ms
+}
+```
+
+- **Clear the timer** in `finally`. Otherwise it keeps running after the work has won. In Node, a waiting timer even keeps the program from exiting.
+- `race` **doesn't stop** the slow work. It only stops waiting for it. With `fetch`, pass a signal so the request is really cancelled: `fetch(url, { signal: AbortSignal.timeout(3000) })`.
+
+### Limiting how many run at once
+
+Sometimes "all at once" is too much. 200 uploads at the same moment can overload the server or hit its rate limit (an error like `429 Too Many Requests`). So you run at most, say, **3 at a time**. When one finishes, the next one starts.
+
+The trick: pass **functions** that start the work, not promises. A promise has already started. A function starts only when you call it.
+
+Below, `runWithLimit` starts `limit` "workers". Each worker takes the next task, waits for it, and repeats until no tasks are left.
+
+```js
+async function runWithLimit(tasks, limit) {
+    const results = [];
+    let nextIndex = 0;
+
+    // A worker takes the next task, waits for it, and repeats.
+    async function worker() {
+        while (nextIndex < tasks.length) {
+            const index = nextIndex;
+            nextIndex = nextIndex + 1;
+            results[index] = await tasks[index]();
+        }
+    }
+
+    // Start `limit` workers, and wait until all of them run out of tasks.
+    const workers = [];
+    for (let i = 0; i < limit; i++) {
+        workers.push(worker());
+    }
+    await Promise.all(workers);
+
+    return results;
+}
+
+// A task is a function: its work starts only when it is called.
+function makeTask(name, ms) {
+    return () => {
+        console.log("start", name);
+        return new Promise((resolve) => {
+            setTimeout(() => {
+                console.log("done", name);
+                resolve(name);
+            }, ms);
+        });
+    };
+}
+
+const tasks = [makeTask("A", 300), makeTask("B", 100), makeTask("C", 100)];
+const results = await runWithLimit(tasks, 2);
+console.log(results);
+// start A
+// start B
+// done B
+// start C
+// done C
+// done A
+// [ 'A', 'B', 'C' ]
+```
+
+| Time | Worker 1 | Worker 2 |
+| --- | --- | --- |
+| 0 ms | starts A | starts B |
+| 100 ms | still on A | B is done. Starts C. |
+| 200 ms | still on A | C is done. No tasks left, so it stops. |
+| 300 ms | A is done. No tasks left. | |
+
+How it works:
+
+- Only 2 tasks run at any moment. C starts only when B frees a slot.
+- `results[index]` puts each result at its task's place, so the order matches the input, like `Promise.all`.
+- Two workers never take the same task. Reading `nextIndex` and moving it forward happen with no `await` in between, and JavaScript runs one thing at a time, so nothing can sneak in.
+
+A simpler idea is **batches**: run 2, wait for both, run the next 2. It is easier to write, but slower, because each batch waits for its slowest task. With workers, a new task starts the moment any slot is free. In real projects, small libraries like `p-limit` do this for you.
+
+## Common mistakes
+
+- **Expecting `Promise.all` to cancel the others.** It stops waiting. It doesn't stop the work.
+- **Using `Promise.all` when some results are enough.** One failure throws away every success. Use `allSettled`.
+- **Mixing up `race` and `any`.** `race` can end with a failure. `any` waits for the first success.
+- **Thinking the results come in finish order.** `all` and `allSettled` keep the **input** order.
+- **Passing promises to a limiter.** They have all started already. Pass functions that start the work.
+- **A timeout that never clears its timer.** Clear it in `finally`.
+- **`Promise.race([])`.** An empty race never settles, so an `await` on it waits forever.
+
+## In the interview
+
+> "`Promise.all` waits for all of them and gives the values in the input order, but it rejects as soon as one fails. `allSettled` never rejects: it waits for everything and tells me, for each one, whether it was fulfilled or rejected. `race` settles with the first one to settle, good or bad. That's how I add a timeout. `any` gives the first success, and rejects with an `AggregateError` only if all of them fail. None of them cancel the other promises. They only decide when to stop waiting."
+
+**Likely follow-up:** "How would you run 100 requests, but at most 5 at a time?"
+
+**Answer:** "I pass functions, not promises, so nothing starts early. I start 5 workers. Each worker takes the next task, awaits it, stores the result at that task's index, and repeats until no tasks are left. Then I await all the workers with `Promise.all`. Taking the next index is safe without a lock, because JavaScript runs one thing at a time and there's no `await` between reading the index and moving it forward."
+
+<Callout title="Remember this" type="success">
+  - **all:** every value, in the input order. Rejects on the **first** failure.
+  - **allSettled:** never rejects. Each result is `{ status, value }` or `{ status, reason }`.
+  - **race:** the first to **settle** wins, even a failure. Good for timeouts (clear the timer).
+  - **any:** the first **success** wins. If all fail: `AggregateError`.
+  - None of them **cancel** the slower promises.
+  - To limit how many run at once: pass **functions**, and run N workers that each take the next task.
+</Callout>

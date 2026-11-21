@@ -1,11 +1,144 @@
 ---
 title: "Inheritance"
-description: "Build a new class on top of an existing one."
+description: "Build a new class on top of an existing one, with extends and super."
 icon: GitFork
-planned: true
 ---
 
-- extends and super
-- Method overriding
-- Prototypal inheritance without classes
-- Problems with deep inheritance
+## What is inheritance?
+
+**Inheritance** is when one class (the **child**) is built from another class (the **parent**), and **inherits** its properties and methods. You use the `extends` keyword.
+
+Here `RaceCar` is built on top of `ToyCar` from [Classes](./classes.mdx):
+
+```js
+class ToyCar {
+    constructor(color, wheels) {
+        this.color = color;
+        this.wheels = wheels;
+    }
+
+    drive() {
+        console.log(`Vroom! The ${this.color} car is driving.`);
+    }
+}
+
+class RaceCar extends ToyCar {
+    constructor(color, wheels, speed) {
+        super(color, wheels); // call the parent class's constructor
+        this.speed = speed; // new property
+    }
+
+    // new action
+    turboBoost() {
+        console.log(`Turbo Boost at speed ${this.speed}!`);
+    }
+}
+
+let myRaceCar = new RaceCar("yellow", 4, 200);
+myRaceCar.drive(); // Vroom! The yellow car is driving.  (from ToyCar)
+myRaceCar.turboBoost(); // Turbo Boost at speed 200!  (new in RaceCar)
+```
+
+`RaceCar` gets everything `ToyCar` has (`color`, `wheels` and `drive()`), plus its own `speed` and `turboBoost()`.
+
+## Replacing a parent method
+
+A child class can write its own version of a parent's method:
+
+```js
+class Animal {
+    speak() {
+        console.log("Animal speaks");
+    }
+}
+
+// extends keyword for inheritance
+class Dog extends Animal {
+    speak() {
+        console.log("Dog barks");
+    }
+}
+
+const dog = new Dog();
+dog.speak(); // Dog barks
+```
+
+`Dog`'s `speak()` replaces `Animal`'s. This is called **method overriding** (see [Polymorphism](./polymorphism.mdx)).
+
+## The super keyword
+
+`super` is how a child class reaches its parent. It has two uses:
+
+- `super(...)` in the constructor calls the **parent's constructor**.
+- `super.method()` calls the **parent's version** of a method.
+
+### When the child has no constructor
+
+```js
+class Animal {
+    constructor(name) {
+        this.name = name;
+    }
+
+    speak() {
+        console.log(`${this.name} makes a sound`);
+    }
+}
+
+class Dog extends Animal {
+    speak() {
+        super.speak(); // call the parent's speak() first
+        console.log(`${this.name} barks`);
+    }
+}
+
+const dog = new Dog("Rex");
+dog.speak();
+// Rex makes a sound
+// Rex barks
+```
+
+`Dog` has no constructor. So when you create a `Dog`, JavaScript automatically calls the parent's constructor with the same arguments. That's how `this.name` gets set.
+
+### When the child has its own constructor
+
+If the child has its own constructor, it must call the parent's constructor itself, with `super(...)`:
+
+```js
+class Animal {
+    constructor(name) {
+        this.name = name;
+    }
+
+    speak() {
+        console.log(`${this.name} makes a sound`);
+    }
+}
+
+class Dog extends Animal {
+    constructor(name, breed) {
+        super(name); // ✅ must come before using this
+        this.breed = breed;
+    }
+
+    speak() {
+        super.speak(); // calls Animal's speak()
+        console.log(`${this.name} the ${this.breed} barks`);
+    }
+}
+
+const dog = new Dog("Rex", "Labrador");
+dog.speak();
+// Rex makes a sound
+// Rex the Labrador barks
+```
+
+In a child constructor, you **must** call `super()` **before you use `this`**. If you don't, creating the object throws a `ReferenceError`.
+
+<Callout title="Remember this" type="success">
+  - **Inheritance:** `class Child extends Parent`. The child gets the parent's properties and methods, and can add its own.
+  - A child can **override** a parent method by writing its own version.
+  - `super(...)` calls the parent's constructor. `super.method()` calls the parent's version of a method.
+  - No constructor in the child: the parent's constructor runs automatically.
+  - A child constructor must call `super()` **before using `this`**, or you get a `ReferenceError`.
+</Callout>

@@ -1,11 +1,297 @@
 ---
 title: "call, apply and bind"
-description: "Choose what this is when you call a function."
+description: "Choose what this is when you call a function: call and apply run it now, bind saves it for later."
 icon: Link2
-planned: true
 ---
 
-- call vs apply vs bind
-- Borrowing methods
-- Partial application with bind
-- When bind is still needed
+## The idea
+
+Every function has three built-in methods, `call`, `apply` and `bind`. They let **you** choose what `this` is inside the function, instead of leaving it to the usual rules (see [The this Keyword](./this-keyword.mdx)).
+
+- `call` and `apply` **run** the function right now, with the `this` you give.
+- `bind` **doesn't run** it. It gives back a new function with `this` fixed, to run later.
+
+Think of a **form letter** that starts with "Dear ___". `call` fills in the name and sends the letter now. `bind` fills in the name and keeps the letter in a drawer, ready to send whenever you want.
+
+## call vs apply vs bind
+
+All three take the `this` value first. They differ in **when** the function runs and **how** you pass the other arguments.
+
+```js
+function introduce(city, job) {
+    console.log(`${this.firstName} lives in ${city}, works as a ${job}`);
+}
+
+const asha = { firstName: "Asha" };
+
+// call: arguments one by one, runs now.
+introduce.call(asha, "Pune", "developer");
+// Asha lives in Pune, works as a developer
+
+// apply: arguments in one array, runs now.
+introduce.apply(asha, ["Pune", "developer"]);
+// Asha lives in Pune, works as a developer
+```
+
+`bind` gives back a new function. Nothing runs until you call it:
+
+```js
+function introduce(city, job) {
+    console.log(`${this.firstName} lives in ${city}, works as a ${job}`);
+}
+
+const asha = { firstName: "Asha" };
+
+const introduceAsha = introduce.bind(asha);
+
+// Later, call it like any function. this is always asha.
+introduceAsha("Delhi", "designer");
+// Asha lives in Delhi, works as a designer
+```
+
+| | `call` | `apply` | `bind` |
+| --- | --- | --- | --- |
+| Runs the function now? | Yes | Yes | No |
+| Other arguments | One by one: `fn.call(obj, a, b)` | In one array: `fn.apply(obj, [a, b])` | One by one, now and/or later |
+| Gives back | The function's result | The function's result | A new function |
+
+A trick to remember: **A**pply takes an **A**rray. **C**all takes **C**ommas.
+
+### Getting the result back
+
+`call` and `apply` return whatever the function returns. If the function doesn't use `this`, pass `null` as the first argument.
+
+```js
+function add(a, b) {
+    return a + b;
+}
+
+console.log(add.call(null, 2, 3)); // 5
+console.log(add.apply(null, [2, 3])); // 5
+```
+
+### apply with an array of values
+
+Before the spread operator `...` existed, `apply` was the way to pass an array to a function that expects separate arguments.
+
+```js
+const scores = [40, 95, 72];
+
+// Old way: apply spreads the array into separate arguments.
+console.log(Math.max.apply(null, scores)); // 95
+
+// Modern way: the spread operator does the same.
+console.log(Math.max(...scores)); // 95
+```
+
+You still see `apply` in helpers like [debounce](../write-your-own/debounce-and-throttle.mdx): `func.apply(this, args)` runs `func` with the same `this` and the same arguments the wrapper received.
+
+## Borrowing methods
+
+`call` lets one object use a method that belongs to **another** object, without copying it.
+
+```js
+const asha = {
+    firstName: "Asha",
+    lastName: "Rao",
+
+    fullName() {
+        return this.firstName + " " + this.lastName;
+    },
+};
+
+// ravi has no fullName method.
+const ravi = { firstName: "Ravi", lastName: "Kumar" };
+
+// Borrow asha's method, with this set to ravi.
+console.log(asha.fullName.call(ravi)); // Ravi Kumar
+```
+
+### Borrowing array methods
+
+The most common use: running **array methods** on things that look like arrays but aren't, like `arguments`.
+
+```js
+function joinAll() {
+    // arguments has no join method, so borrow it from arrays.
+    return Array.prototype.join.call(arguments, " + ");
+}
+
+console.log(joinAll(1, 2, 3)); // 1 + 2 + 3
+```
+
+An **array-like** object has numbered keys and a `length`, but none of the array methods.
+
+```js
+const arrayLike = { 0: "a", 1: "b", length: 2 };
+
+// Old way: borrow slice to make a real array.
+const oldWay = Array.prototype.slice.call(arrayLike);
+console.log(oldWay); // [ 'a', 'b' ]
+
+// Modern way.
+const newWay = Array.from(arrayLike);
+console.log(newWay); // [ 'a', 'b' ]
+```
+
+### Checking the real type of a value
+
+`typeof` says `"object"` for arrays and for `null`. Borrowing `Object.prototype.toString` gives the exact type. Interviewers sometimes ask for this.
+
+```js
+const getType = function (value) {
+    return Object.prototype.toString.call(value);
+};
+
+console.log(typeof []); // object
+console.log(getType([])); // [object Array]
+console.log(getType(null)); // [object Null]
+console.log(getType(new Date())); // [object Date]
+```
+
+## Partial application with bind
+
+`bind` can also **pre-fill the first arguments**. The new function only needs the rest. This is called **partial application**.
+
+```js
+function multiply(a, b) {
+    return a * b;
+}
+
+// multiply doesn't use this, so pass null. Pre-fill a.
+const double = multiply.bind(null, 2);
+const triple = multiply.bind(null, 3);
+
+console.log(double(5)); // 10
+console.log(triple(5)); // 15
+```
+
+A more realistic one: a logger with the level already filled in.
+
+```js
+function log(level, message) {
+    console.log(`[${level}] ${message}`);
+}
+
+const logError = log.bind(null, "ERROR");
+const logInfo = log.bind(null, "INFO");
+
+logError("Payment failed"); // [ERROR] Payment failed
+logInfo("User signed in"); // [INFO] User signed in
+```
+
+More on this, and on currying, in [Higher-Order Functions and Currying](./higher-order-functions-and-currying.mdx).
+
+### Facts about bound functions
+
+A bound function's `this` is **fixed for good**. A second `bind`, or a later `call`, can't change it.
+
+```js
+function showName() {
+    console.log(this.firstName);
+}
+
+const bindAsha = showName.bind({ firstName: "Asha" });
+
+// Binding again does nothing to this.
+const bindRavi = bindAsha.bind({ firstName: "Ravi" });
+bindRavi(); // Asha
+
+// call can't change it either.
+bindAsha.call({ firstName: "Meena" }); // Asha
+```
+
+- Each `bind` call makes a **new** function. `fn.bind(obj) === fn.bind(obj)` is `false`.
+- **Arrow functions** ignore the `this` you pass to all three (they still get the other arguments).
+- `new` ignores the bound `this` and makes a new object. This is rare in practice.
+
+## When bind is still needed
+
+Arrow functions and class fields fixed most `this` problems, so you need `bind` less than before. It's still the right tool in these cases.
+
+### 1. Passing a method as a callback
+
+When a method goes to `setTimeout`, an event system or any other function, it loses its object. `bind` keeps it.
+
+```js
+const user = {
+    firstName: "Asha",
+
+    greet() {
+        console.log("Hi, " + this.firstName);
+    },
+};
+
+setTimeout(user.greet, 100); // Hi, undefined
+setTimeout(user.greet.bind(user), 200); // Hi, Asha
+```
+
+`() => user.greet()` also works. Pick either.
+
+### 2. When you need the same function again later
+
+To **remove** a listener or unsubscribe, you must pass the **exact same function** you added. An inline arrow, or calling `bind` again, makes a new function each time. So bind **once**, save it, and use the saved one both times.
+
+```js
+const listeners = new Set();
+
+const player = {
+    score: 0,
+
+    addPoint() {
+        this.score = this.score + 1;
+    },
+};
+
+// Bind once and keep it.
+const onPoint = player.addPoint.bind(player);
+listeners.add(onPoint);
+
+// Something happens: call every listener.
+for (const listener of listeners) {
+    listener();
+}
+
+// The same function, so it is really removed.
+listeners.delete(onPoint);
+
+console.log(player.score); // 1
+console.log(listeners.size); // 0
+```
+
+### 3. Class methods passed around
+
+A normal class method passed as a callback loses `this`, and since classes are strict, it throws. The classic fix is to bind it in the constructor: `this.handleClick = this.handleClick.bind(this);`. React class components did this all the time.
+
+### 4. Pre-filling arguments
+
+`bind(null, value)` makes a specialised function in one line, without writing a wrapper.
+
+## Common mistakes
+
+- **Expecting `bind` to run the function.** It only returns a new one. You still have to call it.
+- **Mixing up the argument shapes.** `fn.apply(obj, 1, 2)` is wrong: `apply` wants an array, `fn.apply(obj, [1, 2])`.
+- **Binding twice and expecting the second to win.** The first `bind` is final.
+- **Trying to change an arrow function's `this`** with `call`, `apply` or `bind`. It's ignored.
+- **Removing a listener with a fresh `bind`.** `fn.bind(obj)` is a new function every time, so nothing is removed.
+
+## In the interview
+
+- Explain all three in one breath: two run now, one returns a function.
+- Give one real use for each: borrowing a method (`call`), spreading an array (`apply`), fixing `this` for a callback (`bind`).
+- Expect "write your own `bind`". See [call, apply and bind Polyfills](../write-your-own/call-apply-bind-polyfills.mdx).
+
+> "All three set `this` for a function. `call` runs it now with the arguments one by one. `apply` runs it now with the arguments in an array. `bind` doesn't run it: it returns a new function with `this` fixed, and it can also pre-fill some arguments. Once a function is bound, its `this` can't be changed again, and arrow functions ignore all three because they don't have their own `this`."
+
+**Likely follow-up:** "We have arrow functions now. Why would you still use `bind`?"
+
+**Answer:** "When I pass a method as a callback and want a function I can keep, for example to remove a listener later, because I need the exact same function both times. Also in class components, to bind methods in the constructor, and for partial application, like `log.bind(null, "ERROR")`."
+
+<Callout title="Remember this" type="success">
+  - **call** and **apply** run the function **now**. **bind** returns a **new function** for later.
+  - **A**pply = **A**rray of arguments. **C**all = **C**ommas.
+  - **Borrowing:** `Array.prototype.join.call(arguments, ",")` uses a method on another object.
+  - `bind(null, 2)` **pre-fills** arguments: partial application.
+  - A bound `this` is **final**. Arrow functions ignore all three for `this`.
+  - Still use `bind` for **callbacks you must keep or remove later**, and class methods passed around.
+</Callout>

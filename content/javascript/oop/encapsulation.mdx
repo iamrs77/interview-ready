@@ -2,10 +2,75 @@
 title: "Encapsulation"
 description: "Keep an object's data safe, and change it only through its methods."
 icon: Lock
-planned: true
 ---
 
-- What encapsulation means
-- #private fields and methods
-- Private data with closures
-- Getters and setters to guard values
+## What is encapsulation?
+
+**Encapsulation** means controlling access to an object's data and behavior. Keep secrets safe! The data stays hidden inside the object, and outside code can only use it through the object's methods.
+
+## Private fields with #
+
+```js
+class SecretToy {
+    #secretCode; // private property (hidden)
+
+    constructor(code) {
+        this.#secretCode = code;
+    }
+
+    showSecret() {
+        console.log(`The secret code is ${this.#secretCode}`);
+    }
+}
+
+let toy = new SecretToy("12345");
+toy.showSecret(); // The secret code is 12345
+
+// toy.#secretCode; // ❌ Error! We can't see this outside the class
+```
+
+- A name that starts with `#` is a **private field**. Only code **inside the class** can read or change it.
+- You must declare it in the class body, usually at the top: `#secretCode;`.
+- Using it from outside the class is a **SyntaxError**. That doesn't fail only that one line: the whole script refuses to run. That's why the last line is commented out.
+
+## public, private and protected
+
+In TypeScript and other OOP languages, like Java and C#, you'll see three access levels:
+
+| Keyword | Who can access it | In JavaScript |
+| --- | --- | --- |
+| `public` | Everyone | The default: everything is public |
+| `private` | Only code inside the class. Child classes can't access it either | Use `#` (added in ES2022) |
+| `protected` | Code inside the class and its child classes | Not available |
+
+```js
+class Person {
+    name; // public by default
+    #age; // private field: only code inside the class can use it
+
+    constructor(name, age) {
+        this.name = name;
+        this.#age = age;
+    }
+
+    getAge() {
+        return this.#age;
+    }
+}
+
+const p = new Person("Rohit", 27);
+console.log(p.name); // Rohit (public)
+console.log(p.getAge()); // 27
+
+// console.log(p.#age); // ❌ Error! A private field can't be used outside the class
+```
+
+`getAge()` is the only way to read the age from outside, and there's no way to change it. The class decides what outside code can see and do.
+
+A setter is another way to guard data: it can refuse bad values. See [Getters and setters](./classes.mdx#getters-and-setters).
+
+<Callout title="Remember this" type="success">
+  - **Encapsulation** = hide the data inside the object, and allow access only through its methods.
+  - A `#` name is **private**: only code inside the class can use it. Using it outside is a **SyntaxError**.
+  - **public**: everyone (the default in JavaScript). **private**: only the class (`#` in JavaScript). **protected**: the class and its children (not in JavaScript).
+</Callout>

@@ -1,13 +1,543 @@
 ---
 title: "Operators, Template Literals and Comments"
-description: "The everyday syntax, and the operators that surprise people."
+description: "The everyday syntax, and the operators that surprise people: %, ||, ??, i++ and precedence."
 icon: Calculator
-planned: true
 ---
 
-- Arithmetic (including % and **), comparison and assignment operators
-- Logical operators and short-circuiting: &&, ||, ! and ??
-- The ternary operator
-- ++i vs i++, and operator precedence traps
-- Template literals and tagged templates
-- Comments: //, /* */ and JSDoc
+## The idea
+
+An **operator** is a symbol that does something with values: `+` adds, `===` compares, `&&` combines two conditions. Most of them work the way you learned in school. Interview questions come from the few that don't: `%` with negative numbers, `||` vs `??`, `i++` vs `++i`, and the order operators run in.
+
+Think of a **calculator**. The numbers are the values, and the buttons (`+`, `-`, `×`) are the operators. On a scientific calculator, `2 + 3 × 4` gives 14, not 20, because `×` goes first. JavaScript has the same kind of rules, called **precedence**.
+
+## Arithmetic, comparison and assignment
+
+### Arithmetic operators
+
+| Operator | Meaning | Example | Result |
+| --- | --- | --- | --- |
+| `+` | add (or join strings) | `7 + 2` | 9 |
+| `-` | subtract | `7 - 2` | 5 |
+| `*` | multiply | `7 * 2` | 14 |
+| `/` | divide | `7 / 2` | 3.5 |
+| `%` | remainder | `7 % 2` | 1 |
+| `**` | power | `2 ** 3` | 8 |
+
+- `/` always gives the full answer, decimals included. There's no "whole number division". For 3, use `Math.floor(7 / 2)`.
+- Dividing by zero doesn't throw: `10 / 0` is `Infinity`, and `0 / 0` is `NaN`.
+- `+` with a string joins instead of adding. That's covered in [Types and Coercion](./types-and-coercion.mdx).
+
+### The remainder operator %
+
+`%` gives what's **left over** after dividing. It's great for "is it even?", "every 3rd item" and "wrap around to the start".
+
+```js
+console.log(7 % 2); // 1
+console.log(10 % 2 === 0); // true
+
+// Wrap around a list of 3 days: index 4 lands on index 1.
+const days = ["Mon", "Tue", "Wed"];
+console.log(days[4 % days.length]); // Tue
+```
+
+The trap: `%` keeps the sign of the **left** number. `-7 % 3` is `-1`, not 2. To always get a result from 0 up, add the size and take `%` again:
+
+```js
+console.log(-7 % 3); // -1
+
+const size = 3;
+const index = -7;
+
+const remainder = index % size;
+const wrapped = (remainder + size) % size;
+
+console.log(wrapped); // 2
+```
+
+### The power operator **
+
+`2 ** 10` is 1024, the same as `Math.pow(2, 10)`. Two traps:
+
+- `**` works **right to left**: `2 ** 3 ** 2` is `2 ** 9`, which is 512.
+- A minus sign right before `**` is a SyntaxError, because it's unclear what you mean. Add brackets.
+
+```js noRun
+const bad = -2 ** 2; // SyntaxError: Unary operator used immediately before exponentiation expression. Parenthesis must be used to disambiguate operator precedence
+
+const four = (-2) ** 2;
+const minusFour = -(2 ** 2);
+```
+
+### Comparison operators
+
+| Operator | Meaning |
+| --- | --- |
+| `===` and `!==` | equal and not equal, with no type conversion |
+| `==` and `!=` | equal and not equal **after** converting types (avoid) |
+| `>`, `<`, `>=`, `<=` | bigger, smaller, and "or equal" |
+
+Why to avoid `==` is explained in [Types and Coercion](./types-and-coercion.mdx).
+
+Two **strings** are compared letter by letter, by their character codes, not by their meaning:
+
+```js
+console.log("apple" < "banana"); // true
+console.log("10" < "9"); // true
+console.log(10 < 9); // false
+console.log("Zebra" < "apple"); // true
+```
+
+- `"10" < "9"` is true because it compares the first letters, `"1"` and `"9"`, and stops there.
+- Capital letters come before small letters, so `"Zebra"` comes before `"apple"`.
+- If **one** side is a number, the other side becomes a number too: `"10" < 9` is false.
+
+### Assignment operators
+
+`=` stores a value. The short forms do some math and store the result in one step.
+
+| Operator | Same as |
+| --- | --- |
+| `x += 2` | `x = x + 2` |
+| `x -= 2` | `x = x - 2` |
+| `x *= 2` | `x = x * 2` |
+| `x /= 2` | `x = x / 2` |
+| `x %= 2` | `x = x % 2` |
+| `x **= 2` | `x = x ** 2` |
+
+```js
+let score = 10;
+
+score += 5;
+console.log(score); // 15
+
+score *= 2;
+console.log(score); // 30
+
+let message = "Hi";
+message += ", Asha";
+console.log(message); // Hi, Asha
+```
+
+There are also `||=`, `&&=` and `??=`, which only assign in some cases. `x ??= 5` means "set `x` to 5 only if it's `null` or `undefined`". They make more sense after the next section, so there's an example of `??=` below.
+
+## Logical operators and short-circuiting
+
+### &&, || and ! with true and false
+
+- `a && b` (AND) is true only if **both** are true.
+- `a || b` (OR) is true if **at least one** is true.
+- `!a` (NOT) flips true to false and false to true.
+
+```js
+const age = 25;
+const hasTicket = true;
+
+console.log(age >= 18 && hasTicket); // true
+console.log(age < 12 || age > 60); // false
+console.log(!hasTicket); // false
+```
+
+### They return one of the values, not always a boolean
+
+This is what interviews ask about. `&&` and `||` don't always give back `true` or `false`. They give back **one of the two values**:
+
+- `a || b`: if `a` is truthy, give back `a`. Otherwise give back `b`. In short: the **first truthy** value.
+- `a && b`: if `a` is falsy, give back `a`. Otherwise give back `b`. In short: the **first falsy** value.
+
+```js
+console.log("Asha" || "Guest"); // Asha
+console.log("" || "Guest"); // Guest
+console.log(0 || null); // null
+
+console.log("Asha" && "Guest"); // Guest
+console.log(0 && "Guest"); // 0
+console.log(null && "Guest"); // null
+```
+
+In a chain like `a || b || c`, you get the first truthy value, or the last value if none of them are truthy. Truthy and falsy are explained in [Types and Coercion](./types-and-coercion.mdx).
+
+### Short-circuiting
+
+**Short-circuiting** means JavaScript stops as soon as it knows the answer, and **doesn't run** the right side at all:
+
+- `false && anything`: the answer is already false, so `anything` never runs.
+- `true || anything`: the answer is already true, so `anything` never runs.
+
+```js
+function sayHello() {
+    console.log("sayHello ran");
+    return "hello";
+}
+
+const first = true || sayHello();
+const second = false && sayHello();
+const third = false || sayHello(); // sayHello ran
+
+console.log(first); // true
+console.log(second); // false
+console.log(third); // hello
+```
+
+`sayHello` ran only once, for `third`. For `first` and `second`, the left side already decided the answer.
+
+A common use is a guard: only read a property if the object exists.
+
+```js
+const user = null;
+
+// user is falsy, so && gives back user (null) and never reads user.name.
+const userName = user && user.name;
+
+console.log(userName); // null
+```
+
+Today, `user?.name` (optional chaining) does this job more clearly. See [Destructuring, Spread and Rest](../modern-js/destructuring-and-spread.mdx).
+
+### ?? (nullish coalescing)
+
+`a ?? b` gives back `b` only when `a` is **`null` or `undefined`**. Unlike `||`, it keeps `0`, `""` and `false`.
+
+```js
+const volume = 0;
+
+console.log(volume || 50); // 50
+console.log(volume ?? 50); // 0
+```
+
+The user set the volume to 0 on purpose, but `||` threw it away because 0 is falsy.
+
+| Left side | `left \|\| "default"` | `left ?? "default"` |
+| --- | --- | --- |
+| `0` | `"default"` | `0` |
+| `""` | `"default"` | `""` |
+| `false` | `"default"` | `false` |
+| `null` | `"default"` | `"default"` |
+| `undefined` | `"default"` | `"default"` |
+| `"Asha"` | `"Asha"` | `"Asha"` |
+
+Use `??` for defaults whenever 0, an empty string or `false` is a valid value. `??=` works the same way for assignment:
+
+```js
+const settings = { theme: "dark", volume: 0 };
+
+// Only fill in values that are missing (null or undefined).
+settings.volume ??= 50;
+settings.language ??= "en";
+
+console.log(settings); // { theme: 'dark', volume: 0, language: 'en' }
+```
+
+You can't mix `??` with `||` or `&&` without brackets. JavaScript makes you say which one goes first:
+
+```js noRun
+const value = null ?? 1 || 2; // SyntaxError: Unexpected token '||'
+
+const fixed = (null ?? 1) || 2;
+```
+
+## The ternary operator
+
+`condition ? valueIfTrue : valueIfFalse` is a short `if/else` that gives back a value.
+
+```js
+const age = 20;
+const label = age >= 18 ? "adult" : "minor";
+
+console.log(label); // adult
+```
+
+It does the same as this `if/else`:
+
+```js
+const age = 20;
+let label;
+
+if (age >= 18) {
+    label = "adult";
+} else {
+    label = "minor";
+}
+
+console.log(label); // adult
+```
+
+A ternary is good for picking one of two simple values. Don't nest them (`a ? b : c ? d : e`): that gets hard to read very fast. Use `if/else` or a `switch` instead (see [Control Flow and Loops](./control-flow-and-loops.mdx)).
+
+## ++i vs i++, and precedence
+
+### ++i vs i++
+
+Both add 1 to the variable. The difference is the **value the expression gives back**:
+
+- `i++` (after): gives back the **old** value, then adds 1.
+- `++i` (before): adds 1 first, then gives back the **new** value.
+
+```js
+let likes = 5;
+const oldValue = likes++;
+
+console.log(oldValue); // 5
+console.log(likes); // 6
+
+let views = 5;
+const newValue = ++views;
+
+console.log(newValue); // 6
+console.log(views); // 6
+```
+
+On a line of its own, like `i++;`, there's no difference. It only matters when you use the result in the same line. `--` works the same way.
+
+A classic puzzle:
+
+```js
+let count = 1;
+const total = count++ + ++count;
+
+console.log(total); // 4
+console.log(count); // 3
+```
+
+| Step | Part | Gives back | `count` after |
+| --- | --- | --- | --- |
+| 1 | `count++` | 1 (the old value) | 2 |
+| 2 | `++count` | 3 (the new value) | 3 |
+| 3 | `1 + 3` | 4 | 3 |
+
+### Operator precedence
+
+**Precedence** decides which operator runs first, like `×` before `+` in school. Here are the common ones, from first to last:
+
+| Order | Operators |
+| --- | --- |
+| 1 | `( )` brackets |
+| 2 | `!`, `typeof`, `++`, `--`, a minus sign in front (`-x`) |
+| 3 | `**` |
+| 4 | `*`, `/`, `%` |
+| 5 | `+`, `-` |
+| 6 | `<`, `>`, `<=`, `>=` |
+| 7 | `===`, `!==`, `==`, `!=` |
+| 8 | `&&` |
+| 9 | `\|\|` and `??` |
+| 10 | `? :` (the ternary) |
+| 11 | `=`, `+=` and the other assignments |
+
+The traps people fall into:
+
+```js
+// * runs before +.
+console.log(2 + 3 * 4); // 14
+console.log((2 + 3) * 4); // 20
+
+// ! runs before ===, so this is (!count) === 0.
+const count = 5;
+console.log(!count === 0); // false
+console.log(!(count === 0)); // true
+
+// typeof runs before +, so this is (typeof 5) + 3.
+console.log(typeof 5 + 3); // number3
+console.log(typeof (5 + 3)); // number
+```
+
+When you're not sure, add brackets. They cost nothing and make the order obvious to the next reader.
+
+## Template literals
+
+### Backticks, placeholders and many lines
+
+A **template literal** is a string written in backticks instead of quotes. You can put any expression inside `${ }`, and the string can span many lines.
+
+```js
+const name = "Asha";
+const items = 3;
+const price = 250;
+
+const message = `Hi ${name}, you have ${items} items. Total: ${items * price}`;
+console.log(message); // Hi Asha, you have 3 items. Total: 750
+```
+
+The same with `+` is harder to read, and it's easy to forget a space: `"Hi " + name + ", you have " + items + " items."`.
+
+New lines and spaces inside the backticks are kept exactly as written:
+
+```js
+const order = `Order summary:
+- Pizza
+- Juice`;
+
+console.log(order);
+// Prints:
+// Order summary:
+// - Pizza
+// - Juice
+```
+
+### Tagged templates
+
+A **tag** is a function written right before a template literal, with no brackets. JavaScript calls the function with:
+
+1. an array of the **text parts** (the text around the `${ }` placeholders),
+2. then each **value** as its own argument.
+
+```js
+function showParts(strings, ...values) {
+    console.log(strings);
+    console.log(values);
+}
+
+const name = "Asha";
+const age = 30;
+
+showParts`Name: ${name}, age: ${age}.`;
+// Prints:
+// [ 'Name: ', ', age: ', '.' ]
+// [ 'Asha', 30 ]
+```
+
+There is always **one more** text part than values. `...values` collects all the values into an array (a rest parameter, see [Functions in Depth](../functions/functions.mdx)).
+
+The tag can build any result it likes. This one puts square brackets around every value:
+
+```js
+function highlight(strings, ...values) {
+    let result = "";
+
+    for (let i = 0; i < values.length; i++) {
+        result = result + strings[i] + "[" + values[i] + "]";
+    }
+
+    // There's one more text part than values, so add the last one.
+    result = result + strings[strings.length - 1];
+
+    return result;
+}
+
+const product = "Laptop";
+const price = 50000;
+
+const sentence = highlight`The ${product} costs ${price} rupees.`;
+console.log(sentence); // The [Laptop] costs [50000] rupees.
+```
+
+JavaScript has one tag built in, `String.raw`. It keeps backslashes as typed, instead of reading `\n` as a new line:
+
+```js
+const path = String.raw`C:\new\table`;
+
+console.log(path); // C:\new\table
+```
+
+Tags are common in real projects. These need their libraries installed, so they can't run here:
+
+```js noRun
+// styled-components (React): CSS inside a tagged template.
+const Button = styled.button`
+    color: white;
+    background: green;
+`;
+
+// Apollo GraphQL: a query inside a tagged template.
+const GET_USER = gql`
+    query {
+        user {
+            name
+        }
+    }
+`;
+```
+
+Libraries for safe SQL work the same way: the tag gets each value separately, so it can escape user input before it reaches the database.
+
+## Comments
+
+### Single-line and multi-line
+
+```js
+// A single-line comment: everything after // on this line is ignored.
+const price = 100;
+
+/*
+   A multi-line comment.
+   Everything between the start and end markers is ignored.
+*/
+const tax = price / 10;
+
+console.log(price + tax); // 110
+```
+
+Good comments explain **why**, not **what**. `// add tax` above `price + tax` adds nothing. `// Tax is 10% in this region` tells the reader something the code can't.
+
+### JSDoc
+
+**JSDoc** is a comment that starts with `/**`. It describes a function's inputs and output with tags like `@param` and `@returns`. Code editors like VS Code read it and show these hints while you type.
+
+```js
+/**
+ * Works out the price after a discount.
+ * @param {number} price - The original price.
+ * @param {number} percent - The discount, from 0 to 100.
+ * @returns {number} The price after the discount.
+ */
+function applyDiscount(price, percent) {
+    const discount = (price * percent) / 100;
+    return price - discount;
+}
+
+console.log(applyDiscount(200, 10)); // 180
+```
+
+Other common tags are `@example`, `@throws` and `@deprecated`. If you put `// @ts-check` at the top of a plain JavaScript file, TypeScript checks the file using these JSDoc types.
+
+## The semicolon trap
+
+JavaScript adds missing semicolons for you at the end of some lines. This is called **automatic semicolon insertion**. It usually helps, but it bites after `return`:
+
+```js
+function getUser() {
+    return
+    {
+        name: "Asha"
+    };
+}
+
+console.log(getUser()); // undefined
+```
+
+JavaScript puts a semicolon right after `return`, so the function returns nothing. The object below is never reached. Keep the opening `{` on the same line as `return`.
+
+## In the real world
+
+- **The `||` default bug** is common in settings code: `const volume = savedVolume || 50` turns a saved volume of 0 into 50. Use `??`.
+- **Money and decimals:** `0.1 + 0.2` is `0.30000000000000004`, so shops store prices in whole paise or cents (`1999` instead of `19.99`) and only format them for display.
+- **Tagged templates** power styled-components, GraphQL `gql` queries and safe SQL libraries.
+
+## Common mistakes
+
+- **`-7 % 3` is -1, not 2.** `%` keeps the sign of the left number.
+- **Using `||` for defaults** when 0, `""` or `false` are valid. Use `??`.
+- **Expecting `&&` and `||` to give back `true` or `false`.** They give back one of the two values.
+- **Using `i++` inside a bigger expression** and expecting the new value. It gives back the old one.
+- **`!a === b`.** The `!` runs first. Add brackets: `!(a === b)`.
+- **Comparing numbers stored as strings:** `"10" < "9"` is true. Convert to numbers first.
+- **A new line after `return`.** The function returns `undefined`.
+
+## In the interview
+
+> "`||` gives back the first truthy value, and `&&` gives back the first falsy value. Both stop early, which is called short-circuiting, so the right side may never run. `??` is like `||`, but it only falls back when the left side is null or undefined, so it keeps 0, an empty string and false. I use `??` for default values whenever 0 or an empty string is valid."
+
+**Likely follow-up:** "What's the difference between `i++` and `++i`?"
+
+**Answer:** "Both add 1. `i++` gives back the old value and then adds 1. `++i` adds 1 first and gives back the new value. On a line by itself there's no difference. It only matters when the result is used, like `const x = i++`."
+
+**Likely follow-up:** "What is a tagged template?"
+
+**Answer:** "It's a function placed before a template literal. JavaScript calls it with an array of the text parts and then each value as a separate argument, and the function returns whatever it builds. Libraries use it for things like escaping values in SQL queries, or writing CSS in styled-components. `String.raw` is a built-in tag."
+
+<Callout title="Remember this" type="success">
+  - **`%` is a remainder** and keeps the left sign: `-7 % 3` is -1. `**` is power, and `-2 ** 2` is a SyntaxError.
+  - **`a || b`** gives the first truthy value. **`a && b`** gives the first falsy value. The right side may never run.
+  - **`??`** falls back only on `null` or `undefined`, so it keeps 0, `""` and `false`. Use it for defaults.
+  - **`i++`** gives the old value, **`++i`** the new one. It only matters inside a bigger expression.
+  - **Precedence:** `!` and `typeof` run before math, `*` before `+`. When unsure, add brackets.
+  - A **tagged template** calls a function with the text parts and the values. **JSDoc** (`/** @param */`) gives editors type hints.
+</Callout>

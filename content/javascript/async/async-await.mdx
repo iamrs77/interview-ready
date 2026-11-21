@@ -2,10 +2,352 @@
 title: "async and await"
 description: "Write async code that reads like normal code."
 icon: Clock
-planned: true
 ---
 
-- How async/await relates to promises
-- Error handling with try/catch
-- Sequential vs parallel awaits
-- Common mistakes: await in loops, forgetting await
+## The idea
+
+`async` and `await` are a nicer way to write promise code. You write the steps top to bottom, like normal code, and they still run asynchronously. Under the hood, it is all [promises](./promises.mdx).
+
+Think of **waiting for a table at a restaurant**. You give your name and go for a walk. You are paused until your table is ready, but the restaurant keeps serving everyone else. When your name is called, you carry on from where you stopped. `await` pauses **your function** the same way, while the rest of the program keeps running.
+
+## How it works
+
+### How async/await relates to promises
+
+Two rules:
+
+1. An `async` function **always returns a promise**. `return x` fulfills it with `x`. `throw` rejects it.
+2. `await somePromise` pauses the `async` function until the promise settles. Then it gives you the value, or throws the error right on that line.
+
+```js
+async function getNumber() {
+    return 42;
+}
+
+const result = getNumber();
+console.log(result instanceof Promise); // true
+
+result.then((value) => {
+    console.log(value); // 42
+});
+```
+
+`getNumber` returned `42`, but the caller got a promise of `42`.
+
+Here are dependent steps with `await`: get the user, then that user's orders. It reads like normal code.
+
+```js
+// A fake slow task: gives back `value` after 100 ms.
+function later(value) {
+    return new Promise((resolve) => {
+        setTimeout(() => resolve(value), 100);
+    });
+}
+
+function getUser(id) {
+    return later({ id: id, name: "Asha" });
+}
+
+function getOrders(user) {
+    return later(["book", "pen"]);
+}
+
+async function showOrders() {
+    const user = await getUser(1);
+    const orders = await getOrders(user);
+
+    // user is still here, so it's easy to use both.
+    console.log(user.name, "ordered", orders);
+}
+
+showOrders();
+// Asha ordered [ 'book', 'pen' ]
+```
+
+The same `showOrders`, written with `.then`:
+
+```js noRun
+function showOrders() {
+    return getUser(1).then((user) => {
+        return getOrders(user).then((orders) => {
+            console.log(user.name, "ordered", orders);
+        });
+    });
+}
+```
+
+It needs a nested `.then` just to keep `user` around. With `await`, `user` is a normal variable.
+
+### await pauses the function, not the program
+
+While a function waits at `await`, the rest of your code keeps running:
+
+```js
+function wait(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
+
+async function makeTea() {
+    console.log("boil the water");
+    await wait(300);
+    console.log("pour the tea");
+}
+
+console.log("start");
+makeTea();
+console.log("read a book while the water boils");
+// start
+// boil the water
+// read a book while the water boils
+// pour the tea
+```
+
+Step by step:
+
+1. `start` prints.
+2. `makeTea()` runs like a normal function **until the first `await`**. So `boil the water` prints right away.
+3. At `await`, `makeTea` pauses and hands back a promise. The caller goes on: `read a book...` prints.
+4. 300 ms later, the promise is fulfilled. The rest of `makeTea` runs as a microtask: `pour the tea`. See [The Event Loop](./event-loop.mdx).
+
+Two smaller facts:
+
+- `await` works on any value. `await 5` gives `5` (but it still pauses for one microtask).
+- `await` only works inside an `async` function, or at the top level of an ES module. In a normal function, it's a `SyntaxError`.
+
+### Error handling with try/catch
+
+`await` turns a rejected promise into a thrown error. So a normal `try`/`catch` works, just like in normal code.
+
+```js
+function getUser(id) {
+    return new Promise((resolve, reject) => {
+        setTimeout(() => {
+            if (id > 0) {
+                resolve({ id: id, name: "Asha" });
+            } else {
+                reject(new Error("Invalid id: " + id));
+            }
+        }, 100);
+    });
+}
+
+async function showUser(id) {
+    try {
+        const user = await getUser(id);
+        console.log("Hello,", user.name);
+    } catch (error) {
+        console.log("Could not load the user:", error.message);
+    } finally {
+        console.log("Done loading user", id);
+    }
+}
+
+showUser(-1);
+// Could not load the user: Invalid id: -1
+// Done loading user -1
+```
+
+If you don't catch the error inside, the `async` function's promise is **rejected**, and the caller must handle it, with `try`/`catch` around its own `await`, or with `showUser(-1).catch(...)`.
+
+One trap: the `try` only catches what you `await` **inside** it. `return somePromise` without `await` leaves the `try` before the promise fails. [Error Handling](../memory-errors/error-handling.mdx) shows this step by step.
+
+### Sequential vs parallel awaits
+
+Each `await` waits before the next line starts. That's right when step 2 **needs** step 1's result. But when the steps don't depend on each other, waiting one by one wastes time.
+
+**One after another:** two waits of 500 ms take about 1 second.
+
+```js
+function wait(ms, value) {
+    return new Promise((resolve) => {
+        setTimeout(() => resolve(value), ms);
+    });
+}
+
+async function oneAfterAnother() {
+    const start = Date.now();
+
+    // The second wait starts only after the first one is done.
+    const user = await wait(500, "user");
+    const posts = await wait(500, "posts");
+
+    const seconds = (Date.now() - start) / 1000;
+    console.log(user, posts, "took about", seconds.toFixed(1), "seconds");
+}
+
+oneAfterAnother();
+// user posts took about 1.0 seconds
+```
+
+**Both at once:** start both, then wait for both with `Promise.all`. About 0.5 seconds.
+
+```js
+function wait(ms, value) {
+    return new Promise((resolve) => {
+        setTimeout(() => resolve(value), ms);
+    });
+}
+
+async function bothAtOnce() {
+    const start = Date.now();
+
+    // Both timers start now, and run at the same time.
+    const results = await Promise.all([
+        wait(500, "user"),
+        wait(500, "posts"),
+    ]);
+
+    const seconds = (Date.now() - start) / 1000;
+    console.log(results, "took about", seconds.toFixed(1), "seconds");
+}
+
+bothAtOnce();
+// [ 'user', 'posts' ] took about 0.5 seconds
+```
+
+| Use | When | Example |
+| --- | --- | --- |
+| One after another | Step 2 needs step 1's result | get the user, then that user's orders |
+| Both at once (`Promise.all`) | The steps don't depend on each other | the user's profile and the site settings |
+
+Prefer `Promise.all` over "start both, then `await` each one". With two separate `await`s, if the second promise fails while you're still waiting for the first, nobody is listening to it yet. Node can report that as an unhandled rejection. `Promise.all` listens to all of them from the start. More ways to wait for many promises: [Promise.all, allSettled, race and any](./promise-combinators.mdx).
+
+## Common mistakes
+
+### await in a loop
+
+`await` inside a `for` loop waits for each item before starting the next. Three calls of 300 ms take about 0.9 seconds:
+
+```js
+function fetchUser(id) {
+    return new Promise((resolve) => {
+        setTimeout(() => resolve("user " + id), 300);
+    });
+}
+
+async function loadAll() {
+    const start = Date.now();
+    const ids = [1, 2, 3];
+    const users = [];
+
+    // Each round waits for the one before it.
+    for (const id of ids) {
+        const user = await fetchUser(id);
+        users.push(user);
+    }
+
+    const seconds = (Date.now() - start) / 1000;
+    console.log(users, "in about", seconds.toFixed(1), "seconds");
+}
+
+loadAll();
+// [ 'user 1', 'user 2', 'user 3' ] in about 0.9 seconds
+```
+
+If the calls don't depend on each other, start them all, then wait once. About 0.3 seconds:
+
+```js
+function fetchUser(id) {
+    return new Promise((resolve) => {
+        setTimeout(() => resolve("user " + id), 300);
+    });
+}
+
+async function loadAll() {
+    const start = Date.now();
+    const ids = [1, 2, 3];
+
+    // map starts all three calls right away.
+    const promises = ids.map((id) => fetchUser(id));
+    const users = await Promise.all(promises);
+
+    const seconds = (Date.now() - start) / 1000;
+    console.log(users, "in about", seconds.toFixed(1), "seconds");
+}
+
+loadAll();
+// [ 'user 1', 'user 2', 'user 3' ] in about 0.3 seconds
+```
+
+The loop is still the right choice when each call needs the one before it, or when you must not hit a server with everything at once.
+
+### forEach does not wait
+
+`forEach` calls your function for each item and **ignores what it returns**. An `async` function returns a promise, so `forEach` starts them all and moves on at once:
+
+```js
+function wait(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
+
+async function processAll() {
+    const ids = [1, 2, 3];
+
+    ids.forEach(async (id) => {
+        await wait(100);
+        console.log("processed", id);
+    });
+
+    console.log("all done?");
+}
+
+processAll();
+// all done?
+// processed 1
+// processed 2
+// processed 3
+```
+
+"all done?" prints first: nothing waited. Use `for...of` with `await` (one by one), or `await Promise.all(ids.map(...))` (all at once).
+
+### Forgetting await
+
+Without `await`, you get the **promise**, not the value:
+
+```js
+async function getPrice() {
+    return 250;
+}
+
+async function checkout() {
+    // Bug: no await, so price is a promise, not a number.
+    const price = getPrice();
+    console.log("total:", price + 50);
+
+    // Fixed:
+    const realPrice = await getPrice();
+    console.log("total:", realPrice + 50);
+}
+
+checkout();
+// total: [object Promise]50
+// total: 300
+```
+
+### More mistakes
+
+- **`if (isAdmin(user))` with an `async` `isAdmin`.** A promise is an object, and objects are always truthy. So the `if` is always true. Write `if (await isAdmin(user))`.
+- **Thinking `await` blocks the whole program.** It pauses only the function it's in.
+- **Awaiting one by one out of habit.** If two calls don't depend on each other, use `Promise.all`.
+- **A missing `await` inside `try`.** The `catch` never sees the error.
+
+## In the interview
+
+> "async/await is syntax on top of promises. An async function always returns a promise: returning a value fulfills it, throwing rejects it. `await` pauses only that function until the promise settles, then gives me the value, or throws the error, so I can use a normal `try`/`catch`. It doesn't block the thread: the rest of the function continues later, as a microtask. I watch out for accidental one-by-one awaits. If two calls don't depend on each other, I start both and use `Promise.all`."
+
+**Likely follow-up:** "Why doesn't `await` work inside `forEach`?"
+
+**Answer:** "`forEach` calls the callback and ignores what it returns. An async callback returns a promise, so `forEach` starts all of them and moves on without waiting. I use `for...of` with `await` to go one by one, or `map` to an array of promises and `await Promise.all` to run them together."
+
+<Callout title="Remember this" type="success">
+  - An `async` function **always returns a promise**. `return` fulfills it, `throw` rejects it.
+  - `await` pauses **only this function** until the promise settles. The rest of the program keeps running.
+  - The code before the first `await` runs right away. The rest runs later, as a microtask.
+  - Handle errors with `try`/`catch` around the `await`.
+  - Calls that don't depend on each other: start them together with `Promise.all`.
+  - `forEach` doesn't wait for async callbacks. Use `for...of`, or `Promise.all` with `map`.
+</Callout>

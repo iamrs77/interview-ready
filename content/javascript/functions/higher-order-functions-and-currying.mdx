@@ -1,11 +1,389 @@
 ---
 title: "Higher-Order Functions and Currying"
-description: "Functions that take or return functions."
+description: "Functions that take or return functions: currying, partial application, composition and memoization."
 icon: Workflow
-planned: true
 ---
 
-- Higher-order functions
-- Currying and partial application
-- Function composition
-- Memoization
+## The idea
+
+A **higher-order function** is a function that **takes a function** as an argument, **returns a function**, or both. It works because, in JavaScript, functions are values (see [Functions in Depth](./functions.mdx)).
+
+Think of a **washing machine**. The machine does the routine work: fill with water, spin, drain. You choose the **program**: cotton, wool or quick wash. The machine is the higher-order function, and the program you plug in is the function you pass.
+
+You already use them: `map`, `filter`, `setTimeout`, [debounce and throttle](../write-your-own/debounce-and-throttle.mdx) are all higher-order functions.
+
+## Higher-order functions
+
+### Functions that take a function
+
+`map` and `filter` do the looping. You only pass the part that changes: what to do with each item.
+
+```js
+const numbers = [1, 2, 3, 4];
+
+const doubled = numbers.map((number) => number * 2);
+const evens = numbers.filter((number) => number % 2 === 0);
+
+console.log(doubled); // [ 2, 4, 6, 8 ]
+console.log(evens); // [ 2, 4 ]
+```
+
+You can write your own. `repeat` handles the loop, and the caller decides what happens each time.
+
+```js
+function repeat(times, action) {
+    for (let i = 1; i <= times; i++) {
+        action(i);
+    }
+}
+
+repeat(3, (round) => {
+    console.log("Round " + round);
+});
+// Round 1
+// Round 2
+// Round 3
+```
+
+### Functions that return a function
+
+`makeMultiplier` builds and returns a new function. The returned function remembers `factor` through a [closure](./closures.mdx).
+
+```js
+function makeMultiplier(factor) {
+    return function (number) {
+        return number * factor;
+    };
+}
+
+const double = makeMultiplier(2);
+const triple = makeMultiplier(3);
+
+console.log(double(5)); // 10
+console.log(triple(5)); // 15
+```
+
+### Both: wrapping a function
+
+The most useful kind takes a function and returns an **improved version** of it. This one adds logging to any function, without changing that function.
+
+```js
+function withLogging(func) {
+    return function (...args) {
+        console.log("Calling with", args);
+        const result = func(...args);
+        console.log("Result:", result);
+        return result;
+    };
+}
+
+function add(a, b) {
+    return a + b;
+}
+
+const addWithLogs = withLogging(add);
+addWithLogs(2, 3);
+// Calling with [ 2, 3 ]
+// Result: 5
+```
+
+`once`, `debounce`, `throttle` and `memoize` all follow this same shape: take a function, return a new one with extra behavior.
+
+## Currying and partial application
+
+### Currying
+
+**Currying** turns a function that takes several arguments into a chain of functions that take **one argument each**. `add(1, 2, 3)` becomes `add(1)(2)(3)`.
+
+```js
+function add(a, b, c) {
+    return a + b + c;
+}
+
+function curriedAdd(a) {
+    return function (b) {
+        return function (c) {
+            return a + b + c;
+        };
+    };
+}
+
+console.log(add(1, 2, 3)); // 6
+console.log(curriedAdd(1)(2)(3)); // 6
+```
+
+Each call remembers its argument (a closure) and returns the next function, until all the arguments are in:
+
+| Call | What it remembers | What it gives back |
+| --- | --- | --- |
+| `curriedAdd(1)` | `a = 1` | A function waiting for `b` |
+| `(2)` | `a = 1`, `b = 2` | A function waiting for `c` |
+| `(3)` | `a`, `b` and `c` | The result: `6` |
+
+You'll often see the short arrow version. Read each `=>` as "returns a function that takes...":
+
+```js
+const curriedAdd = (a) => (b) => (c) => a + b + c;
+
+console.log(curriedAdd(1)(2)(3)); // 6
+```
+
+### Why curry?
+
+You can fill in the arguments **at different times**, and each step gives you a useful, specialised function.
+
+```js
+const log = (level) => (message) => {
+    console.log(`[${level}] ${message}`);
+};
+
+// Fill in the level once, use it many times.
+const warn = log("WARN");
+const error = log("ERROR");
+
+warn("Disk almost full"); // [WARN] Disk almost full
+error("Server down"); // [ERROR] Server down
+```
+
+To curry **any** function automatically (a common interview task), you check `func.length`, the number of parameters it expects, and keep collecting arguments until you have that many. The full version is written step by step in [Flatten and Memoize](../write-your-own/flatten-and-memoize.mdx).
+
+### A classic puzzle: sum(1)(2)(3)()
+
+"Write `sum` so that `sum(1)(2)(3)()` returns 6, for any number of calls." The empty call `()` means "I'm done".
+
+```js
+function sum(total) {
+    return function (next) {
+        // No argument: we're done, so give back the total.
+        if (next === undefined) {
+            return total;
+        }
+
+        // Otherwise, start again with a bigger total.
+        return sum(total + next);
+    };
+}
+
+console.log(sum(1)(2)(3)()); // 6
+console.log(sum(5)()); // 5
+```
+
+### Partial application
+
+**Partial application** fills in **some** arguments now and returns a function that takes **the rest**, all at once. `bind` can do it (see [call, apply and bind](./call-apply-bind.mdx)), or you can write a small helper:
+
+```js
+function partial(func, ...fixedArgs) {
+    return function (...laterArgs) {
+        return func(...fixedArgs, ...laterArgs);
+    };
+}
+
+function greet(greeting, name) {
+    return `${greeting}, ${name}!`;
+}
+
+const sayHello = partial(greet, "Hello");
+
+console.log(sayHello("Asha")); // Hello, Asha!
+console.log(sayHello("Ravi")); // Hello, Ravi!
+```
+
+| | Currying | Partial application |
+| --- | --- | --- |
+| Arguments per call | Exactly **one** | Any number |
+| `f(a, b, c)` becomes | `f(a)(b)(c)` | `g(c)`, after fixing `a` and `b` |
+| Done by | Rewriting the function as a chain | `bind`, or a helper like `partial` |
+
+## Function composition
+
+**Composition** joins small functions into one bigger function. The output of one becomes the input of the next, like stations on an assembly line.
+
+Without a helper, you nest the calls and read them **inside out**:
+
+```js
+const trim = (text) => text.trim();
+const toLower = (text) => text.toLowerCase();
+const addExclamation = (text) => text + "!";
+
+// Runs trim first, then toLower, then addExclamation.
+const result = addExclamation(toLower(trim("  HELLO  ")));
+
+console.log(result); // hello!
+```
+
+### pipe: left to right
+
+`pipe` takes the functions in the order they should run and returns one function that runs them all.
+
+```js
+function pipe(...functions) {
+    return function (input) {
+        let result = input;
+
+        for (const func of functions) {
+            result = func(result);
+        }
+
+        return result;
+    };
+}
+
+const trim = (text) => text.trim();
+const toLower = (text) => text.toLowerCase();
+const addExclamation = (text) => text + "!";
+
+const tidy = pipe(trim, toLower, addExclamation);
+console.log(tidy("  HELLO  ")); // hello!
+```
+
+### compose: right to left
+
+`compose` is the same idea, but it runs the **last** function first, the way nested calls read: `compose(f, g)(x)` is `f(g(x))`.
+
+```js
+function compose(...functions) {
+    return function (input) {
+        let result = input;
+
+        // Start from the last function and walk back.
+        for (let i = functions.length - 1; i >= 0; i--) {
+            result = functions[i](result);
+        }
+
+        return result;
+    };
+}
+
+const trim = (text) => text.trim();
+const toLower = (text) => text.toLowerCase();
+const addExclamation = (text) => text + "!";
+
+const tidy = compose(addExclamation, toLower, trim);
+console.log(tidy("  HELLO  ")); // hello!
+```
+
+Interviewers often expect the short `reduce` version of `pipe`. It does exactly what the loop does: start with `input`, and pass the result through each function in turn.
+
+```js
+const pipe = (...functions) => (input) => {
+    return functions.reduce((result, func) => func(result), input);
+};
+
+const double = (number) => number * 2;
+const addOne = (number) => number + 1;
+
+console.log(pipe(double, addOne)(5)); // 11
+```
+
+For `compose`, use `reduceRight` instead of `reduce`. In real code, Lodash calls these `flow` (pipe) and `flowRight` (compose), and Redux has a `compose` helper.
+
+## Memoization
+
+**Memoization** means remembering the results of past calls. When the function is called again with the **same input**, it gives back the saved result instead of doing the work again.
+
+Think of a hard sum you solved once. You write the answer on a sticky note. Next time someone asks, you read the note instead of solving it again.
+
+It only works for **pure functions**: the same input always gives the same output, and nothing else changes (no random numbers, no current time, no network calls).
+
+### A simple memoize for one argument
+
+Here it is, used on a slow function. The log line shows when real work happens.
+
+```js
+function memoize(func) {
+    // Saved results: input => result.
+    const cache = new Map();
+
+    return function (input) {
+        if (cache.has(input)) {
+            return cache.get(input);
+        }
+
+        const result = func(input);
+        cache.set(input, result);
+        return result;
+    };
+}
+
+function slowSquare(number) {
+    console.log("Computing " + number);
+    return number * number;
+}
+
+const fastSquare = memoize(slowSquare);
+
+console.log(fastSquare(4));
+// Computing 4
+// 16
+
+// Same input: straight from the cache, no "Computing".
+console.log(fastSquare(4)); // 16
+```
+
+- `cache` lives in a closure, so it survives between calls.
+- A cache hit returns early. A miss does the real work, saves it, then returns it.
+- A `Map` is better than a plain object here: it keeps `1` and `"1"` as different keys.
+
+### Memoizing a recursive function
+
+Plain recursive Fibonacci computes the same values over and over. A cache makes each value computed **once**. The recursive calls must go **through the cache** too.
+
+```js
+const cache = new Map();
+
+function fib(position) {
+    if (position <= 1) {
+        return position;
+    }
+
+    if (cache.has(position)) {
+        return cache.get(position);
+    }
+
+    const result = fib(position - 1) + fib(position - 2);
+    cache.set(position, result);
+    return result;
+}
+
+console.log(fib(50)); // 12586269025
+```
+
+Without the cache, `fib(50)` makes billions of calls. With it, about a hundred.
+
+### Limits of the simple version
+
+- **One argument only.** For several arguments, you need to build one key from all of them, often with `JSON.stringify(args)`. The general version is in [Flatten and Memoize](../write-your-own/flatten-and-memoize.mdx).
+- **Objects are compared by reference.** Two different objects with the same contents are two different keys. See [Value vs Reference](../core-basics/value-vs-reference.mdx).
+- **The cache only grows.** It lives in a closure and is never cleared. Real caches limit their size.
+
+React's `useMemo` and `React.memo` use the same idea: skip work when the inputs haven't changed.
+
+## Common mistakes
+
+- **Calling instead of passing.** `numbers.map(double())` passes the result of `double()`. Pass `double`.
+- **Thinking currying and partial application are the same.** Currying is always one argument at a time. Partial application fixes some arguments, and the rest come together.
+- **Mixing up `pipe` and `compose`.** `pipe` runs left to right. `compose` runs right to left.
+- **Memoizing an impure function**, like one that reads the current time or calls an API. The cache gives back an old answer.
+- **A memoize key built badly.** Using only the first argument, or an object as a plain object key (it turns into `"[object Object]"`).
+- **Recursion that skips the cache.** If the recursive calls go to the original function, only the top call is cached.
+
+## In the interview
+
+- Define a higher-order function, and name ones they know: `map`, `filter`, `setTimeout`.
+- Be ready to write `curriedAdd`, `pipe` and a one-argument `memoize` from memory.
+- Explain why each works: they all use **closures** to remember things between calls.
+
+> "A higher-order function takes a function, returns a function, or both. `map` takes one. A function like `debounce` or `memoize` does both: it takes a function and returns a new one with extra behavior. Currying turns `f(a, b, c)` into `f(a)(b)(c)`, so I can fill arguments in one at a time. Composition joins small functions into one pipeline. Memoization caches results by input, which is safe only for pure functions."
+
+**Likely follow-up:** "How would you write a `curry` that works for any function?"
+
+**Answer:** "`func.length` tells me how many parameters the function expects. I return a function that collects arguments. If it has collected enough, it calls the original function with all of them. If not, it returns another function that keeps collecting. Each step remembers the arguments so far through a closure."
+
+<Callout title="Remember this" type="success">
+  - A **higher-order function** takes a function, returns one, or both: `map`, `debounce`, `memoize`.
+  - **Currying:** `f(a, b, c)` → `f(a)(b)(c)`, one argument per call. **Partial application:** fix some arguments now, pass the rest later.
+  - **pipe** runs functions left to right. **compose** runs them right to left: `compose(f, g)(x)` is `f(g(x))`.
+  - **Memoization** caches results by input in a closure. Only for **pure** functions.
+  - All of these work because of **closures**.
+</Callout>

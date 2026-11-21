@@ -1,11 +1,380 @@
 ---
 title: "Iterators and Generators"
-description: "Make anything loopable, and pause functions."
+description: "How for...of works, how to make anything loopable, and functions that can pause."
 icon: Repeat
-planned: true
 ---
 
-- The iterator protocol and for...of
-- Generators and yield
-- Making your own iterable
-- Async iterators
+## The idea
+
+An **iterator** is an object that gives you values **one at a time**, each time you ask for the next one. Anything that can hand out an iterator is **iterable**, and you can loop over it with `for...of`. A **generator** is a special function that can **pause** in the middle and continue later. It's the easiest way to make an iterator.
+
+Think of the token machine at a bank. You press the button, and it gives you the next number. It remembers where it is, so the next press gives the next number. It doesn't print all the tokens for the day at once, only one each time you ask.
+
+## The iterator protocol and for...of
+
+### What an iterator is
+
+An **iterator** is any object with a `next()` method. Each call to `next()` gives back an object with two properties:
+
+- `value`: the next value.
+- `done`: `false` while there are more values, `true` when it's finished.
+
+Arrays already know how to make an iterator. You get it by calling a method with the special key `Symbol.iterator`:
+
+```js
+const colors = ["red", "green"];
+
+// Ask the array for an iterator.
+const iterator = colors[Symbol.iterator]();
+
+console.log(iterator.next()); // { value: 'red', done: false }
+console.log(iterator.next()); // { value: 'green', done: false }
+console.log(iterator.next()); // { value: undefined, done: true }
+```
+
+`Symbol.iterator` is a built-in, unique key. JavaScript uses it as the agreed name of "the method that gives back an iterator", so it can't clash with your own property names.
+
+These two rules are called the **iteration protocols** ("protocol" just means an agreed set of rules):
+
+| Name | What it is | The rule |
+| --- | --- | --- |
+| **Iterable** | Something you can loop over | It has a `[Symbol.iterator]()` method that gives back an iterator |
+| **Iterator** | The object that does the stepping | It has a `next()` method that gives back `{ value, done }` |
+
+### How for...of uses it
+
+`for...of` follows the protocol for you. It asks for an iterator once, then calls `next()` again and again, until `done` is `true`.
+
+```js
+const word = "hi";
+
+for (const letter of word) {
+    console.log(letter);
+}
+// h
+// i
+```
+
+Here is the same loop written by hand. This is roughly what `for...of` does inside:
+
+```js
+const colors = ["red", "green"];
+
+const iterator = colors[Symbol.iterator]();
+let step = iterator.next();
+
+while (!step.done) {
+    console.log(step.value);
+    step = iterator.next();
+}
+// red
+// green
+```
+
+**Built-in iterables:** arrays, strings, `Map`, `Set`, the `arguments` object, and generator objects. And it's not only `for...of`: spread (`[...set]`), array destructuring, `Array.from`, `new Map(...)`, `new Set(...)` and `Promise.all` all work with any iterable.
+
+**Plain objects are not iterable.** Use `Object.keys`, `Object.values` or `Object.entries` to get an array first:
+
+```js
+const user = { name: "Asha", age: 28 };
+
+// for (const item of user) {} would throw:
+// TypeError: user is not iterable
+
+for (const [key, value] of Object.entries(user)) {
+    console.log(key, value);
+}
+// name Asha
+// age 28
+```
+
+Don't mix up `for...of` and `for...in`:
+
+| Loop | Gives you | Works on |
+| --- | --- | --- |
+| `for...of` | The **values** | Iterables: arrays, strings, Maps, Sets |
+| `for...in` | The **keys**, as strings | Any object (also inherited keys) |
+
+```js
+const letters = ["a", "b"];
+
+for (const index in letters) {
+    console.log(index);
+}
+// 0
+// 1
+
+for (const letter of letters) {
+    console.log(letter);
+}
+// a
+// b
+```
+
+## Generators and yield
+
+### A function that can pause
+
+A **generator function** is written with a star: `function*`. Inside it, `yield` gives out a value and **pauses** the function. The next call to `next()` continues from exactly where it stopped.
+
+Calling a generator function does **not** run its body. It gives back a **generator object**, which is an iterator.
+
+```js
+function* countToThree() {
+    console.log("started");
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+// Nothing runs yet. We only get a generator object.
+const counter = countToThree();
+
+console.log(counter.next());
+// started
+// { value: 1, done: false }
+console.log(counter.next()); // { value: 2, done: false }
+console.log(counter.next()); // { value: 3, done: false }
+console.log(counter.next()); // { value: undefined, done: true }
+```
+
+Step by step:
+
+| Call | What runs | Gives back |
+| --- | --- | --- |
+| `countToThree()` | Nothing. The body waits. | A generator object |
+| 1st `next()` | From the start to the first `yield`: prints "started" | `{ value: 1, done: false }` |
+| 2nd `next()` | From the first `yield` to the second | `{ value: 2, done: false }` |
+| 3rd `next()` | From the second `yield` to the third | `{ value: 3, done: false }` |
+| 4th `next()` | From the third `yield` to the end of the function | `{ value: undefined, done: true }` |
+
+Because a generator object is an iterator **and** an iterable, you can loop over it or spread it:
+
+```js
+function* countToThree() {
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+for (const number of countToThree()) {
+    console.log(number);
+}
+// 1
+// 2
+// 3
+
+console.log([...countToThree()]); // [ 1, 2, 3 ]
+```
+
+A `return` inside a generator ends it with `done: true`. `for...of` and spread **ignore** that last value, because they stop as soon as `done` is `true`.
+
+A generator object can be used **only once**. When it's done, it stays done:
+
+```js
+function* letters() {
+    yield "a";
+    yield "b";
+}
+
+const generator = letters();
+
+console.log([...generator]); // [ 'a', 'b' ]
+// Already used up, so there is nothing left.
+console.log([...generator]); // []
+```
+
+To loop again, call `letters()` again to get a fresh generator object.
+
+### Values only when you ask: infinite generators
+
+A generator makes each value **only when you ask for it**. This is called being **lazy**. So a generator can even go on forever, and that's safe, because each `yield` pauses the loop until the next `next()`.
+
+```js
+function* createIdMaker() {
+    let id = 1;
+
+    // This loop never ends, but yield pauses it after every id.
+    while (true) {
+        yield id;
+        id = id + 1;
+    }
+}
+
+const ids = createIdMaker();
+
+console.log(ids.next().value); // 1
+console.log(ids.next().value); // 2
+console.log(ids.next().value); // 3
+```
+
+Never spread an infinite generator (`[...createIdMaker()]`). Spread asks for **all** the values, so it runs forever.
+
+### Sending a value back in with next(value)
+
+`next()` can also **send a value into** the generator. The value you pass becomes the result of the `yield` that is paused. The first `next()` only starts the generator, up to the first `yield`.
+
+```js
+function* conversation() {
+    const name = yield "What is your name?";
+    yield "Hello, " + name;
+}
+
+const chat = conversation();
+
+console.log(chat.next().value); // What is your name?
+console.log(chat.next("Asha").value); // Hello, Asha
+```
+
+You won't need this often. But it's the idea behind `async`/`await`: a function pauses at each `await`, and continues when the promise sends its value back in.
+
+You can also hand over to another generator with `yield*`. It gives out all of that generator's values, one by one, before going on.
+
+## Making your own iterable
+
+### By hand: add a Symbol.iterator method
+
+To make your own object work with `for...of`, give it a `[Symbol.iterator]()` method that gives back an iterator. Here is a range from 1 to 3, written by hand:
+
+```js
+const range = {
+    from: 1,
+    to: 3,
+
+    [Symbol.iterator]() {
+        let current = this.from;
+        const last = this.to;
+
+        return {
+            next() {
+                if (current > last) {
+                    return { value: undefined, done: true };
+                }
+
+                const value = current;
+                current = current + 1;
+                return { value: value, done: false };
+            },
+        };
+    },
+};
+
+console.log([...range]); // [ 1, 2, 3 ]
+```
+
+- `[Symbol.iterator]()` runs once per loop. It gives back a **new** iterator each time, so you can loop over `range` more than once.
+- The iterator keeps its place in the `current` variable (a [closure](../functions/closures.mdx)).
+- When `current` goes past `last`, it says `done: true`, and the loop stops.
+
+### The easy way: a generator method
+
+That's a lot of code just to count. A generator does the same work with much less. It remembers its place for you, and builds the `{ value, done }` objects for you.
+
+```js
+class Range {
+    constructor(from, to) {
+        this.from = from;
+        this.to = to;
+    }
+
+    // A generator method: the * goes before the name.
+    *[Symbol.iterator]() {
+        for (let number = this.from; number <= this.to; number++) {
+            yield number;
+        }
+    }
+}
+
+const range = new Range(1, 3);
+
+for (const number of range) {
+    console.log(number);
+}
+// 1
+// 2
+// 3
+
+console.log([...range]); // [ 1, 2, 3 ]
+```
+
+The same trick makes your own data structures loopable. A linked list, for example, can `yield` each node's value as it walks from the head to the end. Then code using your list can write `for (const value of list)`, just like with an array.
+
+## Async iterators
+
+### for await...of
+
+Some values arrive **over time**: pages of results from an API, or chunks of a big file. An **async iterator** is like a normal iterator, but its `next()` gives back a **promise** of `{ value, done }`.
+
+You loop over it with **`for await...of`**. It waits for each value before running the loop body, one at a time. It only works inside an `async` function (or at the top level of a module).
+
+### Async generators
+
+The easiest way to make an async iterator is an **async generator**: `async function*`. Inside it, you can use `await` **and** `yield`.
+
+Here, `fetchPage` pretends to load one page from a server, and the async generator gives out the pages one by one:
+
+```js
+// Pretend to load one page of users from a server.
+function fetchPage(pageNumber) {
+    return new Promise((resolve) => {
+        setTimeout(() => {
+            resolve(["user " + pageNumber + "a", "user " + pageNumber + "b"]);
+        }, 100);
+    });
+}
+
+async function* getAllPages(totalPages) {
+    for (let page = 1; page <= totalPages; page++) {
+        // Wait for this page before giving it out.
+        const users = await fetchPage(page);
+        yield users;
+    }
+}
+
+async function main() {
+    for await (const users of getAllPages(3)) {
+        console.log(users);
+    }
+    console.log("all pages loaded");
+}
+
+main();
+// [ 'user 1a', 'user 1b' ]
+// [ 'user 2a', 'user 2b' ]
+// [ 'user 3a', 'user 3b' ]
+// all pages loaded
+```
+
+- Each page arrives about 100 ms after the one before. The loop handles them **in order**, one at a time.
+- The code using it doesn't care how paging works. It just loops.
+- It's lazy too: if the loop stops early (with `break`), the next pages are never loaded.
+
+**In the real world:** in Node.js, streams can be read with `for await (const chunk of stream)`, so you can process a huge file piece by piece without loading it all into memory. Many API client libraries also give paginated results as an async iterator.
+
+`for await...of` goes **one by one**. If the requests don't depend on each other and you want them all at the same time, use [`Promise.all`](../async/promise-combinators.mdx) instead.
+
+## Common mistakes
+
+- **Thinking that calling a generator runs it.** `countToThree()` runs nothing. The body starts on the first `next()`.
+- **Looping over a plain object with `for...of`.** It throws `TypeError: ... is not iterable`. Use `Object.entries(object)`.
+- **Mixing up `for...in` and `for...of`.** `for...in` gives keys (as strings). `for...of` gives values.
+- **Reusing a used-up generator.** It stays done, so the second loop gets nothing. Call the generator function again for a fresh one.
+- **Using `yield` in a normal function.** `yield` only works inside `function*`. Without the star, it's a SyntaxError.
+- **Spreading an infinite generator.** `[...createIdMaker()]` never ends.
+
+## In the interview
+
+> "An iterable is any object with a `Symbol.iterator` method. That method gives back an iterator: an object with a `next()` method that returns `{ value, done }`. `for...of`, spread and destructuring all use this protocol. A generator, written `function*`, is the easy way to build iterators: each `yield` gives out a value and pauses the function until the next `next()`. Generators are lazy, so they can even be infinite. Async generators with `for await...of` do the same for values that arrive over time, like pages from an API."
+
+**Likely follow-up:** "How would you make your own class, like a linked list, work with `for...of`?"
+
+**Answer:** "I'd add a generator method called `[Symbol.iterator]`. Inside, I start at the head, and in a loop I `yield` the current node's value and move to the next node, until I reach the end. The generator handles `next()` and the `{ value, done }` objects for me. Then `for...of`, spread and `Array.from` all work on my list."
+
+<Callout title="Remember this" type="success">
+  - **Iterator:** an object with `next()`, which returns `{ value, done }`.
+  - **Iterable:** an object with a `[Symbol.iterator]()` method that gives back an iterator. Arrays, strings, Maps and Sets are iterable. **Plain objects are not.**
+  - `for...of`, spread and destructuring all use the iterator protocol.
+  - **Generator** (`function*`): calling it runs nothing. Each `next()` runs to the next `yield` and **pauses**. A used-up generator stays done.
+  - To make a class loopable, add `*[Symbol.iterator]() { ... yield ... }`.
+  - **Async generator** (`async function*`) + **`for await...of`**: values that arrive over time, handled one by one.
+</Callout>

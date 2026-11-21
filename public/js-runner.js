@@ -87,7 +87,11 @@ function formatObject(value, depth, seen) {
         return prefix + "{}";
     }
 
-    const fields = keys.map((key) => key + ": " + inner(value[key]));
+    // Like Node: a key that isn't a plain name ('user.name', 'first-name') gets quotes.
+    const fields = keys.map((key) => {
+        const shownKey = /^[A-Za-z_$][\w$]*$/.test(key) ? key : "'" + key + "'";
+        return shownKey + ": " + inner(value[key]);
+    });
     return prefix + "{ " + fields.join(", ") + " }";
 }
 

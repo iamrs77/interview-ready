@@ -351,83 +351,87 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 
 ## JavaScript
 
-**Written: 0 of 52**
+**Written: 54 of 54**
 
 ### Guide
-- ⬜ Start Here
-- ⬜ Cheat Sheet
+- ✅ Start Here
+- ✅ Cheat Sheet
+- ✅ Last-Minute Revision
 
 ### 1. Core Basics
-- ⬜ var, let, const and Scope
-- ⬜ Hoisting and Execution Context
-- ⬜ Types and Coercion
-- ⬜ Operators, Template Literals and Comments
-- ⬜ Control Flow and Loops
-- ⬜ Value vs Reference
+- ✅ var, let, const and Scope
+- ✅ Hoisting and Execution Context
+- ✅ Types and Coercion
+- ✅ Operators, Template Literals and Comments
+- ✅ Control Flow and Loops
+- ✅ Value vs Reference
 
 ### 2. Functions
-- ⬜ Functions in Depth
-- ⬜ Closures
-- ⬜ The this Keyword
-- ⬜ call, apply and bind
-- ⬜ Higher-Order Functions and Currying
+- ✅ Functions in Depth
+- ✅ Closures
+- ✅ The this Keyword
+- ✅ call, apply and bind
+- ✅ Higher-Order Functions and Currying
 
 ### 3. Objects and Arrays
-- ⬜ Objects in Depth
-- ⬜ Array Methods
+- ✅ Objects in Depth
+- ✅ Array Methods
 
 ### 4. OOP in JavaScript
-- ⬜ Constructor Functions and new
-- ⬜ Prototypes and the Prototype Chain
-- ⬜ Classes
-- ⬜ Encapsulation
-- ⬜ Abstraction
-- ⬜ Inheritance
-- ⬜ Polymorphism
-- ⬜ Composition and Mixins
+- ✅ Constructor Functions and new
+- ✅ Prototypes and the Prototype Chain
+- ✅ Classes
+- ✅ Encapsulation
+- ✅ Abstraction
+- ✅ Inheritance
+- ✅ Polymorphism
+- ✅ Composition and Mixins
 
 ### 5. Asynchronous JavaScript
-- ⬜ The Event Loop
-- ⬜ Callbacks and Promises
-- ⬜ async and await
-- ⬜ Promise.all, allSettled, race and any
-- ⬜ Timers
+- ✅ The Event Loop
+- ✅ Callbacks and Promises
+- ✅ async and await
+- ✅ Promise.all, allSettled, race and any
+- ✅ Timers
 
 ### 6. Modern JavaScript
-- ⬜ Destructuring, Spread and Rest
-- ⬜ Modules
-- ⬜ Iterators and Generators
-- ⬜ Map, Set, WeakMap and WeakSet
+- ✅ Destructuring, Spread and Rest
+- ✅ Modules
+- ✅ Iterators and Generators
+- ✅ Map, Set, WeakMap and WeakSet
 
 ### 7. JSON and Storage
-- ⬜ JSON
-- ⬜ Browser Storage
+- ✅ JSON
+- ✅ Browser Storage
 
 ### 8. Memory, Errors and Performance
-- ⬜ Memory and Garbage Collection
-- ⬜ Error Handling
-- ⬜ Performance
+- ✅ Memory and Garbage Collection
+- ✅ Error Handling
+- ✅ Performance
 
-### 9. Write Your Own
-- ⬜ Debounce and Throttle
-- ⬜ Promise.all and Friends
-- ⬜ call, apply and bind Polyfills
-- ⬜ Array Method Polyfills
-- ⬜ Deep Clone and Deep Equal
-- ⬜ Event Emitter
-- ⬜ Flatten and Memoize
+### 9. Testing
+- ✅ Unit, Integration and E2E Tests
 
-### 10. Guess the Output
-- ⬜ Output: Scope and Hoisting
-- ⬜ Output: this
-- ⬜ Output: Event Loop
-- ⬜ Output: Coercion and Objects
+### 10. Write Your Own
+- ✅ Debounce and Throttle
+- ✅ Promise.all and Friends
+- ✅ call, apply and bind Polyfills
+- ✅ Array Method Polyfills
+- ✅ Deep Clone and Deep Equal
+- ✅ Event Emitter
+- ✅ Flatten and Memoize
 
-### 11. TypeScript
-- ⬜ TypeScript Basics
-- ⬜ Unions and Narrowing
-- ⬜ Generics
-- ⬜ Utility Types
+### 11. Guess the Output
+- ✅ Output: Scope and Hoisting
+- ✅ Output: this
+- ✅ Output: Event Loop
+- ✅ Output: Coercion and Objects
+
+### 12. TypeScript
+- ✅ TypeScript Basics
+- ✅ Unions and Narrowing
+- ✅ Generics
+- ✅ Utility Types
 
 ## Git
 

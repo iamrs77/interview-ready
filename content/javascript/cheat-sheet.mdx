@@ -1,11 +1,236 @@
 ---
 title: "Cheat Sheet"
-description: "The rules, gotchas and polyfills on one page."
-icon: ClipboardList
-planned: true
+description: "The JavaScript rules, orders and templates to review before an interview."
+icon: ScrollText
 ---
 
-- Scope, hoisting and `this` rules in one table
-- Event loop order: sync, microtasks, macrotasks
-- Polyfill templates: debounce, throttle, Promise.all, bind
-- Common output-question traps
+## var, let and const
+
+| | `var` | `let` | `const` |
+| --- | --- | --- | --- |
+| Scope | Function | Block `{ }` | Block `{ }` |
+| Hoisted? | Yes, starts as `undefined` | Yes, but in the **TDZ** until its line | Yes, but in the **TDZ** until its line |
+| Use before its line | `undefined` | `ReferenceError` | `ReferenceError` |
+| Reassign? | Yes | Yes | No (but an object's contents can still change) |
+| Redeclare in the same scope? | Yes | No | No |
+
+Function declarations are hoisted **whole**, so you can call them before their line. Function expressions and arrow functions follow the `var`/`let`/`const` rule of their variable. See [Hoisting](./core-basics/hoisting-and-execution-context.mdx).
+
+## Types and coercion
+
+| Expression | Result | Why |
+| --- | --- | --- |
+| `typeof null` | `"object"` | An old bug, kept forever |
+| `typeof NaN` | `"number"` | NaN is a number value |
+| `typeof []` | `"object"` | Use `Array.isArray([])` |
+| `typeof function () {}` | `"function"` | |
+| `0.1 + 0.2 === 0.3` | `false` | Floating point: it's `0.30000000000000004` |
+| `NaN === NaN` | `false` | Use `Number.isNaN(x)` |
+| `"5" + 1` | `"51"` | `+` with a string joins text |
+| `"5" - 1` | `4` | `-` always converts to numbers |
+| `[] + []` | `""` | Both become empty strings |
+| `[] + {}` | `"[object Object]"` | |
+| `null == undefined` | `true` | They only equal each other with `==` |
+| `null == 0` | `false` | |
+| `0 == ""` | `true` | `""` becomes `0` |
+
+**Falsy values** (everything else is truthy): `false`, `0`, `-0`, `0n`, `""`, `null`, `undefined`, `NaN`. Note `[]` and `{}` are **truthy**.
+
+Use `===` by default. See [Types and Coercion](./core-basics/types-and-coercion.mdx).
+
+## The rules of this
+
+| How the function is called | `this` is |
+| --- | --- |
+| `obj.method()` | `obj` |
+| `fn()` (plain call) | `undefined` in strict mode and classes, the global object otherwise |
+| `fn.call(x)`, `fn.apply(x)`, `fn.bind(x)` | `x` |
+| `new Fn()` | The new object |
+| Arrow function | The `this` of the code around it (it has no `this` of its own) |
+
+A method passed as a callback (`setTimeout(obj.method, 0)`) **loses** its `this`. Fix it with an arrow function or `bind`. See [The this Keyword](./functions/this-keyword.mdx).
+
+## call, apply and bind
+
+| | Runs the function now? | Arguments |
+| --- | --- | --- |
+| `fn.call(thisArg, a, b)` | Yes | One by one |
+| `fn.apply(thisArg, [a, b])` | Yes | As an array |
+| `fn.bind(thisArg, a)` | No: returns a new function | One by one, can be partial |
+
+## Event loop order
+
+1. Run all the **synchronous** code (the call stack empties).
+2. Run **all** microtasks: promise callbacks (`then`, `catch`, `finally`), the code after `await`, `queueMicrotask`.
+3. Run **one** macrotask: a `setTimeout` or `setInterval` callback. Then go back to step 2.
+
+```js
+console.log("1: sync");
+
+setTimeout(() => console.log("4: timeout"), 0);
+
+Promise.resolve().then(() => console.log("3: promise"));
+
+console.log("2: sync");
+// 1: sync
+// 2: sync
+// 3: promise
+// 4: timeout
+```
+
+See [The Event Loop](./async/event-loop.mdx).
+
+## Promise combinators
+
+| | Fulfills when | Rejects when |
+| --- | --- | --- |
+| `Promise.all` | **All** fulfill (results in input order) | **Any one** rejects |
+| `Promise.allSettled` | **All** settle, good or bad | Never |
+| `Promise.race` | The **first** one to settle fulfills | The first one to settle rejects |
+| `Promise.any` | The **first** one fulfills | **All** reject (`AggregateError`) |
+
+An empty array: `all` and `allSettled` fulfill with `[]`, `race` stays pending forever, `any` rejects with `AggregateError`.
+
+See [Promise.all, allSettled, race and any](./async/promise-combinators.mdx).
+
+## Array methods
+
+| Changes the original array | Returns a new array or value |
+| --- | --- |
+| `push`, `pop`, `shift`, `unshift`, `splice`, `sort`, `reverse`, `fill` | `map`, `filter`, `slice`, `concat`, `flat`, `toSorted`, `toReversed`, `toSpliced`, `reduce`, `find`, `some`, `every` |
+
+`sort()` without a compare function sorts as **text**: `[10, 9, 1].sort()` gives `[1, 10, 9]`. For numbers, use `(a, b) => a - b`. See [Array Methods](./objects-arrays/array-methods.mdx).
+
+## Copying
+
+| Way | Depth | Notes |
+| --- | --- | --- |
+| `[...arr]`, `{ ...obj }`, `Object.assign` | Shallow | Nested objects are shared |
+| `JSON.parse(JSON.stringify(x))` | Deep | Plain data only: Dates become strings, functions and `undefined` are dropped, Map and Set become `{}` |
+| `structuredClone(x)` | Deep | Keeps Dates, Map, Set. Can't copy functions |
+
+See [Value vs Reference](./core-basics/value-vs-reference.mdx).
+
+## Templates to write from memory
+
+**Debounce:** run after the calls stop. See [Debounce and Throttle](./write-your-own/debounce-and-throttle.mdx).
+
+```js
+function debounce(func, delay) {
+    let timer;
+
+    return function (...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => func.apply(this, args), delay);
+    };
+}
+
+const save = debounce(() => console.log("Saved"), 100);
+save();
+save();
+save();
+// Saved   (once, 100 ms after the last call)
+```
+
+**Throttle:** run at most once per interval.
+
+```js
+function throttle(func, delay) {
+    let last = 0;
+
+    return function (...args) {
+        const now = Date.now();
+
+        if (now - last >= delay) {
+            last = now;
+            func.apply(this, args);
+        }
+    };
+}
+
+const scroll = throttle(() => console.log("Scrolled"), 1000);
+scroll();
+scroll();
+scroll();
+// Scrolled   (once: the other calls came within 1 second)
+```
+
+**Promise.all:** results in input order, reject on the first failure. See [Promise.all and Friends](./write-your-own/promise-polyfills.mdx).
+
+```js
+function promiseAll(items) {
+    return new Promise((resolve, reject) => {
+        // Accept any list, like a Set. It also turns holes into undefined.
+        const list = Array.from(items);
+        const results = [];
+        let finished = 0;
+
+        if (list.length === 0) {
+            resolve(results);
+            return;
+        }
+
+        list.forEach((item, index) => {
+            // Promise.resolve also accepts plain values, not only promises.
+            Promise.resolve(item).then((value) => {
+                // Save by index, so the order matches the input.
+                results[index] = value;
+                finished = finished + 1;
+
+                if (finished === list.length) {
+                    resolve(results);
+                }
+            }, reject);
+        });
+    });
+}
+
+const slow = new Promise((resolve) => setTimeout(() => resolve("slow"), 50));
+const results = await promiseAll([slow, "plain", Promise.resolve("fast")]);
+
+console.log(results); // [ 'slow', 'plain', 'fast' ]
+```
+
+**bind:** return a function that calls the original with a fixed `this`. The full version also handles `new`: see [call, apply and bind Polyfills](./write-your-own/call-apply-bind-polyfills.mdx).
+
+```js
+Function.prototype.myBind = function (thisArg, ...boundArgs) {
+    const originalFunction = this;
+
+    return function (...laterArgs) {
+        return originalFunction.apply(thisArg, [...boundArgs, ...laterArgs]);
+    };
+};
+
+const user = { firstName: "Asha" };
+
+function greet(greeting, mark) {
+    return greeting + ", " + this.firstName + mark;
+}
+
+const greetAsha = greet.myBind(user, "Hello");
+console.log(greetAsha("!")); // Hello, Asha!
+```
+
+## Common output-question traps
+
+| Code | Prints | Why |
+| --- | --- | --- |
+| `for (var i = 0; i < 3; i++) setTimeout(() => console.log(i))` | `3 3 3` | One shared `var i`. Use `let` for `0 1 2` |
+| `console.log(x); var x = 5;` | `undefined` | `var` is hoisted as `undefined` |
+| `console.log(y); let y = 5;` | `ReferenceError` | `y` is in the TDZ |
+| `const f = obj.method; f();` | `this` is lost | A plain call, not a method call |
+| A promise vs `setTimeout(fn, 0)` | Promise first | Microtasks run before macrotasks |
+| `[1, 2, 3] + [4]` | `"1,2,34"` | Arrays become strings, then `+` joins them |
+| `{ a: 1 } === { a: 1 }` | `false` | Two different objects: compared by reference |
+
+Practice these in [Guess the Output](./guess-the-output/output-scope-and-hoisting.mdx).
+
+<Callout title="Remember this" type="success">
+  - **`const` by default**, `let` when the value changes. `let`, `const` and `class` are in the **TDZ** before their line.
+  - **Use `===`.** Only 8 values are falsy. `[]` and `{}` are truthy.
+  - **`this`** is decided by how the function is called. Arrow functions take it from the code around them.
+  - **Event loop:** sync code, then **all** microtasks (promises), then **one** macrotask (timers).
+  - **`sort`, `reverse`, `splice`** change the array. **`structuredClone`** is the safe deep copy.
+  - **Templates:** debounce waits for a pause, throttle runs at most once per interval, `Promise.all` saves results by index.
+</Callout>

@@ -1,11 +1,376 @@
 ---
 title: "Promise.all and Friends"
-description: "Write Promise.all, allSettled, race and any yourself."
+description: "Write Promise.all, allSettled, race and any yourself, with the results in the right order."
 icon: Handshake
-planned: true
 ---
 
-- Promise.all from scratch
-- Promise.allSettled, race and any
-- Keeping the order of results
-- Handling non-promise values
+## The idea
+
+`Promise.all`, `Promise.allSettled`, `Promise.race` and `Promise.any` each take a **list of promises** and give back **one promise**. They differ in **when** that one promise finishes. "Write your own `Promise.all`" is one of the most common JavaScript interview questions.
+
+Think of a **group order** at a food court:
+
+- **all:** you sit down only when **every** dish is ready. If one dish is cancelled, the whole order fails.
+- **allSettled:** you wait for every dish, then get a report: which came and which were cancelled.
+- **race:** whatever happens **first** wins, a dish being ready or a dish being cancelled.
+- **any:** the first dish that is actually **ready** wins. You only give up if every dish is cancelled.
+
+For how to use them, see [Promise.all, allSettled, race and any](../async/promise-combinators.mdx). For promises themselves, see [Callbacks and Promises](../async/promises.mdx).
+
+| Method | Fulfills when | Rejects when | Gives back |
+| --- | --- | --- | --- |
+| `Promise.all` | **all** fulfill | the **first** one rejects | an array of values, in input order |
+| `Promise.allSettled` | **all** settle (fulfill or reject) | never | an array of `{ status, value }` or `{ status, reason }` |
+| `Promise.race` | the first to settle fulfills | the first to settle rejects | that first value or error |
+| `Promise.any` | the **first** one fulfills | **all** reject | that first value, or an `AggregateError` |
+
+"Settle" means "finish either way": fulfilled or rejected.
+
+## Building them
+
+### Promise.all from scratch
+
+**The task:** write `promiseAll(items)`, which works like `Promise.all`.
+
+**How the real one works:**
+
+```js
+const slow = new Promise((resolve) => setTimeout(() => resolve("slow"), 200));
+const fast = new Promise((resolve) => setTimeout(() => resolve("fast"), 100));
+
+// The results keep the input order, even though "fast" finished first.
+// A plain value like 42 is fine too.
+console.log(await Promise.all([slow, fast, 42])); // [ 'slow', 'fast', 42 ]
+
+try {
+    await Promise.all([slow, Promise.reject(new Error("Boom"))]);
+} catch (error) {
+    // One rejection rejects the whole thing.
+    console.log(error.message); // Boom
+}
+```
+
+**Build it:**
+
+1. Return a **new promise**. You'll call its `resolve` or `reject` when the time is right.
+2. Make a `results` array and a `doneCount` counter.
+3. If the list is **empty**, resolve with `[]` right away. Otherwise you'd wait forever.
+4. For each item, wrap it with `Promise.resolve(item)`, so plain values work too. Then add a `.then`.
+5. When one fulfills, save its value **at its own index**, and add 1 to `doneCount`.
+6. When `doneCount` equals the number of items, every one is done: resolve with `results`.
+7. If any item rejects, call `reject` with that error. A promise settles **only once**, so later calls to `resolve` or `reject` are ignored.
+
+```js
+function promiseAll(items) {
+    return new Promise((resolve, reject) => {
+        // Accept any list, like a Set, not only an array.
+        const list = Array.from(items);
+        const results = [];
+        let doneCount = 0;
+
+        if (list.length === 0) {
+            resolve(results);
+            return;
+        }
+
+        list.forEach((item, index) => {
+            Promise.resolve(item)
+                .then((value) => {
+                    // Save by index, so the order matches the input.
+                    results[index] = value;
+                    doneCount++;
+
+                    if (doneCount === list.length) {
+                        resolve(results);
+                    }
+                })
+                .catch(reject);
+        });
+    });
+}
+
+const slow = new Promise((resolve) => setTimeout(() => resolve("slow"), 200));
+const fast = new Promise((resolve) => setTimeout(() => resolve("fast"), 100));
+
+console.log(await promiseAll([slow, fast, 42])); // [ 'slow', 'fast', 42 ]
+console.log(await promiseAll([])); // []
+
+try {
+    await promiseAll([slow, Promise.reject(new Error("Boom"))]);
+} catch (error) {
+    console.log(error.message); // Boom
+}
+```
+
+**Edge cases interviewers check:**
+
+- The results are in **input order**, not finishing order.
+- An **empty** list resolves to `[]` right away.
+- **Plain values** (not promises) are allowed, and come back as they are.
+- The **first** rejection wins. The other promises keep running (a promise can't be stopped), but their results are ignored.
+- How you know you're done: a **counter**, not `results.length`. More on both of these below.
+
+### Promise.allSettled, race and any
+
+#### promiseAllSettled
+
+**The task:** write `promiseAllSettled(items)`, which works like `Promise.allSettled`.
+
+**How the real one works:** it waits for **every** item to settle and **never rejects**. Each result is an object: `{ status: "fulfilled", value }` or `{ status: "rejected", reason }`.
+
+**Build it:** once you have `promiseAll`, this one is short. Turn each item into a promise that **never rejects**: both outcomes become a fulfilled result object. Then wait for all of them. (The block uses the real `Promise.all` to run alone. In the interview, use your `promiseAll`.)
+
+```js
+function promiseAllSettled(items) {
+    const safeItems = Array.from(items).map((item) => {
+        return Promise.resolve(item).then(
+            (value) => {
+                return { status: "fulfilled", value: value };
+            },
+            (reason) => {
+                // The error becomes a normal result, so it can't reject.
+                return { status: "rejected", reason: reason };
+            }
+        );
+    });
+
+    return Promise.all(safeItems);
+}
+
+const results = await promiseAllSettled([
+    Promise.resolve("Asha"),
+    Promise.reject(new Error("Server down")),
+    42,
+]);
+
+for (const result of results) {
+    if (result.status === "fulfilled") {
+        console.log("fulfilled:", result.value);
+    } else {
+        console.log("rejected:", result.reason.message);
+    }
+}
+// fulfilled: Asha
+// rejected: Server down
+// fulfilled: 42
+```
+
+`.then(onFulfilled, onRejected)` takes **two** functions: one for success, one for failure. Here both return a normal object, so the new promise always fulfills.
+
+Use `allSettled` when every result matters on its own. For example, sending 10 notifications and then reporting how many failed.
+
+#### promiseRace
+
+**The task:** write `promiseRace(items)`, which works like `Promise.race`.
+
+**How the real one works:** it settles **the same way as the first item that settles**. If the first one fulfills, the race fulfills. If the first one rejects, the race rejects.
+
+**Build it:** attach the outer `resolve` and `reject` to **every** item. Whichever item settles first calls one of them. A promise settles only once, so all the later calls do nothing.
+
+```js
+function promiseRace(items) {
+    return new Promise((resolve, reject) => {
+        for (const item of items) {
+            // The first one to call resolve or reject wins.
+            Promise.resolve(item).then(resolve, reject);
+        }
+    });
+}
+
+const slow = new Promise((resolve) => setTimeout(() => resolve("slow"), 200));
+const fast = new Promise((resolve) => setTimeout(() => resolve("fast"), 100));
+
+console.log(await promiseRace([slow, fast])); // fast
+
+// The classic use: give up if something takes too long.
+const timeout = new Promise((resolve, reject) => {
+    setTimeout(() => reject(new Error("Timed out")), 50);
+});
+
+try {
+    await promiseRace([slow, timeout]);
+} catch (error) {
+    console.log(error.message); // Timed out
+}
+```
+
+**Edge cases:**
+
+- An **empty** list: the real `race` stays pending **forever**. Our version does the same, because nothing ever calls `resolve`.
+- A plain value, or a promise that is already settled, wins over one still waiting. If several are ready, the **first in the list** wins.
+- The loser is **not stopped**. In the example, `slow` still finishes after 200 ms. Nobody listens to it any more.
+
+#### promiseAny
+
+**The task:** write `promiseAny(items)`, which works like `Promise.any`.
+
+**How the real one works:** the **first item to fulfill** wins. Rejections are ignored, unless **every** item rejects. Then it rejects with an **`AggregateError`**: one error that holds all the errors in its `errors` array, in input order.
+
+`any` is the mirror of `all`. `all` waits for every success and fails on the first error. `any` succeeds on the first success and waits for every error.
+
+**Build it:**
+
+1. Return a new promise. Keep an `errors` array and a `failedCount` counter.
+2. An **empty** list rejects right away with an `AggregateError`.
+3. For each item: on success, call `resolve` (the first one wins).
+4. On failure, save the error **at its index**, and add 1 to `failedCount`. When every item has failed, reject with an `AggregateError`.
+
+```js
+function promiseAny(items) {
+    return new Promise((resolve, reject) => {
+        const list = Array.from(items);
+        const errors = [];
+        let failedCount = 0;
+
+        const message = "All promises were rejected";
+
+        if (list.length === 0) {
+            reject(new AggregateError(errors, message));
+            return;
+        }
+
+        list.forEach((item, index) => {
+            Promise.resolve(item).then(resolve, (error) => {
+                // Keep the errors in input order.
+                errors[index] = error;
+                failedCount++;
+
+                if (failedCount === list.length) {
+                    reject(new AggregateError(errors, message));
+                }
+            });
+        });
+    });
+}
+
+const fails = Promise.reject(new Error("Mirror 1 down"));
+const works = new Promise((resolve) => setTimeout(() => resolve("Mirror 2"), 100));
+
+console.log(await promiseAny([fails, works])); // Mirror 2
+
+const failA = Promise.reject(new Error("A"));
+const failB = Promise.reject(new Error("B"));
+
+try {
+    await promiseAny([failA, failB]);
+} catch (error) {
+    console.log(error.name); // AggregateError
+    console.log(error.message); // All promises were rejected
+    console.log(error.errors.length); // 2
+}
+```
+
+A real use: download a file from **several mirror servers**, and take whichever answers first with a good result.
+
+### Keeping the order of results
+
+The most common bug in `Promise.all` answers is using `push`. `push` adds each value **when it finishes**, so a fast promise jumps ahead of a slow one.
+
+```js
+function promiseAllBroken(items) {
+    return new Promise((resolve, reject) => {
+        const results = [];
+
+        items.forEach((item) => {
+            Promise.resolve(item)
+                .then((value) => {
+                    // Bug: push adds values in the order they FINISH.
+                    results.push(value);
+
+                    if (results.length === items.length) {
+                        resolve(results);
+                    }
+                })
+                .catch(reject);
+        });
+    });
+}
+
+const first = new Promise((resolve) => setTimeout(() => resolve("a"), 300));
+const second = new Promise((resolve) => setTimeout(() => resolve("b"), 100));
+const third = new Promise((resolve) => setTimeout(() => resolve("c"), 200));
+
+console.log(await promiseAllBroken([first, second, third])); // [ 'b', 'c', 'a' ]
+```
+
+| Item | Index | Finishes at | Place with `push` | Place with `results[index]` |
+| --- | --- | --- | --- | --- |
+| `"a"` | 0 | 300 ms | 3rd | 1st |
+| `"b"` | 1 | 100 ms | 1st | 2nd |
+| `"c"` | 2 | 200 ms | 2nd | 3rd |
+
+The fix is `results[index] = value`: each value goes to **its own spot**, whenever it finishes.
+
+But then **don't use `results.length` to check if you're done**. Setting a spot near the end of an array makes the length jump, even when the earlier spots are still empty:
+
+```js
+const results = [];
+
+// Only the LAST item has finished so far.
+results[2] = "c";
+
+console.log(results.length); // 3
+console.log(results[0]); // undefined
+```
+
+With `results.length === items.length` as the check, you'd resolve **too early**, with empty spots. That's why `promiseAll` keeps a separate `doneCount`.
+
+### Handling non-promise values
+
+`Promise.all([1, 2, 3])` works, and gives back `[ 1, 2, 3 ]`. The real methods accept **plain values** as well as promises. If your code calls `item.then(...)` directly, a plain value crashes it: `item.then is not a function`.
+
+The fix is `Promise.resolve(item)`:
+
+- A **plain value** becomes a promise that is already fulfilled with that value.
+- A **real promise** comes back as the very same promise.
+- A **"thenable"** (any object with a `then` method, like promises from old libraries) is followed, and its result is used.
+
+```js
+const original = new Promise((resolve) => setTimeout(() => resolve("done"), 100));
+
+// A promise comes back unchanged.
+console.log(Promise.resolve(original) === original); // true
+
+// A plain value becomes a fulfilled promise.
+console.log(await Promise.resolve(42)); // 42
+
+// An object with a then method is followed.
+const thenable = {
+    then(resolve) {
+        resolve("from a thenable");
+    },
+};
+console.log(await Promise.resolve(thenable)); // from a thenable
+```
+
+So wrapping every item with `Promise.resolve` lets one piece of code handle all three cases. `await` works the same way: `await 42` simply gives `42`.
+
+## Common mistakes
+
+- **`push` instead of `results[index]`.** The results come out in finishing order.
+- **`results.length` as the "done" check.** It jumps when a late spot is filled first. Use a counter.
+- **Forgetting the empty list.** `promiseAll([])` must resolve to `[]`, or it waits forever. `promiseAny([])` must reject.
+- **Calling `item.then` directly.** Plain values crash. Wrap every item with `Promise.resolve`.
+- **Thinking the other promises are cancelled** when `all` rejects or `race` finishes. They keep running. Only their results are ignored.
+- **Mixing up `race` and `any`.** `race` takes the first to **settle**, even an error. `any` takes the first **success**.
+
+## In the interview
+
+> "I return a new promise. I keep a results array and a counter. I wrap each item with `Promise.resolve`, so plain values work too. When an item fulfills, I store its value at its own index, so the order matches the input, and I add one to the counter. When the counter reaches the number of items, I resolve with the results. If any item rejects, I reject straight away. Later calls are ignored, because a promise settles only once. An empty list resolves to an empty array right away."
+
+**Likely follow-up:** "How are `race` and `any` different?"
+
+**Answer:** "`race` settles like the first item that settles, success or failure. So an early error wins. `any` ignores errors and fulfills with the first success. It only rejects if every item fails, and then it rejects with an `AggregateError` that holds all the errors."
+
+**Likely follow-up:** "Does `Promise.all` cancel the other promises when one fails?"
+
+**Answer:** "No. A promise is just a result of work that has already started, and it can't be stopped from outside. `Promise.all` simply stops listening. To really stop the work, like a network request, I'd pass an `AbortController` signal to it and call `abort()`."
+
+<Callout title="Remember this" type="success">
+  - **all:** every item fulfills, or the **first rejection** wins. **allSettled:** waits for all, **never rejects**.
+  - **race:** the first to **settle** wins. **any:** the first to **fulfill** wins, `AggregateError` if all fail.
+  - Save each result at **`results[index]`**, never `push`, so the order matches the input.
+  - Count finished items with a **counter**, not `results.length`.
+  - Wrap every item with **`Promise.resolve(item)`** so plain values work. Handle the **empty** list.
+  - A promise settles **once**, so extra `resolve` or `reject` calls do nothing, and nothing gets cancelled.
+</Callout>

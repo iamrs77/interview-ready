@@ -1,11 +1,401 @@
 ---
 title: "Output: Scope and Hoisting"
-description: "Tricky questions about var, let, hoisting and closures."
+description: "Guess the output: var, let, hoisting, the TDZ, shadowing and closures in loops."
 icon: ArrowDownToLine
-planned: true
 ---
 
-- Hoisting puzzles
-- TDZ errors
-- Closures in loops
-- Shadowing
+## How to solve these
+
+Before you read the first line, apply these rules:
+
+1. **Do the setup pass first.** Before any line runs, JavaScript finds every declaration in the scope. A `var` starts as `undefined`. A function declaration is ready to call. A `let`, `const` or `class` exists but is locked until its line runs. That locked time is the **TDZ** (temporal dead zone). See [Hoisting and Execution Context](../core-basics/hoisting-and-execution-context.mdx).
+2. **A function expression is just a variable.** In `var sayBye = function () {}`, only the name `sayBye` is hoisted, as `undefined`. The function arrives when that line runs.
+3. **`var` ignores blocks. `let` and `const` don't.** A `var` belongs to the whole function. A `let` or `const` lives only inside the nearest `{ }`. See [var, let, const and Scope](../core-basics/variables-and-scope.mdx).
+4. **The nearest name wins.** JavaScript looks in the current scope first, then each outer scope. An inner variable with the same name hides (shadows) the outer one in its **whole** scope, even on the lines above it.
+5. **A closure keeps the variable, not a copy of its value.** A `for` loop with `var` has one shared `i`. A `for` loop with `let` makes a new `i` for each turn. See [Closures](../functions/closures.mdx).
+
+## The puzzles
+
+### 1. Using a var before its line
+
+```js
+console.log(score);
+
+var score = 10;
+
+console.log(score);
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+undefined
+10
+```
+
+- Setup pass: `score` is a `var`, so it starts as `undefined`.
+- The first `console.log` prints `undefined`. No error.
+- Then `score = 10` runs, so the second `console.log` prints `10`.
+
+</Accordion>
+</Accordions>
+
+### 2. Using a let before its line
+
+```js
+console.log("start");
+
+console.log(total);
+
+let total = 5;
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+start
+ReferenceError: Cannot access 'total' before initialization
+```
+
+- `start` prints.
+- `total` was hoisted, so it exists. But it is in the TDZ until the `let total = 5` line runs.
+- Reading it now throws. The program stops there.
+- Compare with puzzle 1: a `var` gives `undefined`, a `let` gives an error.
+
+</Accordion>
+</Accordions>
+
+### 3. Function declaration vs function expression
+
+```js
+sayHi();
+sayBye();
+
+function sayHi() {
+    console.log("Hi");
+}
+
+var sayBye = function () {
+    console.log("Bye");
+};
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+Hi
+TypeError: sayBye is not a function
+```
+
+- Setup pass: `sayHi` is a function declaration, so the whole function is ready.
+- `sayBye` is a `var`, so for now it is `undefined`.
+- `sayHi()` prints `Hi`.
+- `sayBye()` tries to call `undefined`. That's a **TypeError** (the value is the wrong kind), not a ReferenceError (the name does exist).
+
+</Accordion>
+</Accordions>
+
+### 4. A var leaks out of a block
+
+```js
+if (true) {
+    var animal = "cat";
+    let food = "fish";
+}
+
+console.log(animal);
+console.log(food);
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+cat
+ReferenceError: food is not defined
+```
+
+- `var` ignores the `if` block. `animal` belongs to the whole script, so it is still there after the block.
+- `let food` lives only inside the `{ }` of the `if`. Outside it, there is no `food` at all.
+- Two different messages: "is not defined" means the name doesn't exist here. "Cannot access ... before initialization" means it exists but is still in the TDZ.
+
+</Accordion>
+</Accordions>
+
+### 5. A var inside a function hides the outer one
+
+```js
+var color = "red";
+
+function paint() {
+    console.log(color);
+
+    var color = "blue";
+
+    console.log(color);
+}
+
+paint();
+console.log(color);
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+undefined
+blue
+red
+```
+
+- When `paint()` starts, its setup pass finds `var color` inside it. So `paint` gets its **own** `color`, starting as `undefined`.
+- That inner `color` hides the outer `"red"` in the whole function, even on the line above `var color`.
+- First log: the inner `color`, still `undefined`.
+- It becomes `"blue"`, so the second log prints `blue`.
+- The outer `color` was never touched: `red`.
+
+</Accordion>
+</Accordions>
+
+### 6. The outer variable is right there... or is it?
+
+```js
+let city = "Delhi";
+
+function showCity() {
+    console.log(city);
+
+    let city = "Mumbai";
+}
+
+showCity();
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+ReferenceError: Cannot access 'city' before initialization
+```
+
+- Many people say `Delhi`. But `showCity` has its own `let city`.
+- The setup pass of `showCity` creates that inner `city`, locked in the TDZ.
+- Rule 4: the nearest `city` is the inner one, so JavaScript never looks outside.
+- Reading a locked `let` throws.
+
+</Accordion>
+</Accordions>
+
+### 7. typeof on a missing name
+
+```js
+console.log(typeof notDeclaredAnywhere);
+console.log(typeof laterValue);
+
+let laterValue = 1;
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+undefined
+ReferenceError: Cannot access 'laterValue' before initialization
+```
+
+- `typeof` on a name that doesn't exist anywhere is safe. It gives `"undefined"`, with no error. (An old rule, so code could check if something exists.)
+- But `laterValue` does exist. It is in the TDZ, and not even `typeof` can read it.
+
+</Accordion>
+</Accordions>
+
+### 8. A function and a var with the same name
+
+```js
+console.log(typeof greet);
+
+var greet = "hello";
+
+function greet() {
+    return "hi";
+}
+
+console.log(typeof greet);
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+function
+string
+```
+
+- Setup pass: it finds both `var greet` and `function greet`. The function wins. A `var` with no value yet doesn't replace it.
+- So the first log prints `function`.
+- Then the line `greet = "hello"` runs (its `var` part was already handled). Now `greet` is a string.
+- When the code reaches the function declaration, nothing happens. It was already handled in the setup pass.
+
+</Accordion>
+</Accordions>
+
+### 9. var in a loop with setTimeout
+
+```js
+for (var i = 0; i < 3; i++) {
+    setTimeout(function () {
+        console.log(i);
+    }, 100);
+}
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+3
+3
+3
+```
+
+- `var i` is **one** variable for the whole loop. All three callbacks close over that same `i`.
+- The loop finishes first. It stops when `i` is `3`, because `3 < 3` is false.
+- 100 ms later, the callbacks run. Each one reads the shared `i`, which is `3`.
+
+</Accordion>
+</Accordions>
+
+### 10. The same loop with let
+
+```js
+for (let i = 0; i < 3; i++) {
+    setTimeout(function () {
+        console.log(i);
+    }, 100);
+}
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+0
+1
+2
+```
+
+- With `let`, each turn of the loop gets a **new** `i`, holding that turn's value.
+- Each callback closes over its own `i`: `0`, `1` and `2`.
+- This is the usual fix for puzzle 9.
+
+</Accordion>
+</Accordions>
+
+### 11. Two counters from one function
+
+```js
+function makeCounter() {
+    let count = 0;
+
+    return function () {
+        count = count + 1;
+        return count;
+    };
+}
+
+const counterA = makeCounter();
+const counterB = makeCounter();
+
+console.log(counterA());
+console.log(counterA());
+console.log(counterB());
+console.log(counterA());
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+1
+2
+1
+3
+```
+
+- Each call to `makeCounter()` makes a **new** `count`, starting at `0`.
+- `counterA` keeps one `count`. `counterB` keeps a different one.
+
+| Call | Which `count` | Value after the call |
+|---|---|---|
+| `counterA()` | A's | 1 |
+| `counterA()` | A's | 2 |
+| `counterB()` | B's | 1 |
+| `counterA()` | A's | 3 |
+
+</Accordion>
+</Accordions>
+
+### 12. A function hiding after return
+
+```js
+var total = 1;
+
+function update() {
+    total = 10;
+    return;
+
+    function total() {}
+}
+
+update();
+console.log(total);
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+1
+```
+
+- The trick is `function total() {}` inside `update`, after the `return`. That line is never reached, but the setup pass still finds it.
+- So `update` has its own **local** `total` (a function, at first).
+- `total = 10` changes that local `total`, not the outer one.
+- The outer `total` stays `1`.
+
+</Accordion>
+</Accordions>
+
+## In the interview
+
+Say the rule first. Then go line by line, and start with what exists after the setup pass, before the first line runs.
+
+> "There's one rule here: `var` is function-scoped, so the whole loop shares a single `i`. The loop runs to the end first, and `i` ends at 3. The timers run later, and all three callbacks read that same `i`, so it prints 3, 3, 3. If I change `var` to `let`, each turn gets its own `i`, so it prints 0, 1, 2."
+
+**Likely follow-up:** "How would you fix the `var` loop without using `let`?"
+
+**Answer:** "Give each callback its own copy of `i`. I wrap the body in a function that takes `i` as a parameter, and call it right away. That's an IIFE (an immediately invoked function expression). Each call has its own `current`, so the callbacks print 0, 1, 2."
+
+```js
+for (var i = 0; i < 3; i++) {
+    // Call a function right away, passing in this turn's i.
+    // Each call gets its own "current" variable.
+    (function (current) {
+        setTimeout(function () {
+            console.log(current); // 0, then 1, then 2
+        }, 100);
+    })(i);
+}
+```
+
+<Callout title="Remember this" type="success">
+  - **Setup pass first:** `var` starts as `undefined`, function declarations are ready, `let` and `const` are locked (the TDZ).
+  - A `let` or `const` read before its line throws **ReferenceError: Cannot access 'x' before initialization**.
+  - A **function expression** is a variable: calling it too early throws **TypeError: x is not a function**.
+  - `var` ignores blocks. `let` and `const` stay inside their `{ }`.
+  - An inner name **shadows** the outer one in its whole scope, even on the lines above it.
+  - `var` in a loop = **one shared** variable. `let` in a loop = **a new one each turn**.
+</Callout>

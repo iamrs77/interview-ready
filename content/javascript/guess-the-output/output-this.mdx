@@ -1,11 +1,447 @@
 ---
 title: "Output: this"
-description: "Tricky questions about what this points to."
+description: "Guess the output: what this points to in methods, arrow functions, callbacks, call, apply and bind."
 icon: MapPin
-planned: true
 ---
 
-- Method vs plain call
-- Arrow functions inside methods
-- Callbacks and setTimeout
-- call, apply and bind
+## How to solve these
+
+Ask one question: **how was the function called?** Where it was written only matters for arrow functions.
+
+1. **A method call, `obj.fn()`:** `this` is the object before the dot. In `a.b.fn()`, it's `a.b`, the object right before the **last** dot.
+2. **A plain call, `fn()`:** there is no object. In strict mode (class code, ES modules, files with `"use strict"`), `this` is `undefined`. In sloppy (non-strict) mode, it's the global object. Either way, it's not your object. These puzzles run in sloppy mode, like a plain `.js` file in Node.
+3. **A callback is a plain call.** When you pass `obj.fn` to `setTimeout` or `forEach`, you pass only the function. The object stays behind.
+4. **Arrow functions have no `this` of their own.** They use the `this` of the code around the place they were written. `call`, `apply` and `bind` can't change it.
+5. **`call`, `apply` and `bind` set `this` by hand.** `call` and `apply` do it for one call. `bind` makes a new function with `this` fixed for good, and binding it again can't change that `this`.
+
+See [The this Keyword](../functions/this-keyword.mdx) and [call, apply and bind](../functions/call-apply-bind.mdx).
+
+## The puzzles
+
+### 1. Method call vs plain call
+
+```js
+const user = {
+    firstName: "Asha",
+    greet() {
+        console.log("Hi, " + this.firstName);
+    },
+};
+
+user.greet();
+
+const greet = user.greet;
+greet();
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+Hi, Asha
+Hi, undefined
+```
+
+- `user.greet()` has `user` before the dot, so `this` is `user`.
+- `const greet = user.greet` copies only the function. It doesn't remember `user`.
+- `greet()` is a plain call. In sloppy mode, `this` is the global object. It has no `firstName`, so you get `undefined`.
+- In strict mode, `this` would be `undefined`, and `this.firstName` would throw a TypeError (see puzzle 12).
+
+</Accordion>
+</Accordions>
+
+### 2. One function, two objects
+
+```js
+function describe() {
+    console.log("I am in " + this.city);
+}
+
+const home = {
+    city: "Pune",
+    describe: describe,
+};
+
+const office = {
+    city: "Delhi",
+    describe: describe,
+};
+
+home.describe();
+office.describe();
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+I am in Pune
+I am in Delhi
+```
+
+- Both objects hold the **same** function.
+- `this` is not fixed when the function is written. It's picked at each call, from the object before the dot.
+
+</Accordion>
+</Accordions>
+
+### 3. A nested object
+
+```js
+const company = {
+    city: "Pune",
+    office: {
+        city: "Delhi",
+        show() {
+            console.log(this.city);
+        },
+    },
+};
+
+company.office.show();
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+Delhi
+```
+
+- `this` is the object right before the **last** dot: `company.office`.
+- `company` plays no part, even though the call starts with it.
+
+</Accordion>
+</Accordions>
+
+### 4. An arrow function as a method
+
+```js
+const counter = {
+    count: 5,
+    show: () => {
+        console.log(this.count);
+    },
+};
+
+counter.show();
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+undefined
+```
+
+- `show` is an arrow function, so it has no `this` of its own.
+- It takes `this` from the code around the object, which is the top level of the file. The `{ }` of an object is **not** a scope.
+- At the top level, `this` is not `counter`, and it has no `count`. So it prints `undefined`.
+- Lesson: don't write methods as arrow functions.
+
+</Accordion>
+</Accordions>
+
+### 5. A regular function inside a method
+
+```js
+const team = {
+    title: "Blue",
+    members: ["Asha", "Ravi"],
+    list() {
+        this.members.forEach(function (member) {
+            console.log(member + " is in " + this.title);
+        });
+    },
+};
+
+team.list();
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+Asha is in undefined
+Ravi is in undefined
+```
+
+- `team.list()` is a method call, so inside `list`, `this` is `team`. That's why `this.members` works.
+- But the callback is a new regular function. `forEach` calls it as a plain call, so it gets its own `this`, which is not `team`.
+- So `this.title` is `undefined`.
+
+</Accordion>
+</Accordions>
+
+### 6. An arrow function inside a method
+
+```js
+const team = {
+    title: "Blue",
+    members: ["Asha", "Ravi"],
+    list() {
+        this.members.forEach((member) => {
+            console.log(member + " is in " + this.title);
+        });
+    },
+};
+
+team.list();
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+Asha is in Blue
+Ravi is in Blue
+```
+
+- The callback is now an arrow function. It has no `this`, so it uses the `this` of `list`, which is `team`.
+- This is the usual fix for puzzle 5. The old fix was `const self = this;` at the top of `list`, then `self.title` in the callback.
+
+</Accordion>
+</Accordions>
+
+### 7. setTimeout inside a method
+
+```js
+const timer = {
+    seconds: 3,
+    start() {
+        setTimeout(function () {
+            console.log("regular:", this.seconds);
+        }, 100);
+
+        setTimeout(() => {
+            console.log("arrow:", this.seconds);
+        }, 200);
+    },
+};
+
+timer.start();
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+regular: undefined
+arrow: 3
+```
+
+- `setTimeout` calls the regular function later, by itself, not as `timer.something()`. So its `this` is not `timer`. (In a browser it's the global object. In Node it's an internal timer object.) Neither has `seconds`.
+- The arrow function uses the `this` of `start`, which is `timer`.
+- The delays (100 and 200) are only there to fix the print order.
+
+</Accordion>
+</Accordions>
+
+### 8. Passing a method to setTimeout
+
+```js
+const player = {
+    score: 10,
+    showScore() {
+        console.log("score:", this.score);
+    },
+};
+
+setTimeout(player.showScore, 100);
+
+setTimeout(() => {
+    player.showScore();
+}, 200);
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+score: undefined
+score: 10
+```
+
+- `setTimeout(player.showScore, 100)` hands over only the function. When the timer fires, nobody calls it as `player.showScore()`, so `this` is lost.
+- The arrow wrapper calls `player.showScore()` with the dot, so `this` is `player`.
+- `setTimeout(player.showScore.bind(player), 100)` also works.
+
+</Accordion>
+</Accordions>
+
+### 9. call and apply
+
+```js
+function introduce(greeting, ending) {
+    console.log(greeting + ", I am " + this.firstName + ending);
+}
+
+const ravi = {
+    firstName: "Ravi",
+};
+
+introduce.call(ravi, "Hello", "!");
+introduce.apply(ravi, ["Hi", "."]);
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+Hello, I am Ravi!
+Hi, I am Ravi.
+```
+
+- Both run `introduce` right away, with `this` set to `ravi`.
+- `call` takes the other arguments one by one. `apply` takes them as one array. (Memory trick: **a**pply = **a**rray.)
+
+</Accordion>
+</Accordions>
+
+### 10. bind twice
+
+```js
+function showCity() {
+    console.log(this.city);
+}
+
+const pune = {
+    city: "Pune",
+};
+
+const delhi = {
+    city: "Delhi",
+};
+
+const boundToPune = showCity.bind(pune);
+const boundAgain = boundToPune.bind(delhi);
+
+boundToPune();
+boundAgain();
+boundToPune.call(delhi);
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+Pune
+Pune
+Pune
+```
+
+- `bind` returns a new function with `this` locked to `pune`.
+- Binding that function again can't unlock it. `boundAgain` still uses `pune`.
+- `call` can't change it either.
+- Only the **first** `bind` counts.
+
+</Accordion>
+</Accordions>
+
+### 11. A method that returns a function
+
+```js
+const shop = {
+    owner: "Meera",
+
+    getRegular() {
+        return function () {
+            return this.owner;
+        };
+    },
+
+    getArrow() {
+        return () => {
+            return this.owner;
+        };
+    },
+};
+
+const regular = shop.getRegular();
+const arrow = shop.getArrow();
+
+const otherShop = {
+    owner: "Kiran",
+};
+
+console.log(regular());
+console.log(arrow());
+console.log(regular.call(otherShop));
+console.log(arrow.call(otherShop));
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+undefined
+Meera
+Kiran
+Meera
+```
+
+| Call | What `this` is | Why | Prints |
+|---|---|---|---|
+| `regular()` | the global object | a plain call | `undefined` |
+| `arrow()` | `shop` | an arrow keeps the `this` of `getArrow`, which was called as `shop.getArrow()` | `Meera` |
+| `regular.call(otherShop)` | `otherShop` | `call` sets `this` | `Kiran` |
+| `arrow.call(otherShop)` | still `shop` | `call` can't change an arrow's `this` | `Meera` |
+
+</Accordion>
+</Accordions>
+
+### 12. A class method taken out
+
+```js
+class Person {
+    constructor(firstName) {
+        this.firstName = firstName;
+    }
+
+    greet() {
+        console.log("Hi, " + this.firstName);
+    }
+}
+
+const asha = new Person("Asha");
+asha.greet();
+
+const greet = asha.greet;
+greet();
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+Hi, Asha
+TypeError: Cannot read properties of undefined (reading 'firstName')
+```
+
+- `new Person("Asha")` makes a new object and sets `this` to it inside the constructor.
+- `asha.greet()` is a method call, so it works.
+- `greet()` is a plain call. Class code is **always** strict mode, so `this` is `undefined`, not the global object like in puzzle 1.
+- Reading `.firstName` of `undefined` throws.
+- Fix: `const greet = asha.greet.bind(asha);`, or call it with the dot.
+
+</Accordion>
+</Accordions>
+
+## In the interview
+
+Say the rule first: "I look at how the function is called, not where it's written." Then go call by call and name what `this` is each time.
+
+> "`user.greet()` has `user` before the dot, so `this` is `user`, and it prints Hi, Asha. But `const greet = user.greet` copies just the function. `greet()` is a plain call with nothing before the dot. In sloppy mode `this` is the global object, which has no `firstName`, so it prints Hi, undefined. In strict mode, or inside a class, `this` is `undefined`, so it would throw a TypeError instead."
+
+**Likely follow-up:** "How do you make the second call work?"
+
+**Answer:** "Three ways. Bind it: `const greet = user.greet.bind(user)`. Wrap it in an arrow: `const greet = () => user.greet()`. Or set `this` for one call: `greet.call(user)`. For callbacks like `setTimeout`, I usually use the arrow wrapper, because it's easy to read."
+
+<Callout title="Remember this" type="success">
+  - **Look at the call:** in `obj.fn()`, `this` is `obj`, the object right before the last dot.
+  - A **plain call** `fn()` has no object: `this` is `undefined` (strict) or the global object (sloppy).
+  - Passing `obj.fn` as a **callback** loses `this`. Wrap it in an arrow or use `bind`.
+  - **Arrow functions** take `this` from where they were written. `call`, `apply` and `bind` can't change it.
+  - `call(obj, a, b)` and `apply(obj, [a, b])` run now. `bind(obj)` returns a new function, and a second `bind` can't change its `this`.
+  - Class code is always **strict**, so a lost class method throws a TypeError.
+</Callout>

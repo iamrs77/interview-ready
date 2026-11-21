@@ -1,11 +1,119 @@
 ---
 title: "Value vs Reference"
-description: "Why changing a copy sometimes changes the original."
+description: "Why changing a copy sometimes changes the original: shallow and deep copies."
 icon: Copy
-planned: true
 ---
 
-- Primitives are copied, objects are shared
-- Shallow copy vs deep copy
-- Spread, Object.assign and structuredClone
-- Comparing objects
+## Why copying is tricky
+
+To understand copies, you need one idea first:
+
+- **Primitives** (numbers, strings, booleans) are copied **by value**. The new variable gets its own copy.
+- **Objects and arrays** are copied **by reference**. The new variable points to the **same** object.
+
+```js
+let a = 10;
+let b = a; // b gets its own copy of 10
+b = 20;
+console.log(a); // 10: a didn't change
+
+const array = [1, 2, 3];
+const sameArray = array; // NOT a copy: both names point to the same array
+sameArray.push(4);
+console.log(array); // [ 1, 2, 3, 4 ]: the original changed too
+```
+
+So to really copy an array or an object, you make a **shallow copy** or a **deep copy**.
+
+## Shallow copy
+
+A shallow copy copies **only the first level**. Nested objects and arrays are still **referenced**: the copy and the original share them.
+
+```js noRun
+const arrayCopy = [...array];
+```
+
+Here is what "only the first level" means:
+
+```js
+const array = [1, 2, [3, 4]];
+const arrayCopy = [...array];
+
+arrayCopy[0] = 100; // first level: only the copy changes
+arrayCopy[2].push(5); // nested array: shared, so both change
+
+console.log(array); // [ 1, 2, [ 3, 4, 5 ] ]
+console.log(arrayCopy); // [ 100, 2, [ 3, 4, 5 ] ]
+```
+
+For objects, a shallow copy is `{ ...object }`.
+
+## Deep copy
+
+A deep copy creates a **completely independent** clone, including all nested levels.
+
+```js noRun
+const arrayCopy = JSON.parse(JSON.stringify(array));
+```
+
+`JSON.stringify` turns the array into text. `JSON.parse` builds brand-new arrays and objects from that text, so nothing is shared.
+
+```js
+const array = [1, 2, [3, 4]];
+const arrayCopy = JSON.parse(JSON.stringify(array));
+
+arrayCopy[2].push(5);
+
+console.log(array); // [ 1, 2, [ 3, 4 ] ]: the original is safe
+console.log(arrayCopy); // [ 1, 2, [ 3, 4, 5 ] ]
+```
+
+### The catch with JSON
+
+The JSON way only works for **plain data**: numbers, strings, booleans, `null`, arrays and plain objects. Anything else is changed or lost:
+
+```js
+const original = {
+    date: new Date("2026-01-01"),
+    greet: function () {},
+    nothing: undefined,
+    tags: new Set(["a", "b"]),
+};
+
+const copy = JSON.parse(JSON.stringify(original));
+console.log(copy); // { date: '2026-01-01T00:00:00.000Z', tags: {} }
+```
+
+- A **Date** becomes a string.
+- **Functions** and **`undefined`** are dropped.
+- A **Set** or a **Map** becomes an empty object `{}`.
+- An object that refers to **itself** throws a `TypeError`.
+
+### structuredClone: the modern way
+
+`structuredClone` is built into browsers and Node.js. It makes a real deep copy, and it keeps Dates, Maps and Sets:
+
+```js
+const original = {
+    date: new Date("2026-01-01"),
+    tags: new Set(["a", "b"]),
+    nested: { count: 1 },
+};
+
+const copy = structuredClone(original);
+copy.nested.count = 99;
+
+console.log(copy.date instanceof Date); // true
+console.log(copy.tags); // Set(2) { 'a', 'b' }
+console.log(original.nested.count); // 1: the original is safe
+```
+
+One limit: it can't copy **functions**. An object with a function in it throws an error.
+
+<Callout title="Remember this" type="success">
+  - **Primitives** are copied by value. **Objects and arrays** are copied by **reference**: `const b = a` shares the same object.
+  - **Shallow copy** (`[...array]`, `{ ...object }`): only the first level is copied. Nested objects are **shared**.
+  - **Deep copy**: every level is copied, so nothing is shared.
+  - `JSON.parse(JSON.stringify(x))` works only for **plain data**. Dates become strings, functions and `undefined` are dropped, Maps and Sets become `{}`.
+  - **`structuredClone(x)`** is the modern deep copy. It keeps Dates, Maps and Sets, but can't copy functions.
+</Callout>

@@ -1,12 +1,515 @@
 ---
 title: "Control Flow and Loops"
-description: "if/else, switch, and every kind of loop."
+description: "if/else, switch, and every kind of loop: for, while, do...while, for...of and for...in."
 icon: GitBranch
-planned: true
 ---
 
-- if / else if / else
-- switch: strict comparison and fall-through
-- for, while and do...while
-- break, continue and labels
-- for...in vs for...of
+## The idea
+
+Code normally runs from top to bottom, one line after another. **Control flow** changes that order. **Conditions** (`if`, `switch`) choose which code runs, and **loops** (`for`, `while`) run the same code again and again.
+
+Think of a **recipe**. "If the dough is sticky, add flour" is a condition. "Stir until smooth" is a loop: you don't know in advance how many stirs it takes. "Add 3 eggs, one at a time" is a counting loop.
+
+## Conditions
+
+### if / else if / else
+
+```js
+function getGrade(score) {
+    if (score >= 90) {
+        return "A";
+    } else if (score >= 75) {
+        return "B";
+    } else if (score >= 50) {
+        return "C";
+    } else {
+        return "Fail";
+    }
+}
+
+console.log(getGrade(95)); // A
+console.log(getGrade(80)); // B
+console.log(getGrade(30)); // Fail
+```
+
+- JavaScript checks the conditions **from top to bottom** and runs only the **first** one that's true. The rest are skipped.
+- So the order matters. If `score >= 50` came first, a score of 95 would get a "C".
+- The condition doesn't have to be a boolean. It's converted using the truthy and falsy rules (see [Types and Coercion](./types-and-coercion.mdx)).
+
+### Early return
+
+Inside a function, you can often drop the `else`. `return` ends the function, so the code after it only runs when the condition was false. Checks like this at the top of a function are called **guard clauses**.
+
+```js
+function getDiscount(user) {
+    if (!user) {
+        return 0;
+    }
+
+    if (user.isMember) {
+        return 20;
+    }
+
+    return 5;
+}
+
+console.log(getDiscount(null)); // 0
+console.log(getDiscount({ isMember: true })); // 20
+console.log(getDiscount({ isMember: false })); // 5
+```
+
+### Always use braces
+
+Without `{ }`, only the **first** line after the `if` belongs to it, whatever the indentation says:
+
+```js
+const isLoggedIn = false;
+
+if (isLoggedIn)
+    console.log("Welcome back");
+    console.log("Loading your orders");
+
+// Prints:
+// Loading your orders
+```
+
+The second line looks like it's inside the `if`, but it runs every time.
+
+## switch
+
+### switch uses strict comparison
+
+`switch` compares one value against a list of `case` values. It's tidier than a long `if / else if` chain when you check one variable against fixed values. `break` ends the `switch`, and `default` runs when no case matches.
+
+```js
+const role = "editor";
+
+switch (role) {
+    case "admin":
+        console.log("Full access");
+        break;
+    case "editor":
+        console.log("Can edit posts");
+        break;
+    default:
+        console.log("Read only");
+}
+// Prints:
+// Can edit posts
+```
+
+`switch` compares with **`===`**. There's no type conversion, so a string never matches a number:
+
+```js
+const input = "1";
+
+switch (input) {
+    case 1:
+        console.log("number one");
+        break;
+    default:
+        console.log("no match");
+}
+// Prints:
+// no match
+```
+
+This bites when the value comes from a form or a URL, because those are always strings. Convert first: `switch (Number(input))`.
+
+### Fall-through
+
+Without `break`, JavaScript doesn't stop at the end of the matching case. It **falls through** and runs the code of the next cases too, until it reaches a `break` or the end of the `switch`.
+
+```js
+const level = 1;
+
+switch (level) {
+    case 1:
+        console.log("Level 1 reward");
+    case 2:
+        console.log("Level 2 reward");
+    case 3:
+        console.log("Level 3 reward");
+        break;
+    case 4:
+        console.log("Level 4 reward");
+}
+// Prints:
+// Level 1 reward
+// Level 2 reward
+// Level 3 reward
+```
+
+`case 2` and `case 3` are not checked again. Once a case matches, the code just keeps running downward until the `break`.
+
+Fall-through is useful on purpose when several cases share the same code:
+
+```js
+function getDayType(day) {
+    switch (day) {
+        case "Saturday":
+        case "Sunday":
+            return "weekend";
+        default:
+            return "weekday";
+    }
+}
+
+console.log(getDayType("Sunday")); // weekend
+console.log(getDayType("Tuesday")); // weekday
+```
+
+`return` leaves the whole function, so no `break` is needed after it.
+
+### let and const inside a case
+
+All the cases of a `switch` share **one** block. So two cases can't both declare a `let` with the same name:
+
+```js noRun
+switch (action) {
+    case "add":
+        let message = "Added";
+        break;
+    case "remove":
+        let message = "Removed"; // SyntaxError: Identifier 'message' has already been declared
+        break;
+}
+```
+
+The fix is to give each case its own block with braces: `case "add": { let message = "Added"; break; }`.
+
+## Loops
+
+### for
+
+The classic counting loop. Its brackets hold three parts, separated by semicolons: where to **start**, the **condition** to keep going, and the **update** after each round.
+
+```js
+for (let i = 0; i < 3; i++) {
+    console.log("Round", i);
+}
+// Prints:
+// Round 0
+// Round 1
+// Round 2
+```
+
+| Round | `i` | `i < 3`? | What happens |
+| --- | --- | --- | --- |
+| before the loop | 0 | | the start part `let i = 0` runs once |
+| 1 | 0 | yes | prints "Round 0", then `i++` |
+| 2 | 1 | yes | prints "Round 1", then `i++` |
+| 3 | 2 | yes | prints "Round 2", then `i++` |
+| - | 3 | **no** | the loop stops |
+
+Use `for` when you need the **index**, or want to count in steps or backwards:
+
+```js
+const scores = [40, 75, 90];
+
+// Start at the last index and go down to 0.
+for (let i = scores.length - 1; i >= 0; i--) {
+    console.log(scores[i]);
+}
+// Prints:
+// 90
+// 75
+// 40
+```
+
+### while
+
+`while` repeats as long as its condition is true. Use it when you don't know in advance how many rounds you need.
+
+```js
+let balance = 100;
+let months = 0;
+
+// Spend 30 a month while there's enough money.
+while (balance >= 30) {
+    balance -= 30;
+    months++;
+}
+
+console.log(months); // 3
+console.log(balance); // 10
+```
+
+Something inside the loop must change the condition. If `balance` never went down, the loop would run forever and the program would freeze.
+
+### do...while
+
+`do...while` checks the condition **after** each round, so the body always runs **at least once**:
+
+```js
+let attempts = 0;
+
+do {
+    attempts++;
+    console.log("Attempt", attempts);
+} while (attempts < 0);
+// Prints:
+// Attempt 1
+```
+
+`attempts < 0` is false from the start, but the body still ran once. A `while` loop with the same condition would run zero times. It fits "do it once, then repeat if needed": show a menu, then show it again only if the choice was invalid.
+
+### Which loop to pick
+
+| Loop | Checks the condition | Can run zero times? | Use it for |
+| --- | --- | --- | --- |
+| `for` | before each round | yes | counting, working with indexes |
+| `while` | before each round | yes | an unknown number of rounds |
+| `do...while` | after each round | **no**, at least once | "do it once, then maybe again" |
+| `for...of` | - | yes | the values of an array, string, Map or Set |
+| `for...in` | - | yes | the keys of an object |
+
+## break, continue and labels
+
+### break and continue
+
+- **`break`** stops the whole loop.
+- **`continue`** skips the rest of this round and moves to the next one.
+
+```js
+const numbers = [3, -1, 8, 0, 5];
+
+for (let i = 0; i < numbers.length; i++) {
+    const number = numbers[i];
+
+    // Skip negative numbers.
+    if (number < 0) {
+        continue;
+    }
+
+    // Stop completely at the first zero.
+    if (number === 0) {
+        break;
+    }
+
+    console.log(number);
+}
+// Prints:
+// 3
+// 8
+```
+
+The loop never reaches `5`, because `break` stopped it at `0`.
+
+### Labels: breaking out of nested loops
+
+A plain `break` only stops the **innermost** loop. To stop an outer loop from inside an inner one, give the outer loop a **label** (a name followed by a colon) and `break` that label.
+
+```js
+const grid = [
+    [1, 2, 3],
+    [4, 5, 6],
+    [7, 8, 9],
+];
+
+outer: for (let row = 0; row < grid.length; row++) {
+    for (let col = 0; col < grid[row].length; col++) {
+        if (grid[row][col] === 5) {
+            console.log("Found 5 at row", row, "column", col);
+
+            // Stop BOTH loops, not just the inner one.
+            break outer;
+        }
+    }
+}
+// Prints:
+// Found 5 at row 1 column 1
+```
+
+`continue outer` also works: it jumps to the next round of the outer loop. Labels are rare in everyday code, because moving the loops into a function and using `return` is usually clearer. They do come up in interviews.
+
+### forEach can't break
+
+`break` and `continue` don't work inside `array.forEach(...)`. The callback is a separate function, not a loop body. A `return` inside it only ends that one call, so it acts like `continue`. To stop early, use a `for` or `for...of` loop, or a method like `find` or `some` (see [Array Methods](../objects-arrays/array-methods.mdx)).
+
+## for...in vs for...of
+
+### for...of gives the values
+
+`for...of` loops over the **values** of anything **iterable** (anything that can be stepped through one item at a time): arrays, strings, Maps and Sets. It's the cleanest loop when you don't need the index.
+
+```js
+const fruits = ["apple", "mango", "kiwi"];
+
+for (const fruit of fruits) {
+    console.log(fruit);
+}
+// Prints:
+// apple
+// mango
+// kiwi
+```
+
+`const` is fine here: each round gets a fresh `fruit` variable. A string gives its letters:
+
+```js
+for (const letter of "hey") {
+    console.log(letter);
+}
+// Prints:
+// h
+// e
+// y
+```
+
+If you also need the index, use `entries()`:
+
+```js
+const fruits = ["apple", "mango"];
+
+// entries() gives [index, value] pairs. [index, fruit] unpacks each pair.
+for (const [index, fruit] of fruits.entries()) {
+    console.log(index, fruit);
+}
+// Prints:
+// 0 apple
+// 1 mango
+```
+
+Plain objects are **not** iterable, so `for...of` on one throws:
+
+```js
+const person = { name: "Asha", age: 30 };
+
+for (const value of person) {
+    console.log(value);
+}
+// TypeError: person is not iterable
+```
+
+To loop over an object with `for...of`, turn it into an array first with `Object.keys`, `Object.values` or `Object.entries`:
+
+```js
+const person = { name: "Asha", age: 30 };
+
+for (const [key, value] of Object.entries(person)) {
+    console.log(key, value);
+}
+// Prints:
+// name Asha
+// age 30
+```
+
+### for...in gives the keys
+
+`for...in` loops over the **keys** (the property names) of an object:
+
+```js
+const person = { name: "Asha", age: 30 };
+
+for (const key in person) {
+    console.log(key, person[key]);
+}
+// Prints:
+// name Asha
+// age 30
+```
+
+### Why not for...in on arrays
+
+On an array, `for...in` gives the **indexes as strings**, not the values. It also picks up any extra property someone added to the array:
+
+```js
+const colors = ["red", "green"];
+colors.extra = "oops";
+
+for (const key in colors) {
+    console.log(key, typeof key);
+}
+// Prints:
+// 0 string
+// 1 string
+// extra string
+```
+
+`for...in` also visits keys **inherited** from a parent object (its prototype, see [Prototypes](../oop/prototypes.mdx)):
+
+```js
+const animal = { eats: true };
+
+// dog's parent object is animal.
+const dog = Object.create(animal);
+dog.barks = true;
+
+for (const key in dog) {
+    console.log(key);
+}
+// Prints:
+// barks
+// eats
+
+// Object.keys gives only dog's own keys.
+console.log(Object.keys(dog)); // [ 'barks' ]
+```
+
+| | `for...of` | `for...in` |
+| --- | --- | --- |
+| Gives you | the **values** | the **keys**, as strings |
+| Works on | iterables: arrays, strings, Map, Set | any object |
+| Plain objects | no: TypeError | yes |
+| Arrays | yes, use this | avoid: string indexes, extra keys |
+| Inherited keys | no | yes |
+
+An easy way to remember: **"of" gives values, "in" gives keys**. It's like the `in` operator, `"name" in person`, which also checks keys.
+
+## In the real world
+
+- In 2014, Apple shipped a security bug ("goto fail") in its SSL code, written in C. A line was accidentally duplicated under an `if` with no braces, so the second copy always ran and skipped a key security check. The same thing can happen in JavaScript: always use braces.
+- ESLint's **`no-fallthrough`** rule flags a `case` with no `break`, and **`no-case-declarations`** flags a `let` or `const` directly inside a `case`.
+
+## Common mistakes
+
+- **Switching on a string with number cases.** `switch` uses `===`: `"1"` never matches `case 1`.
+- **Forgetting `break`.** The next cases run too.
+- **Off by one:** `i <= array.length` goes one step past the end and reads `undefined`. Use `i < array.length`.
+- **A `while` loop whose condition never changes.** It runs forever.
+- **`for...in` on an array.** You get string indexes and extra keys. Use `for...of`.
+- **`for...of` on a plain object.** It throws "is not iterable". Use `Object.entries`.
+- **`break` inside `forEach`.** It doesn't work. Use a `for...of` loop.
+
+## In the interview
+
+> "`for...of` gives the values of an iterable, like an array, a string, a Map or a Set. `for...in` gives the keys of an object as strings, including inherited ones. So I use `for...of` for arrays, and `Object.keys` or `Object.entries` with `for...of` for objects. `switch` compares with strict equality, and without `break` it falls through into the next case."
+
+**Likely follow-up:** "How would you replace a long `switch`?"
+
+**Answer:** "With an object used as a lookup table. The keys are the cases and the values are the results. It's shorter, and adding a case is one line."
+
+```js
+const discountByCode = {
+    SAVE10: 10,
+    SAVE20: 20,
+    WELCOME: 15,
+};
+
+function getDiscount(code) {
+    // hasOwn checks only the object's own keys,
+    // so an inherited name like "toString" doesn't match.
+    if (Object.hasOwn(discountByCode, code)) {
+        return discountByCode[code];
+    }
+
+    return 0;
+}
+
+console.log(getDiscount("SAVE20")); // 20
+console.log(getDiscount("BOGUS")); // 0
+```
+
+**Likely follow-up:** "When would you use `do...while`?"
+
+**Answer:** "When the body must run at least once before the condition makes sense, like showing a menu and repeating only if the choice was invalid, or making a request and retrying while it fails. A normal `while` checks first, so it can run zero times."
+
+<Callout title="Remember this" type="success">
+  - **`if / else if`** runs only the **first** true branch. Always use braces.
+  - **`switch`** compares with **`===`**. Without `break`, it **falls through** into the next cases.
+  - **`for`** for counting, **`while`** for an unknown number of rounds, **`do...while`** runs **at least once**.
+  - **`break`** stops the loop, **`continue`** skips to the next round. A **label** lets `break` stop an outer loop.
+  - **`for...of`** gives **values** (arrays, strings, Map, Set). **`for...in`** gives **keys** as strings, including inherited ones.
+  - `forEach` can't `break`, and `for...of` on a plain object throws: use `Object.entries`.
+</Callout>

@@ -1,11 +1,391 @@
 ---
 title: "call, apply and bind Polyfills"
-description: "Write your own call, apply and bind."
+description: "Write your own call, apply and bind, including partial arguments and bind with new."
 icon: Phone
-planned: true
 ---
 
-- myCall and myApply
-- myBind with partial arguments
-- bind with new
-- Edge cases
+## The idea
+
+`call`, `apply` and `bind` let you choose what `this` is inside a function (see [call, apply and bind](../functions/call-apply-bind.mdx) for how to use them). "Write your own `call`" is a common interview question, because the answer shows you really understand `this`.
+
+The whole trick rests on one rule: when you call `object.method()`, **`this` is the object before the dot**. So to run a function with `this` set to `asha`, you put the function on `asha` for a moment, call `asha.tempFunction()`, and then take it off again. It's like inviting a guest speaker into your house: while they speak there, "this house" means your house. Then they leave.
+
+## How the real methods behave
+
+```js
+function greet(greeting, punctuation) {
+    return greeting + ", " + this.name + punctuation;
+}
+
+const asha = { name: "Asha" };
+
+// call: arguments one by one, runs now.
+console.log(greet.call(asha, "Hello", "!")); // Hello, Asha!
+
+// apply: arguments in one array, runs now.
+console.log(greet.apply(asha, ["Hi", "?"])); // Hi, Asha?
+
+// bind: runs later. "Hey" is saved now, "." comes later.
+const greetAsha = greet.bind(asha, "Hey");
+console.log(greetAsha(".")); // Hey, Asha.
+```
+
+All three live on `Function.prototype`, so every function has them. Your versions go there too. Inside them, **`this` is the function** you called them on: in `greet.myCall(...)`, `this` is `greet`.
+
+## Building them
+
+### myCall and myApply
+
+#### myCall
+
+**The task:** write `myCall(context, ...args)`. It runs the function now, with `this` set to `context` and the other arguments passed on.
+
+**Step 1: the simple version.** Put the function on the object, call it through the object, remove it, and return the result.
+
+```js
+Function.prototype.myCall = function (context, ...args) {
+    // `this` is the function, for example greet.
+    context.tempFunction = this;
+
+    // Called as context.tempFunction(), so `this` inside it is context.
+    const result = context.tempFunction(...args);
+
+    delete context.tempFunction;
+    return result;
+};
+
+function greet(greeting) {
+    return greeting + ", " + this.name;
+}
+
+console.log(greet.myCall({ name: "Asha" }, "Hello")); // Hello, Asha
+```
+
+That is the core idea. Now the details the real `call` has:
+
+- **A name clash.** If the object already has a property called `tempFunction`, we overwrite it, then delete it. A **Symbol** fixes this. A Symbol is a key that is **unique**, so it can never clash with a real property.
+- **`null` or `undefined` as the context.** The real `call` then uses the global object (in non-strict code). Our version would crash on `null.tempFunction`.
+- **A primitive as the context**, like `"hi"` or `5`. You can't keep a property on a primitive, so wrap it in an object first with `Object(context)`.
+- **Not a function.** If `this` isn't a function, throw a `TypeError`.
+
+**Step 2: the full version.**
+
+```js
+Function.prototype.myCall = function (context, ...args) {
+    if (typeof this !== "function") {
+        throw new TypeError("myCall must be called on a function");
+    }
+
+    // null or undefined means "the global object", in non-strict code.
+    if (context === null || context === undefined) {
+        context = globalThis;
+    }
+
+    // A primitive like "hi" can't hold a property, so wrap it in an object.
+    context = Object(context);
+
+    // A unique key: it can't overwrite a property the object already has.
+    const key = Symbol("tempFunction");
+
+    context[key] = this;
+    const result = context[key](...args);
+    delete context[key];
+
+    return result;
+};
+
+function whoIsThis() {
+    return this;
+}
+
+const asha = { name: "Asha", tempFunction: "keep me" };
+
+console.log(whoIsThis.myCall(asha).name); // Asha
+console.log(Object.keys(asha)); // [ 'name', 'tempFunction' ]
+console.log(whoIsThis.myCall(null) === globalThis); // true
+console.log(typeof whoIsThis.myCall("hi")); // object
+```
+
+`Object.keys` shows that no extra key was left behind, and the real `tempFunction` property is safe. The last line prints `object`, not `string`: the primitive `"hi"` was wrapped in an object.
+
+#### myApply
+
+**The task:** write `myApply(context, argsArray)`. It's the same as `myCall`, but the arguments come in **one array**. If the array is `null` or `undefined`, the function gets no arguments.
+
+**Build it:** the same steps as `myCall`. The only new part: turn `argsArray` into a list of arguments. `Array.from` also handles "array-like" values, like the `arguments` object.
+
+```js
+Function.prototype.myApply = function (context, argsArray) {
+    if (typeof this !== "function") {
+        throw new TypeError("myApply must be called on a function");
+    }
+
+    if (context === null || context === undefined) {
+        context = globalThis;
+    }
+
+    context = Object(context);
+
+    // No array means no arguments.
+    let args = [];
+    if (argsArray !== null && argsArray !== undefined) {
+        args = Array.from(argsArray);
+    }
+
+    const key = Symbol("tempFunction");
+    context[key] = this;
+    const result = context[key](...args);
+    delete context[key];
+
+    return result;
+};
+
+function greet(greeting, punctuation) {
+    return greeting + ", " + this.name + punctuation;
+}
+
+console.log(greet.myApply({ name: "Asha" }, ["Hi", "!"])); // Hi, Asha!
+console.log(Math.max.myApply(null, [4, 9, 2])); // 9
+```
+
+`Math.max.apply(null, numbers)` is the classic use of `apply`: it was how you passed an array to a function that wants separate arguments, before the spread operator (`Math.max(...numbers)`) existed.
+
+### myBind with partial arguments
+
+**The task:** write `myBind(context, ...boundArgs)`. It doesn't run the function. It returns a **new function** that, when called, runs the original with `this` set to `context`.
+
+`bind` also takes **partial arguments**: arguments you give now are saved and go **first**. Arguments given later go after them. This is called **partial application**.
+
+**Build it:**
+
+1. Save the original function (`this`) in a variable. Inside the new function, `this` will be something else.
+2. Return a new function that takes the later arguments.
+3. Inside it, join the saved arguments and the later ones.
+4. Run the original with `apply`, and return its result.
+
+```js
+Function.prototype.myBind = function (context, ...boundArgs) {
+    const originalFunction = this;
+
+    return function (...laterArgs) {
+        // Saved arguments first, then the new ones.
+        const allArgs = boundArgs.concat(laterArgs);
+
+        return originalFunction.apply(context, allArgs);
+    };
+};
+
+function greet(greeting, punctuation) {
+    return greeting + ", " + this.name + punctuation;
+}
+
+const asha = { name: "Asha" };
+
+const greetAsha = greet.myBind(asha);
+console.log(greetAsha("Hello", "!")); // Hello, Asha!
+
+// Partial: "Hi" is saved now, the punctuation comes later.
+const sayHi = greet.myBind(asha, "Hi");
+console.log(sayHi("?")); // Hi, Asha?
+```
+
+Using the real `apply` inside `myBind` is fine in an interview. You can also use your own `myApply`.
+
+Partial application works even when the function doesn't use `this` at all. Pass `null` as the context:
+
+```js
+Function.prototype.myBind = function (context, ...boundArgs) {
+    const originalFunction = this;
+
+    return function (...laterArgs) {
+        const allArgs = boundArgs.concat(laterArgs);
+        return originalFunction.apply(context, allArgs);
+    };
+};
+
+function multiply(first, second) {
+    return first * second;
+}
+
+const double = multiply.myBind(null, 2);
+const triple = multiply.myBind(null, 3);
+
+console.log(double(5)); // 10
+console.log(triple(5)); // 15
+```
+
+### bind with new
+
+A bound function can also be called with `new`. Then the real `bind` **ignores** the saved `this` and makes a brand new object, as `new` always does. The saved arguments are still used.
+
+```js
+function Person(name, city) {
+    this.name = name;
+    this.city = city;
+}
+
+// "Asha" is saved. The context { team: "x" } will be ignored by new.
+const MakeAsha = Person.bind({ team: "x" }, "Asha");
+const person = new MakeAsha("Delhi");
+
+console.log(person); // Person { name: 'Asha', city: 'Delhi' }
+console.log(person instanceof Person); // true
+```
+
+Our simple `myBind` gets this wrong. It always runs the original with the saved context, so the names land on `{ team: "x" }`, and `new` hands back an empty object:
+
+```js
+Function.prototype.myBind = function (context, ...boundArgs) {
+    const originalFunction = this;
+
+    return function (...laterArgs) {
+        const allArgs = boundArgs.concat(laterArgs);
+        return originalFunction.apply(context, allArgs);
+    };
+};
+
+function Person(name, city) {
+    this.name = name;
+    this.city = city;
+}
+
+const team = { team: "x" };
+const MakeAsha = Person.myBind(team, "Asha");
+const person = new MakeAsha("Delhi");
+
+console.log(person.name); // undefined
+console.log(team); // { team: 'x', name: 'Asha', city: 'Delhi' }
+```
+
+**The fix:**
+
+1. Give the new function a name, `boundFunction`, so we can check against it.
+2. When it's called with `new`, `this` is a fresh object made from `boundFunction`. So `this instanceof boundFunction` is `true`. In that case, use `this` instead of the saved context.
+3. Link `boundFunction.prototype` to the original's prototype, so the new object counts as a `Person` and gets `Person`'s methods.
+
+```js
+Function.prototype.myBind = function (context, ...boundArgs) {
+    const originalFunction = this;
+
+    function boundFunction(...laterArgs) {
+        const allArgs = boundArgs.concat(laterArgs);
+
+        // With new, `this` is the fresh object: use it, ignore the context.
+        if (this instanceof boundFunction) {
+            return originalFunction.apply(this, allArgs);
+        }
+
+        return originalFunction.apply(context, allArgs);
+    }
+
+    // Arrow functions have no prototype, so check first.
+    if (originalFunction.prototype) {
+        boundFunction.prototype = Object.create(originalFunction.prototype);
+    }
+
+    return boundFunction;
+};
+```
+
+`Object.create(proto)` makes an empty object whose prototype is `proto`. So an object made by `new boundFunction()` looks things up in `boundFunction.prototype`, and from there in `Person.prototype`. See [Prototypes](../oop/prototypes.mdx).
+
+The same tests as above, now with the fix:
+
+```js
+Function.prototype.myBind = function (context, ...boundArgs) {
+    const originalFunction = this;
+
+    function boundFunction(...laterArgs) {
+        const allArgs = boundArgs.concat(laterArgs);
+
+        if (this instanceof boundFunction) {
+            return originalFunction.apply(this, allArgs);
+        }
+
+        return originalFunction.apply(context, allArgs);
+    }
+
+    if (originalFunction.prototype) {
+        boundFunction.prototype = Object.create(originalFunction.prototype);
+    }
+
+    return boundFunction;
+};
+
+function Person(name, city) {
+    this.name = name;
+    this.city = city;
+}
+
+const team = { team: "x" };
+const MakeAsha = Person.myBind(team, "Asha");
+const person = new MakeAsha("Delhi");
+
+console.log(person); // Person { name: 'Asha', city: 'Delhi' }
+console.log(person instanceof Person); // true
+console.log(team); // { team: 'x' }
+```
+
+### Edge cases
+
+What interviewers check, and what the real methods do:
+
+| Case | What should happen |
+| --- | --- |
+| `context` is `null` or `undefined` | `this` is the global object (in non-strict code) |
+| `context` is a primitive, like `"hi"` | it is wrapped in an object (in non-strict code) |
+| the object already has your temp key | it must not be touched: use a **Symbol** |
+| the function returns a value | `myCall` and `myApply` must **return** it |
+| `apply` gets `null` instead of an array | the function runs with no arguments |
+| called on something that isn't a function | throw a `TypeError` |
+| a bound function is called with `call` or `bind` again | the **first** bound `this` still wins |
+| a bound function is called with `new` | the bound `this` is ignored. A new object is made |
+| the function is an arrow function | `this` can't be changed at all. Arrows keep the `this` from where they were written |
+
+The "first `this` wins" rule, shown with the real `bind`:
+
+```js
+function getName() {
+    return this.name;
+}
+
+const boundToAsha = getName.bind({ name: "Asha" });
+
+console.log(boundToAsha.call({ name: "Ravi" })); // Asha
+console.log(boundToAsha.bind({ name: "Ravi" })()); // Asha
+```
+
+The bound function never looks at its own `this`. It always uses the one it saved. Your `myBind` behaves the same way, because the inner function only ever uses `context`.
+
+One thing a polyfill can't fully copy: when the **called function** is in **strict mode** (all class code and ES modules are strict), the real `call` passes `null` or a primitive through **as it is**, without turning it into the global object or an object wrapper. Interviewers don't expect you to handle this. It's enough to mention it.
+
+## Common mistakes
+
+- **Writing the polyfill as an arrow function.** Then `this` isn't the function you called it on.
+- **Forgetting to return the result** in `myCall` or `myApply`.
+- **Using a plain key** like `context.fn`. It can overwrite and then delete a real property. Use a Symbol.
+- **Crashing on `null`**, or on a primitive context. Handle both before adding the key.
+- **In `myBind`, using `this` inside the returned function** instead of a saved `originalFunction`. By then, `this` is something else.
+- **Putting the later arguments first.** The arguments saved by `bind` always go first.
+- **Forgetting the `new` case** in `myBind`, if the interviewer asks for it.
+
+## In the interview
+
+> "`this` is the object before the dot. So in `myCall`, I put the function on the context object under a Symbol key, so it can't clash with a real property. Then I call it as `context[key](...args)`, delete the key, and return the result. If the context is `null` or `undefined` I use `globalThis`, and I wrap primitives with `Object()`. `myApply` is the same, but the arguments come as one array. `myBind` saves the function and the first arguments, and returns a new function that joins the saved arguments with the new ones and runs the original with `apply`."
+
+**Likely follow-up:** "What happens if you call a bound function with `new`?"
+
+**Answer:** "`new` wins over `bind`. The bound `this` is ignored, a new object is created, and the saved arguments are still passed. In my polyfill I check `this instanceof boundFunction` to spot the `new` call, use that new object as `this`, and set `boundFunction.prototype` to `Object.create(originalFunction.prototype)`, so `instanceof` and the methods still work."
+
+**Likely follow-up:** "Why a Symbol and not a normal key like `fn`?"
+
+**Answer:** "A Symbol is always unique. If the object already had an `fn` property, a normal key would overwrite it, and then my `delete` would remove it for good. A Symbol can't clash with anything, and it doesn't show up in `Object.keys` either."
+
+<Callout title="Remember this" type="success">
+  - The trick: **`this` is the object before the dot**. Put the function on the context, call it, delete it, return the result.
+  - Use a **Symbol** key. Use `globalThis` for `null` or `undefined`. Wrap primitives with `Object()`.
+  - **myApply** = myCall with **one array** of arguments (`null` means no arguments).
+  - **myBind** saves the function and the first arguments, and returns a function that runs `apply` with **saved arguments first**.
+  - With **`new`**, a bound function ignores its `this`: check `this instanceof boundFunction` and link the prototype.
+  - Once bound, `this` can't be changed again, not even by `call` or another `bind`.
+</Callout>

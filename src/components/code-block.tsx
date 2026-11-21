@@ -8,8 +8,8 @@ import { runInPlayground } from '@/components/js-playground';
 import { hasPlaygroundAt } from '@/lib/playground';
 
 /*
- * Lesson code blocks. On tracks with the JS playground (LLD and DSA), JavaScript blocks get a "Run"
- * button: one click puts the block's code in the playground, opens it and runs it.
+ * Lesson code blocks. On tracks with the JS playground, JavaScript blocks get a "Run" button: one click
+ * puts the block's code in the playground, opens it and runs it. A block marked ```js noRun gets none.
  * Other blocks look exactly like Fumadocs' normal code block.
  */
 
@@ -54,10 +54,10 @@ function RunActions({ className, children }: { className?: string; children?: Re
   );
 }
 
-export function LessonCodeBlock(props: ComponentProps<'pre'> & { 'data-language'?: string }) {
+export function LessonCodeBlock(props: ComponentProps<'pre'> & { 'data-language'?: string; 'data-no-run'?: string }) {
   const pathname = usePathname();
   const language = props['data-language'] ?? '';
-  const runnable = RUNNABLE_LANGUAGES.includes(language) && hasPlaygroundAt(pathname);
+  const runnable = RUNNABLE_LANGUAGES.includes(language) && !props['data-no-run'] && hasPlaygroundAt(pathname);
 
   return (
     <CodeBlock {...(props as ComponentProps<typeof CodeBlock>)} Actions={runnable ? RunActions : undefined}>

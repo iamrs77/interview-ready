@@ -1,11 +1,501 @@
 ---
 title: "Output: Event Loop"
-description: "Put the logs in the right order."
+description: "Put the logs in the right order: sync code, promises, async/await and setTimeout."
 icon: RefreshCcw
-planned: true
 ---
 
-- setTimeout vs promises
-- async/await order
-- Nested microtasks
-- Mixed puzzles
+## How to solve these
+
+Sort every line into one of three groups. Then print the groups in this order:
+
+1. **Sync code first**, top to bottom. This includes the body of `new Promise(...)`, and an `async` function up to its first `await`.
+2. **Then all the microtasks**: `.then`, `.catch` and `.finally` callbacks, the code after an `await`, and `queueMicrotask`. They run in the order they were queued. If a microtask queues another microtask, that one runs too, before any timer.
+3. **Then one timer** (a macrotask): a `setTimeout` callback. The timer that is due first goes first. For timers set at about the same time, that's the shortest delay. Equal delays go in the order they were set. After **each** timer callback, empty the microtasks again.
+4. **A `.then` is queued only when the step before it finishes.** So two promise chains take turns: A1, B1, A2, B2.
+
+See [The Event Loop](../async/event-loop.mdx) and [async and await](../async/async-await.mdx).
+
+## The puzzles
+
+### 1. setTimeout with 0
+
+```js
+console.log("A");
+
+setTimeout(() => {
+    console.log("B");
+}, 0);
+
+console.log("C");
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+A
+C
+B
+```
+
+- **Sync:** `A`, then `C`. `setTimeout` only schedules its callback for later.
+- **Timers:** `B`.
+- A delay of `0` means "after the sync code is done", not "right now".
+
+</Accordion>
+</Accordions>
+
+### 2. A promise vs setTimeout
+
+```js
+console.log("start");
+
+setTimeout(() => {
+    console.log("timeout");
+}, 0);
+
+Promise.resolve().then(() => {
+    console.log("promise");
+});
+
+console.log("end");
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+start
+end
+promise
+timeout
+```
+
+- **Sync:** `start`, `end`. The `.then` callback goes to the microtask queue. The timer callback goes to the timer queue.
+- **Microtasks:** `promise`.
+- **Timers:** `timeout`.
+- Microtasks always run before the next timer, even a 0 ms timer that was set earlier.
+
+</Accordion>
+</Accordions>
+
+### 3. The promise body runs right away
+
+```js
+console.log("1");
+
+const promise = new Promise((resolve) => {
+    console.log("2");
+    resolve();
+    console.log("3");
+});
+
+promise.then(() => {
+    console.log("4");
+});
+
+console.log("5");
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+1
+2
+3
+5
+4
+```
+
+- The function you pass to `new Promise` runs **immediately**, as normal sync code. So `2` and `3` print right away.
+- `resolve()` doesn't stop the function. It only marks the promise as done, so `3` still prints.
+- The `.then` callback still waits for all the sync code to finish.
+- **Sync:** `1`, `2`, `3`, `5`. **Microtasks:** `4`.
+
+</Accordion>
+</Accordions>
+
+### 4. Three timers
+
+```js
+setTimeout(() => {
+    console.log("slow");
+}, 100);
+
+setTimeout(() => {
+    console.log("fast");
+}, 0);
+
+setTimeout(() => {
+    console.log("medium");
+}, 50);
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+fast
+medium
+slow
+```
+
+- All three are timers, so only the delay matters. Shortest first: 0, then 50, then 100.
+- The order in the code only matters when two delays are equal.
+
+</Accordion>
+</Accordions>
+
+### 5. An async function runs until the first await
+
+```js
+async function load() {
+    console.log("B");
+
+    await null;
+
+    console.log("D");
+}
+
+console.log("A");
+load();
+console.log("C");
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+A
+B
+C
+D
+```
+
+- Calling an `async` function runs its body right away, like a normal function, up to the first `await`. So `B` prints before `C`.
+- `await` pauses `load` and goes back to the caller. The rest of `load` becomes a microtask.
+- `await null` still waits, even though `null` is not a promise.
+- **Sync:** `A`, `B`, `C`. **Microtasks:** `D`.
+
+</Accordion>
+</Accordions>
+
+### 6. The classic async/await question
+
+```js
+async function first() {
+    console.log("first start");
+    await second();
+    console.log("first end");
+}
+
+async function second() {
+    console.log("second");
+}
+
+console.log("script start");
+
+setTimeout(() => {
+    console.log("timeout");
+}, 0);
+
+first();
+
+Promise.resolve().then(() => {
+    console.log("then");
+});
+
+console.log("script end");
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+script start
+first start
+second
+script end
+first end
+then
+timeout
+```
+
+- **Sync:**
+  - `script start`. Then the timer is scheduled.
+  - `first()` runs: it prints `first start`, then calls `second()`, which prints `second` right away.
+  - `await` pauses `first`. The rest of `first` is queued as a microtask.
+  - The `.then` callback is queued next, **behind** the rest of `first`.
+  - `script end`.
+- **Microtasks:** `first end`, then `then`, in the order they were queued.
+- **Timers:** `timeout`.
+
+</Accordion>
+</Accordions>
+
+### 7. Two promise chains
+
+```js
+Promise.resolve()
+    .then(() => {
+        console.log("A1");
+    })
+    .then(() => {
+        console.log("A2");
+    });
+
+Promise.resolve()
+    .then(() => {
+        console.log("B1");
+    })
+    .then(() => {
+        console.log("B2");
+    });
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+A1
+B1
+A2
+B2
+```
+
+- Both `Promise.resolve()` promises are already done, so `A1` and `B1` are queued right away.
+- `A2` is not queued yet. It waits for `A1` to finish (rule 4).
+
+| Microtask that runs | Prints | Queue after it |
+|---|---|---|
+| A1 | `A1` | B1, A2 |
+| B1 | `B1` | A2, B2 |
+| A2 | `A2` | B2 |
+| B2 | `B2` | empty |
+
+</Accordion>
+</Accordions>
+
+### 8. A promise inside a timer
+
+```js
+setTimeout(() => {
+    console.log("timer 1");
+
+    Promise.resolve().then(() => {
+        console.log("promise inside timer 1");
+    });
+}, 0);
+
+setTimeout(() => {
+    console.log("timer 2");
+}, 0);
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+timer 1
+promise inside timer 1
+timer 2
+```
+
+- **Timers:** `timer 1` runs and queues a microtask.
+- After **each** timer callback, the microtask queue is emptied. So the promise runs **before** `timer 2`.
+
+</Accordion>
+</Accordions>
+
+### 9. A timer inside a promise
+
+```js
+Promise.resolve().then(() => {
+    console.log("promise 1");
+
+    setTimeout(() => {
+        console.log("timer from promise");
+    }, 0);
+});
+
+setTimeout(() => {
+    console.log("timer");
+}, 0);
+
+Promise.resolve().then(() => {
+    console.log("promise 2");
+});
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+promise 1
+promise 2
+timer
+timer from promise
+```
+
+- **Sync:** two microtasks are queued, and one timer is set (call it timer A, the one that prints `timer`).
+- **Microtasks:** `promise 1` runs and sets a new timer (timer B). Timer B is set **after** timer A. Then `promise 2` runs.
+- **Timers:** both have a 0 ms delay, so the one set first runs first: `timer`, then `timer from promise`.
+
+</Accordion>
+</Accordions>
+
+### 10. A microtask that queues a microtask
+
+```js
+setTimeout(() => {
+    console.log("timeout");
+}, 0);
+
+queueMicrotask(() => {
+    console.log("micro 1");
+
+    queueMicrotask(() => {
+        console.log("micro 3");
+    });
+});
+
+queueMicrotask(() => {
+    console.log("micro 2");
+});
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+micro 1
+micro 2
+micro 3
+timeout
+```
+
+- `queueMicrotask` puts a function straight into the microtask queue.
+- `micro 1` runs and queues `micro 3` at the **end** of the queue, behind `micro 2`.
+- The event loop keeps going until the microtask queue is empty. Only then does the timer run.
+- So microtasks that keep queuing new microtasks would block timers forever.
+
+</Accordion>
+</Accordions>
+
+### 11. Two async functions take turns
+
+```js
+async function task(label) {
+    console.log(label + " step 1");
+    await null;
+    console.log(label + " step 2");
+    await null;
+    console.log(label + " step 3");
+}
+
+task("A");
+task("B");
+console.log("sync done");
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+A step 1
+B step 1
+sync done
+A step 2
+B step 2
+A step 3
+B step 3
+```
+
+- **Sync:** `task("A")` runs until its first `await`: `A step 1`. The same for B: `B step 1`. Then `sync done`.
+- **Microtasks:** A goes on and prints `A step 2`. At the next `await`, it is queued again, **behind** B. Then B prints `B step 2` and queues itself behind A. And so on.
+- Each `await` sends the function to the back of the line.
+
+</Accordion>
+</Accordions>
+
+### 12. Everything together
+
+```js
+console.log("1");
+
+setTimeout(() => {
+    console.log("2");
+}, 0);
+
+new Promise((resolve) => {
+    console.log("3");
+    resolve();
+})
+    .then(() => {
+        console.log("4");
+
+        setTimeout(() => {
+            console.log("5");
+        }, 0);
+    })
+    .then(() => {
+        console.log("6");
+    });
+
+async function run() {
+    console.log("7");
+    await null;
+    console.log("8");
+}
+
+run();
+
+console.log("9");
+```
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+1
+3
+7
+9
+4
+8
+6
+2
+5
+```
+
+- **Sync:**
+  - `1`. Timer `2` is set.
+  - The promise body prints `3` and resolves, so the first `.then` (`4`) is queued.
+  - `run()` prints `7` and pauses at `await`. The rest of `run` (`8`) is queued.
+  - `9`.
+- **Microtasks** (queue: `4`, `8`):
+  - `4` runs. It prints `4` and sets timer `5`. When it finishes, the next `.then` (`6`) is queued. Queue: `8`, `6`.
+  - `8` runs, then `6`.
+- **Timers:** `2` was set first, so `2`, then `5`.
+
+</Accordion>
+</Accordions>
+
+## In the interview
+
+Say the rule first: "sync code, then all microtasks, then one timer." Then sort the lines into groups out loud, and keep track of what's waiting in each queue.
+
+> "I'll sort the lines into groups. Sync code runs first: `script start`, then `first start` and `second`, because an async function runs until its first `await`, then `script end`. Next come the microtasks, in the order they were queued: the rest of `first`, so `first end`, then the `.then`. The timer runs last, because a timer is a macrotask, and macrotasks only run when the microtask queue is empty."
+
+**Likely follow-up:** "Why does a `setTimeout` with 0 ms run after a promise?"
+
+**Answer:** "`setTimeout` puts its callback in the timer queue, which is a macrotask queue. A `.then` callback goes into the microtask queue. When the current code finishes, the event loop empties the whole microtask queue first, and only then takes one macrotask. So even a 0 ms timer waits for every promise callback that is ready. Also, 0 ms is the shortest wait, not an exact time. If the thread is busy, the timer runs later."
+
+<Callout title="Remember this" type="success">
+  - Order: **sync code → all microtasks → one timer → all microtasks → next timer**.
+  - The `new Promise` body and an `async` function (up to its first `await`) run **right away**.
+  - Microtasks: `.then`, `.catch`, `.finally`, the code after `await`, and `queueMicrotask`.
+  - The next `.then` in a chain is queued only when the one before it **finishes**, so chains take turns.
+  - Timers: shortest delay first. Equal delays run in the order they were set. `0` ms still waits.
+</Callout>

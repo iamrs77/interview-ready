@@ -1,13 +1,476 @@
 ---
 title: "Functions in Depth"
-description: "Declarations, expressions, arrow functions and parameters."
+description: "Declarations, expressions, arrow functions, parameters, IIFE, return values and callbacks."
 icon: SquareFunction
-planned: true
 ---
 
-- Function declarations vs expressions
-- Arrow functions and how they differ
-- Default, rest parameters and arguments
-- IIFE and first-class functions
-- Return values, and the implicit return of arrow functions
-- Callback functions
+## The idea
+
+A **function** is a named piece of code you can run again and again. You give it inputs (**parameters**), it does some work, and it can give back an output (the **return value**).
+
+Think of a **coffee machine**. You put in water and beans (the inputs), press a button (call the function), and coffee comes out (the return value). You don't rebuild the machine every morning. You just press the button again.
+
+In JavaScript, a function is also a **value**, like a number or a string. You can store it in a variable, pass it to another function, and return it from a function. Closures, callbacks and higher-order functions are all built on this one fact.
+
+## Declarations vs expressions
+
+### Function declaration
+
+A **declaration** is a line that starts with the word `function` and has a name.
+
+```js
+function add(a, b) {
+    return a + b;
+}
+
+console.log(add(2, 3)); // 5
+```
+
+### Function expression
+
+An **expression** creates a function as a value and stores it in a variable. The function itself can have no name.
+
+```js
+const multiply = function (a, b) {
+    return a * b;
+};
+
+console.log(multiply(2, 3)); // 6
+```
+
+### The real difference: hoisting
+
+Before running your code, JavaScript scans it and sets up every **declaration**, with its body. So you can call a declaration **above** the line where it's written. This is called **hoisting**.
+
+```js
+// Works: the whole declaration was set up before this line ran.
+console.log(square(4)); // 16
+
+function square(number) {
+    return number * number;
+}
+```
+
+An expression is just a value put into a variable. The value is only stored when that line runs. With `const` or `let`, using the variable before its line throws an error.
+
+```js
+// The variable exists, but it has no value yet.
+console.log(double(5)); // ReferenceError: Cannot access 'double' before initialization
+
+const double = function (number) {
+    return number * 2;
+};
+```
+
+With `var`, the variable is hoisted as `undefined`, so the error is different: `TypeError: double is not a function`. See [Hoisting](../core-basics/hoisting-and-execution-context.mdx) for the full story.
+
+| | Declaration | Expression |
+| --- | --- | --- |
+| Looks like | `function add() {}` | `const add = function () {};` |
+| Call it before its line? | Yes, it's hoisted with its body | No |
+| Needs a name? | Yes | No, it can be anonymous |
+
+## Arrow functions
+
+An **arrow function** is a shorter way to write a function expression. You drop the word `function` and put `=>` after the parameters.
+
+```js
+// A normal function expression.
+const addOld = function (a, b) {
+    return a + b;
+};
+
+// The same thing as an arrow function.
+const add = (a, b) => {
+    return a + b;
+};
+
+// One expression? Drop the braces and the word return.
+const addShort = (a, b) => a + b;
+
+console.log(addOld(1, 2)); // 3
+console.log(add(1, 2)); // 3
+console.log(addShort(1, 2)); // 3
+```
+
+### How arrow functions differ
+
+Arrows are not just shorter. They behave differently in four ways:
+
+| | Regular function | Arrow function |
+| --- | --- | --- |
+| `this` | Decided by **how** the function is called | Taken from the code **around** it |
+| `arguments` | Has its own | Doesn't have its own |
+| Use with `new` | Yes | No: `TypeError: ... is not a constructor` |
+| Hoisted? | Declarations are | No, it's always an expression |
+
+The `this` difference matters most. A regular method gets the object before the dot. An arrow doesn't, so it is a bad choice for an object method:
+
+```js
+const user = {
+    firstName: "Asha",
+
+    regular: function () {
+        return this.firstName;
+    },
+
+    arrow: () => {
+        // this here is NOT user: arrows don't get their own this.
+        return this.firstName;
+    },
+};
+
+console.log(user.regular()); // Asha
+console.log(user.arrow()); // undefined
+```
+
+The full rules are in [The this Keyword](./this-keyword.mdx).
+
+An arrow can't be used as a constructor:
+
+```js
+const Person = (name) => {
+    return name;
+};
+
+const asha = new Person("Asha"); // TypeError: Person is not a constructor
+```
+
+An arrow has no `arguments` of its own. If it uses `arguments`, it gets the one from the regular function around it:
+
+```js
+function outer() {
+    const inner = () => {
+        // This is outer's arguments, not inner's.
+        return arguments.length;
+    };
+
+    return inner(10, 20, 30, 40);
+}
+
+console.log(outer(1, 2)); // 2
+```
+
+## Parameters
+
+### Missing and extra arguments
+
+JavaScript never complains about the number of arguments. A missing one is `undefined`. An extra one is ignored.
+
+```js
+function introduce(name, city) {
+    console.log(name, city);
+}
+
+introduce("Asha"); // Asha undefined
+introduce("Asha", "Pune", "extra"); // Asha Pune
+```
+
+### Default parameters
+
+A **default** value is used when the argument is missing. It's used **only for `undefined`**, not for `null`.
+
+```js
+function greet(name = "friend") {
+    return `Hello, ${name}!`;
+}
+
+console.log(greet("Asha")); // Hello, Asha!
+console.log(greet()); // Hello, friend!
+console.log(greet(undefined)); // Hello, friend!
+console.log(greet(null)); // Hello, null!
+```
+
+### Rest parameters
+
+`...name` collects **all the remaining arguments** into a real array. It must be the last parameter.
+
+```js
+function sum(...numbers) {
+    let total = 0;
+
+    for (const number of numbers) {
+        total = total + number;
+    }
+
+    return total;
+}
+
+console.log(sum(1, 2, 3)); // 6
+console.log(sum()); // 0
+```
+
+```js
+// The first argument goes to label. The rest go into scores.
+function report(label, ...scores) {
+    console.log(label, scores);
+}
+
+report("Asha", 90, 85, 70); // Asha [ 90, 85, 70 ]
+```
+
+### The arguments object
+
+Every regular function also gets `arguments`: all the values it was called with. It's the old way, from before rest parameters. It **looks** like an array, but it is not one, so it has no `map` or `forEach`.
+
+```js
+function showArguments() {
+    console.log(arguments.length); // 3
+    console.log(arguments[0]); // a
+    console.log(Array.isArray(arguments)); // false
+
+    // Turn it into a real array first.
+    const list = Array.from(arguments);
+    console.log(list); // [ 'a', 'b', 'c' ]
+}
+
+showArguments("a", "b", "c");
+```
+
+| | Rest `...args` | `arguments` |
+| --- | --- | --- |
+| Real array? | Yes | No, only array-like |
+| In arrow functions? | Yes | No |
+| Holds | Only the remaining arguments | All the arguments |
+| Use it in new code? | Yes | No |
+
+## Functions are values
+
+"**First-class functions**" means functions are treated like any other value. You can store them, pass them and return them.
+
+```js
+function sayHello() {
+    return "Hello";
+}
+
+// 1. Store it in a variable. No (): we copy the function, we don't call it.
+const greetFunction = sayHello;
+console.log(greetFunction()); // Hello
+
+// 2. Put it in an object.
+const actions = {
+    greet: sayHello,
+};
+console.log(actions.greet()); // Hello
+
+// 3. Return it from another function.
+function getGreeter() {
+    return sayHello;
+}
+console.log(getGreeter()()); // Hello
+```
+
+Watch the brackets: `sayHello` is the function itself. `sayHello()` **runs** it and gives you its result.
+
+### IIFE: a function that runs right away
+
+An **IIFE** (Immediately Invoked Function Expression) is a function you write and call in the same place. Wrap it in brackets, then add `()` to call it.
+
+```js
+(function () {
+    // These variables exist only inside the IIFE.
+    const secret = "only inside";
+    console.log(secret); // only inside
+})();
+
+// The arrow version.
+(() => {
+    console.log("I run once, right now"); // I run once, right now
+})();
+```
+
+Why wrap it in brackets? A line that starts with `function` is read as a **declaration**, and a declaration must have a name and can't be called on the spot. The brackets turn it into an expression.
+
+Why use it?
+
+- **A private scope.** Before `let`, `const` and modules, `var` leaked into the whole function or the global scope. An IIFE kept variables private. Old libraries used this a lot.
+- **Fixing the loop-with-var bug.** See [Closures](./closures.mdx).
+- **Running async code at the top level** in older setups: `(async () => { ... })();`.
+
+## Return values
+
+### return stops the function
+
+`return` gives a value back and **stops** the function. A function with no `return` gives back `undefined`.
+
+```js
+function checkAge(age) {
+    if (age < 18) {
+        return "Too young";
+    }
+
+    // This line runs only when the return above didn't.
+    return "Welcome";
+}
+
+function noReturn() {
+    const total = 1 + 1;
+}
+
+console.log(checkAge(15)); // Too young
+console.log(checkAge(30)); // Welcome
+console.log(noReturn()); // undefined
+```
+
+### The implicit return of arrow functions
+
+Without braces, an arrow **returns** its expression automatically. With braces, it's a normal body, and you must write `return`.
+
+```js
+const double = (number) => number * 2;
+
+const tripleWrong = (number) => {
+    number * 3;
+};
+
+const triple = (number) => {
+    return number * 3;
+};
+
+console.log(double(4)); // 8
+console.log(tripleWrong(4)); // undefined
+console.log(triple(4)); // 12
+```
+
+To return an **object** in the short form, wrap it in brackets. Without them, JavaScript reads the braces as the function body, not as an object.
+
+```js
+const makeUserWrong = (name) => {
+    name: name;
+};
+
+const makeUser = (name) => ({ name: name });
+
+console.log(makeUserWrong("Asha")); // undefined
+console.log(makeUser("Asha")); // { name: 'Asha' }
+```
+
+### The return-on-its-own-line trap
+
+JavaScript adds a semicolon after a `return` that ends a line. So the object below is never returned.
+
+```js
+function getUser() {
+    return
+    {
+        name: "Asha";
+    }
+}
+
+console.log(getUser()); // undefined
+```
+
+Fix: start the value on the same line as `return`, like `return {`.
+
+## Callback functions
+
+A **callback** is a function you pass to another function, so that function can call it ("call it back") at the right time.
+
+Think of a busy restaurant. You leave your phone number, and they call you when your table is ready. Your phone number is the callback.
+
+### Synchronous callbacks
+
+Some callbacks run right away, while the other function is still running. Array methods work like this.
+
+```js
+const prices = [100, 250, 40];
+
+// map calls our arrow function once for each price.
+const withDelivery = prices.map((price) => price + 30);
+
+console.log(withDelivery); // [ 130, 280, 70 ]
+```
+
+You can write your own function that takes a callback:
+
+```js
+function processOrder(order, onReady) {
+    console.log("Cooking " + order);
+    onReady(order);
+}
+
+function announce(order) {
+    console.log(order + " is ready");
+}
+
+processOrder("pizza", announce);
+// Cooking pizza
+// pizza is ready
+```
+
+### Asynchronous callbacks
+
+Other callbacks run **later**, after something finishes, like a timer or a network request. The rest of your code doesn't wait.
+
+```js
+console.log("Order placed");
+
+setTimeout(function () {
+    console.log("Table is ready");
+}, 1000);
+
+console.log("Waiting...");
+// Order placed
+// Waiting...
+// Table is ready   (1 second later)
+```
+
+### Error-first callbacks (Node style)
+
+Old Node APIs pass **the error first**, then the result: `callback(error, result)`. If there's no error, the first argument is `null`.
+
+```js
+function loadUser(id, callback) {
+    setTimeout(function () {
+        if (id <= 0) {
+            callback(new Error("Invalid id"), null);
+            return;
+        }
+
+        callback(null, { id: id, name: "Asha" });
+    }, 100);
+}
+
+loadUser(1, function (error, user) {
+    if (error) {
+        console.log("Failed:", error.message);
+        return;
+    }
+
+    console.log("Loaded:", user.name); // Loaded: Asha
+});
+```
+
+Many callbacks nested inside each other get hard to read ("callback hell"). That's why [Promises](../async/promises.mdx) and [async/await](../async/async-await.mdx) were added.
+
+## Common mistakes
+
+- **Calling instead of passing.** `setTimeout(sayHello(), 1000)` runs `sayHello` **now** and passes its result. Pass the function: `setTimeout(sayHello, 1000)`.
+- **An arrow function as an object method.** It doesn't get the object as `this`. Use a regular method.
+- **Braces with no `return` in an arrow.** `(number) => { number * 2 }` returns `undefined`.
+- **Returning an object without brackets:** write `() => ({ name: "Asha" })`.
+- **Using `arguments` inside an arrow.** It's not the arrow's own. Use `...args`.
+- **Expecting a default for `null`.** Defaults only replace `undefined`.
+- **Calling a function expression above its line.** Only declarations are hoisted with their body.
+- **`return` alone on a line.** The function returns `undefined`.
+
+## In the interview
+
+- Know the declaration vs expression difference: it's **hoisting**.
+- Know the four arrow differences: `this`, `arguments`, `new`, and hoisting.
+- Be ready to explain what a callback is, with one sync and one async example.
+
+> "A function declaration is hoisted with its body, so I can call it before the line it's on. A function expression is a value stored in a variable, so it only exists after that line runs. Arrow functions are a short form of expressions, but they also behave differently: they don't have their own `this` or `arguments`, and they can't be used with `new`. They take `this` from the code around them."
+
+**Likely follow-up:** "When should you NOT use an arrow function?"
+
+**Answer:** "As an object method that uses `this`, because `this` won't be the object. As a constructor, because arrows can't be called with `new`. And when I need the function's own `arguments`, though rest parameters are better anyway. Arrows are great for callbacks inside methods, because they keep the method's `this`."
+
+<Callout title="Remember this" type="success">
+  - **Declarations** are hoisted with their body. **Expressions** exist only after their line runs.
+  - **Arrow functions** have no own `this`, no `arguments`, and can't be used with `new`.
+  - Arrow **without braces** returns its value. **With braces**, write `return`. Objects need `() => ({ ... })`.
+  - **Defaults** replace only `undefined`. **Rest** `...args` is a real array. `arguments` is not.
+  - Functions are **values**: `fn` is the function, `fn()` runs it. An **IIFE** runs right where it's written.
+  - A **callback** is a function you pass in, to be called later (async) or right away (like `map`).
+</Callout>

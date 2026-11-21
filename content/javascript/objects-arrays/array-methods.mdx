@@ -2,11 +2,406 @@
 title: "Array Methods"
 description: "map, filter, reduce and friends, and which ones change the array."
 icon: List
-planned: true
 ---
 
-- map vs forEach
-- filter, find, some and every
-- reduce, step by step
-- sort and reverse change the array: toSorted and toReversed do not
-- Chaining array methods
+## The idea
+
+Array methods are **ready-made loops**. You give them a small function, called a **callback**, and they run it for each item. Each method answers a different question: "change every item" (`map`), "keep some items" (`filter`), "add them all up" (`reduce`).
+
+Think of a **shopping cart**. You may want each price with a discount (map), only the items under ₹100 (filter), or the total to pay (reduce). Same cart, three different questions.
+
+The callback gets **three arguments**: the item, its index and the whole array. Most of the time you only need the item.
+
+```js
+const fruits = ["apple", "banana"];
+
+fruits.forEach((fruit, index, array) => {
+    console.log(index, fruit, array.length);
+});
+// 0 apple 2
+// 1 banana 2
+```
+
+## map vs forEach
+
+`map` builds a **new array**. Each new item is whatever your callback returns. The new array has the same length, and the original is not changed.
+
+```js
+const prices = [100, 200, 300];
+
+const salePrices = prices.map((price) => {
+    return price / 2;
+});
+
+console.log(salePrices); // [ 50, 100, 150 ]
+console.log(prices); // [ 100, 200, 300 ]
+```
+
+`forEach` just runs your callback for each item and gives back **`undefined`**. You use it to **do** something: print, save, send.
+
+```js
+const prices = [100, 200, 300];
+
+const result = prices.forEach((price) => {
+    console.log(price);
+});
+// 100
+// 200
+// 300
+
+console.log(result); // undefined
+```
+
+| | `map` | `forEach` |
+| --- | --- | --- |
+| Gives back | a new array, same length | `undefined` |
+| Use it to | turn each item into something new | do something with each item |
+| Can you chain another method after it? | yes | no |
+| Can you stop it early with `break`? | no | no |
+
+If you need to stop early, use a `for...of` loop, or `find` or `some` (they stop by themselves, see below).
+
+**The missing `return`.** With curly braces, an arrow function needs `return`. Without braces, it returns the value by itself.
+
+```js
+const prices = [100, 200];
+
+// Curly braces but no return: every result is undefined.
+const wrong = prices.map((price) => {
+    price * 2;
+});
+console.log(wrong); // [ undefined, undefined ]
+
+// No braces: the value is returned for you.
+const right = prices.map((price) => price * 2);
+console.log(right); // [ 200, 400 ]
+```
+
+**A famous trick question.** What does this print?
+
+```js
+const result = ["1", "2", "3"].map(parseInt);
+console.log(result); // [ 1, NaN, NaN ]
+```
+
+`map` passes the item **and the index**. `parseInt` reads its second argument as the number base. So the calls are `parseInt("1", 0)`, `parseInt("2", 1)` and `parseInt("3", 2)`. Base `0` means "guess", so it gives 1. Base 1 doesn't exist, so `NaN`. In base 2 (binary), "3" isn't a valid digit, so `NaN`. The fix is to pass only the item:
+
+```js
+const result = ["1", "2", "3"].map((text) => parseInt(text, 10));
+console.log(result); // [ 1, 2, 3 ]
+```
+
+## filter, find, some and every
+
+These four all ask a yes-or-no question about each item. Your callback returns `true` or `false`. What they give back is different.
+
+```js
+const users = [
+    { name: "Asha", age: 25 },
+    { name: "Ravi", age: 17 },
+    { name: "Meera", age: 32 },
+];
+
+// filter: ALL the users who match, in a new array.
+const adults = users.filter((user) => user.age >= 18);
+console.log(adults.length); // 2
+
+// find: the FIRST user who matches, or undefined.
+const firstTeen = users.find((user) => user.age < 18);
+console.log(firstTeen); // { name: 'Ravi', age: 17 }
+
+// some: does AT LEAST ONE user match?
+const hasTeen = users.some((user) => user.age < 18);
+console.log(hasTeen); // true
+
+// every: do ALL the users match?
+const allAdults = users.every((user) => user.age >= 18);
+console.log(allAdults); // false
+```
+
+| Method | The question | Gives back | If nothing matches | Stops early? |
+| --- | --- | --- | --- | --- |
+| `filter` | Which items match? | a new array | `[]` | No, it checks every item |
+| `find` | What is the first match? | the item | `undefined` | Yes, at the first match |
+| `findIndex` | Where is the first match? | its index | `-1` | Yes, at the first match |
+| `some` | Does any item match? | `true` or `false` | `false` | Yes, at the first `true` |
+| `every` | Do all items match? | `true` or `false` | `false` | Yes, at the first `false` |
+
+"Stops early" is real. Here `find` checks only two items, because the second one already matches:
+
+```js
+const numbers = [3, 8, 12, 5];
+let checks = 0;
+
+const firstBig = numbers.find((number) => {
+    checks = checks + 1;
+    return number > 5;
+});
+
+console.log(firstBig); // 8
+console.log(checks); // 2
+```
+
+That's why `find` is better than `filter(...)[0]`: `filter` checks every item and builds a whole array, just to throw most of it away.
+
+**An empty array is a classic trap.** `some` gives `false`, but `every` gives `true`. `every` really asks "is there any item that fails?" An empty array has no item that fails, so the answer is `true`.
+
+```js
+const empty = [];
+
+console.log(empty.some((number) => number > 0)); // false
+console.log(empty.every((number) => number > 0)); // true
+```
+
+## reduce, step by step
+
+`reduce` boils a whole array down to **one value**: a sum, a count, an object. It carries a **running total** from one item to the next. You give it two things: a callback, and the **start value** of the total.
+
+```js noRun
+array.reduce((total, item) => {
+    // work out the new total from the old total and this item
+    return newTotal;
+}, startValue);
+```
+
+Here is the simplest use: adding up prices.
+
+```js
+const prices = [60, 40, 250];
+
+const total = prices.reduce((sum, price) => {
+    return sum + price;
+}, 0);
+
+console.log(total); // 350
+```
+
+Each step, the callback gets the total so far and the next item. What it returns becomes the total for the next step:
+
+| Step | `sum` coming in | `price` | Returns (the new `sum`) |
+| --- | --- | --- | --- |
+| 1 | 0 (the start value) | 60 | 60 |
+| 2 | 60 | 40 | 100 |
+| 3 | 100 | 250 | 350 |
+
+After the last item, `reduce` gives back the last value returned: 350. It is exactly this loop, packed into one method:
+
+```js
+const prices = [60, 40, 250];
+let sum = 0;
+
+for (const price of prices) {
+    sum = sum + price;
+}
+
+console.log(sum); // 350
+```
+
+The total doesn't have to be a number. Here it's an object that counts votes. The start value is an empty object `{}`.
+
+```js
+const votes = ["tea", "coffee", "tea", "tea", "coffee"];
+
+const counts = votes.reduce((tally, vote) => {
+    // First time we see this vote: start its count at 0.
+    if (tally[vote] === undefined) {
+        tally[vote] = 0;
+    }
+
+    tally[vote] = tally[vote] + 1;
+
+    // Always return the total, or the next step gets undefined.
+    return tally;
+}, {});
+
+console.log(counts); // { tea: 3, coffee: 2 }
+```
+
+| Step | `vote` | `tally` after this step |
+| --- | --- | --- |
+| start | | `{}` |
+| 1 | tea | `{ tea: 1 }` |
+| 2 | coffee | `{ tea: 1, coffee: 1 }` |
+| 3 | tea | `{ tea: 2, coffee: 1 }` |
+| 4 | tea | `{ tea: 3, coffee: 1 }` |
+| 5 | coffee | `{ tea: 3, coffee: 2 }` |
+
+**Without a start value**, `reduce` uses the first item as the start and begins at the second item. That works, until the array is empty:
+
+```js
+const prices = [60, 40, 250];
+
+// The start is 60, and the first step adds 40.
+const total = prices.reduce((sum, price) => sum + price);
+console.log(total); // 350
+
+const empty = [];
+
+try {
+    empty.reduce((sum, price) => sum + price);
+} catch (error) {
+    console.log(error.message); // Reduce of empty array with no initial value
+}
+```
+
+So always pass a start value. You may also be asked to write `map`, `filter` or `reduce` yourself: see [Array Method Polyfills](../write-your-own/array-method-polyfills.mdx).
+
+## Methods that change the array
+
+### sort and reverse change the array, toSorted and toReversed don't
+
+Most array methods leave the original alone. But `sort` and `reverse` change the original array **in place**, and give back **that same array**, not a copy.
+
+```js
+const scores = [40, 100, 1, 5, 25];
+
+const sorted = scores.sort((first, second) => first - second);
+
+console.log(sorted); // [ 1, 5, 25, 40, 100 ]
+console.log(scores); // [ 1, 5, 25, 40, 100 ]
+console.log(sorted === scores); // true
+```
+
+The original order is gone. `toSorted` and `toReversed` (added in 2023) give you a **new** array and leave the original alone:
+
+```js
+const scores = [40, 100, 1, 5, 25];
+
+const sorted = scores.toSorted((first, second) => first - second);
+const reversed = scores.toReversed();
+
+console.log(sorted); // [ 1, 5, 25, 40, 100 ]
+console.log(reversed); // [ 25, 5, 1, 100, 40 ]
+console.log(scores); // [ 40, 100, 1, 5, 25 ]
+```
+
+In older code, you'll see a copy made first: `[...scores].sort(...)` or `scores.slice().sort(...)`. In React this matters a lot: if you sort state in place, React sees the **same** array and may not update the screen.
+
+**The default sort compares items as text.** Without a compare function, `10` comes before `5`, because the text "1" comes before "5".
+
+```js
+const numbers = [10, 1, 5, 100];
+
+console.log(numbers.toSorted()); // [ 1, 10, 100, 5 ]
+
+const smallToBig = numbers.toSorted((first, second) => first - second);
+console.log(smallToBig); // [ 1, 5, 10, 100 ]
+```
+
+The compare function gets two items and returns a number:
+
+- **Negative:** `first` goes before `second`.
+- **Positive:** `second` goes before `first`.
+- **Zero:** keep their order.
+
+So `first - second` sorts small to big, and `second - first` sorts big to small. For objects, compare a field: `(first, second) => first.age - second.age`.
+
+### Which methods change the array?
+
+| Changes the original array | Safe version: gives back a new array |
+| --- | --- |
+| `sort()` | `toSorted()` |
+| `reverse()` | `toReversed()` |
+| `splice()` | `toSpliced()` |
+| `array[1] = "x"` | `with(1, "x")` |
+| `push()`, `unshift()` | spread: `[...array, item]`, `[item, ...array]` |
+| `pop()`, `shift()` | `slice(0, -1)`, `slice(1)` |
+| `fill()` | `map()` |
+
+These **never** change the array: `map`, `filter`, `reduce`, `find`, `some`, `every`, `forEach`, `slice`, `concat`, `join`, `includes`, `indexOf` and `flat`. (`forEach` doesn't change it by itself, but your callback can.)
+
+```js
+const letters = ["a", "b", "c"];
+
+const replaced = letters.with(1, "x");
+const withoutFirst = letters.toSpliced(0, 1);
+
+console.log(replaced); // [ 'a', 'x', 'c' ]
+console.log(withoutFirst); // [ 'b', 'c' ]
+console.log(letters); // [ 'a', 'b', 'c' ]
+```
+
+### slice vs splice
+
+The names are one letter apart, and interviewers love to ask the difference.
+
+| | `slice(start, end)` | `splice(start, deleteCount, ...newItems)` |
+| --- | --- | --- |
+| Changes the original? | **No** | **Yes** |
+| Gives back | A **new array** with the items from `start` up to, but not including, `end` | An array of the **removed** items |
+| Used for | Copying part of an array | Removing, inserting or replacing items in place |
+
+```js
+const fruits = ["apple", "banana", "cherry", "date"];
+
+// slice: copy items 1 and 2. The original stays the same.
+const middle = fruits.slice(1, 3);
+console.log(middle); // [ 'banana', 'cherry' ]
+console.log(fruits); // [ 'apple', 'banana', 'cherry', 'date' ]
+
+// splice: at index 1, remove 2 items and put "kiwi" in their place.
+const removed = fruits.splice(1, 2, "kiwi");
+console.log(removed); // [ 'banana', 'cherry' ]
+console.log(fruits); // [ 'apple', 'kiwi', 'date' ]
+```
+
+## Chaining array methods
+
+`filter` and `map` give back a new array, so you can call the next method right on it. This is called **chaining**. Put each method on its own line, so it reads like a list of steps.
+
+```js
+const orders = [
+    { item: "Book", amount: 300, paid: true },
+    { item: "Pen", amount: 20, paid: false },
+    { item: "Bag", amount: 900, paid: true },
+];
+
+const totalPaid = orders
+    .filter((order) => order.paid)
+    .map((order) => order.amount)
+    .reduce((sum, amount) => sum + amount, 0);
+
+console.log(totalPaid); // 1200
+```
+
+| Step | What comes out |
+| --- | --- |
+| start | 3 orders |
+| `.filter((order) => order.paid)` | 2 orders: Book and Bag |
+| `.map((order) => order.amount)` | `[300, 900]` |
+| `.reduce((sum, amount) => sum + amount, 0)` | `1200` |
+
+Two tips:
+
+- **Long chains are hard to debug.** Give a step a name instead: `const paidOrders = orders.filter(...)`. Then you can print it.
+- **Each step loops again** and makes a new array. For normal sizes, that doesn't matter. For a huge array in a hot path, one loop or one `reduce` can do it all in a single pass.
+
+## Common mistakes
+
+- **No `return` in a callback with curly braces.** `map` gives an array of `undefined`.
+- **Using `map` when you don't use the result.** That's what `forEach` is for.
+- **`sort()` on numbers with no compare function.** It sorts as text: `[1, 10, 100, 5]`.
+- **Forgetting that `sort` and `reverse` change the original.** Use `toSorted` and `toReversed`.
+- **`reduce` with no start value** on an array that can be empty: `TypeError`. And forgetting to `return` the total from the callback.
+- **`map(parseInt)`.** `map` also passes the index, and `parseInt` reads it as the number base.
+- **Trying to `break` out of `forEach`.** You can't. Use `for...of`, `find` or `some`.
+- **`await` inside `forEach`.** `forEach` doesn't wait for async callbacks. Use `for...of` (see [async/await](../async/async-await.mdx)).
+
+## In the interview
+
+A very common question is "What's the difference between `map`, `forEach`, `filter` and `reduce`?"
+
+> "All four loop over the array and call my callback for each item. `forEach` gives back `undefined`, so I use it for side effects, like logging. `map` gives back a new array of the same length, with each item changed. `filter` gives back a new array with only the items where my callback returned `true`. `reduce` carries a running total through the array and gives back one value, like a sum or an object of counts. None of them change the original array, unlike `sort`, `reverse` and `splice`."
+
+**Likely follow-up:** "How do you sort an array without changing the original?"
+
+**Answer:** "Use `toSorted`, which gives back a new sorted array. In older code, copy first: `[...array].sort(...)`. And for numbers I always pass a compare function, like `(first, second) => first - second`, because the default sort compares the items as text, so `10` would come before `5`."
+
+<Callout title="Remember this" type="success">
+  - **`map`** = new array, same length, each item changed. **`forEach`** = just runs the callback, gives back `undefined`.
+  - **`filter`** = all matches (an array). **`find`** = the first match or `undefined`. **`some`** = any match? **`every`** = all match?
+  - **`reduce`** carries a running total. **Always pass a start value**, and always return the total.
+  - **`sort`, `reverse`, `splice`, `push`, `pop`** change the original. **`toSorted`, `toReversed`, `toSpliced`, `with`** don't.
+  - The default **`sort` compares as text**: use `(first, second) => first - second` for numbers.
+  - On an empty array, `some` gives `false` and `every` gives `true`.
+</Callout>

@@ -1,11 +1,325 @@
 ---
 title: "JSON"
-description: "The data format of the web: syntax, parse and stringify."
+description: "The data format of the web: its rules, parse and stringify, and what it can't hold."
 icon: Braces
-planned: true
 ---
 
-- JSON syntax rules, and how JSON differs from a JS object
-- JSON.parse and JSON.stringify
-- Replacer, reviver and indentation
-- What JSON loses: functions, undefined, Dates, Map, cycles
+## The idea
+
+**JSON** (JavaScript Object Notation) is a way to write data as **text**. It looks almost like a JavaScript object, but it's just a string. Because it's plain text with a few strict rules, every language can read and write it: JavaScript, Python, Java, Go.
+
+Think of a standard shipping form. Everyone, in every country, fills in the same boxes in the same way, so anyone can read it. `JSON.stringify` fills in the form (object → text). `JSON.parse` reads it back (text → a new object).
+
+You meet JSON everywhere: API requests and responses, `package.json`, config files, and data saved in [browser storage](./browser-storage.mdx).
+
+## JSON syntax rules
+
+### What valid JSON looks like
+
+```json
+{
+  "name": "Asha",
+  "age": 28,
+  "isAdmin": false,
+  "skills": ["js", "css"],
+  "address": { "city": "Pune" },
+  "manager": null
+}
+```
+
+The rules:
+
+- **Keys** must be in **double quotes**: `"name"`, never `name` or `'name'`.
+- **Strings** use **double quotes** only. No single quotes, no backticks.
+- A value can only be one of **six types**: string, number, `true`/`false`, `null`, array, or object.
+- **No trailing comma** after the last item.
+- **No comments.**
+- **No** `undefined`, functions, `NaN`, `Infinity`, or dates as real dates.
+
+### How JSON differs from a JavaScript object
+
+| | JavaScript object | JSON |
+| --- | --- | --- |
+| What it is | A value in memory, inside your program | A **string** of text |
+| Keys | Quotes are optional | Must have **double quotes** |
+| Strings | `'single'`, `"double"` or backticks | `"double"` only |
+| Trailing comma | Allowed | Not allowed |
+| Comments | Allowed (in code) | Not allowed |
+| Values | Anything: functions, `undefined`, Dates, Maps... | Only string, number, boolean, `null`, array, object |
+
+A string that breaks the rules can't be parsed. `JSON.parse` throws a **SyntaxError**:
+
+```js
+// Keys without quotes and single quotes: fine in JavaScript, not in JSON.
+const badJson = "{ name: 'Asha' }";
+
+try {
+    JSON.parse(badJson);
+} catch (error) {
+    console.log(error.name); // SyntaxError
+}
+```
+
+## JSON.parse and JSON.stringify
+
+### From object to text, and back
+
+`JSON.stringify` turns a value into a JSON **string**. `JSON.parse` turns a JSON string back into a value.
+
+```js
+const user = { name: "Asha", age: 28 };
+
+const text = JSON.stringify(user);
+console.log(text); // {"name":"Asha","age":28}
+console.log(typeof text); // string
+
+const copy = JSON.parse(text);
+console.log(copy.name); // Asha
+console.log(copy === user); // false
+```
+
+`JSON.parse` always builds **brand-new** objects and arrays. That's why `copy === user` is `false`. It's also why `JSON.parse(JSON.stringify(x))` is a quick deep copy, but with limits: see [The catch with JSON](../core-basics/value-vs-reference.mdx#the-catch-with-json).
+
+It works for single values too, not only objects:
+
+```js
+console.log(JSON.stringify("hi")); // "hi"
+console.log(JSON.stringify(42)); // 42
+console.log(JSON.stringify([1, "two", null])); // [1,"two",null]
+
+console.log(JSON.parse("true")); // true
+console.log(JSON.parse("[1, 2]")); // [ 1, 2 ]
+```
+
+Notice that `JSON.stringify("hi")` keeps the double quotes: the result is the 4-character string `"hi"`, because that's how a string is written in JSON.
+
+**In the real world:** when you call an API with `fetch`, you send data with `body: JSON.stringify(data)`, and `response.json()` reads the answer for you by parsing the JSON text.
+
+### Parse can fail: use try/catch
+
+Data from outside your program (a server, a file, storage) can be broken. Wrap `JSON.parse` in `try`/`catch`, so one bad string doesn't crash your app:
+
+```js
+function safeParse(text, fallback) {
+    try {
+        return JSON.parse(text);
+    } catch (error) {
+        return fallback;
+    }
+}
+
+console.log(safeParse('{"theme":"dark"}', {})); // { theme: 'dark' }
+console.log(safeParse("not json", {})); // {}
+console.log(safeParse(undefined, {})); // {}
+```
+
+The single quotes on the outside of `'{"theme":"dark"}'` let us write JSON's double quotes inside, without escaping them.
+
+`JSON.parse(undefined)` throws, because the text `"undefined"` is not valid JSON. But `JSON.parse(null)` gives back `null` without an error. This matters when reading from storage, where a missing key gives `null`.
+
+## Replacer, reviver and indentation
+
+### Indentation: the third argument
+
+By default, `JSON.stringify` puts everything on one line. The **third argument** adds line breaks and that many spaces of indentation, which is easier to read in logs and files:
+
+```js
+const user = { name: "Asha", skills: ["js"] };
+
+console.log(JSON.stringify(user, null, 2));
+// {
+//   "name": "Asha",
+//   "skills": [
+//     "js"
+//   ]
+// }
+```
+
+The `null` in the middle means "no replacer". That's the next part.
+
+### Replacer: choose what goes in
+
+The **second argument** of `JSON.stringify` is a **replacer**. It can be an **array of keys** to keep:
+
+```js
+const user = { name: "Asha", password: "secret", age: 28 };
+
+console.log(JSON.stringify(user, ["name", "age"])); // {"name":"Asha","age":28}
+```
+
+Or it can be a **function**, called for every key and value. Whatever it returns is used instead. If it returns `undefined`, that key is left out.
+
+```js
+function hidePassword(key, value) {
+    if (key === "password") {
+        return undefined;
+    }
+
+    return value;
+}
+
+const user = { name: "Asha", password: "secret", age: 28 };
+
+console.log(JSON.stringify(user, hidePassword)); // {"name":"Asha","age":28}
+```
+
+A class can also control its own JSON with a `toJSON()` method. `JSON.stringify` calls it and uses its result. That's how a Date turns into a string: Dates have a built-in `toJSON()`.
+
+```js
+class Account {
+    constructor(owner, password) {
+        this.owner = owner;
+        this.password = password;
+    }
+
+    // JSON.stringify uses this instead of the whole object.
+    toJSON() {
+        return { owner: this.owner };
+    }
+}
+
+const account = new Account("Asha", "secret");
+
+console.log(JSON.stringify(account)); // {"owner":"Asha"}
+```
+
+### Reviver: fix values on the way out
+
+The **second argument** of `JSON.parse` is a **reviver**. It's a function called for every key and value while parsing, and its result is used instead. The classic use: turn date strings back into real `Date` objects.
+
+```js
+const text = '{"title":"Launch","date":"2026-01-15T00:00:00.000Z"}';
+
+function reviveDates(key, value) {
+    if (key === "date") {
+        return new Date(value);
+    }
+
+    return value;
+}
+
+const plain = JSON.parse(text);
+console.log(typeof plain.date); // string
+
+const event = JSON.parse(text, reviveDates);
+console.log(event.date instanceof Date); // true
+console.log(event.date.getUTCFullYear()); // 2026
+```
+
+## What JSON loses
+
+JSON only knows six types. Anything else is **changed** or **dropped**, often without an error.
+
+| Value | Inside an object | Inside an array |
+| --- | --- | --- |
+| `undefined` | The key is **dropped** | Becomes `null` |
+| A function | The key is **dropped** | Becomes `null` |
+| `NaN`, `Infinity` | Becomes `null` | Becomes `null` |
+| A `Date` | Becomes a **string** (ISO format) | Becomes a string |
+| A `Map` or a `Set` | Becomes `{}` (empty!) | Becomes `{}` |
+| A class instance | A plain object: the class and its methods are gone | Same |
+| A `BigInt` | **TypeError** | **TypeError** |
+| An object that refers to itself | **TypeError** | **TypeError** |
+
+### undefined, functions, NaN and Dates
+
+```js
+const data = {
+    name: "Asha",
+    nickname: undefined,
+    greet: function () {},
+    score: NaN,
+    joined: new Date("2026-01-15"),
+};
+
+console.log(JSON.stringify(data));
+// {"name":"Asha","score":null,"joined":"2026-01-15T00:00:00.000Z"}
+
+console.log(JSON.stringify([undefined, function () {}, NaN])); // [null,null,null]
+```
+
+When you parse it back, `joined` is a **string**, not a Date. Use a reviver (above) if you need the Date back.
+
+### Map and Set
+
+A Map or a Set becomes an empty `{}`, and your data is lost. Turn it into a plain object or an array first:
+
+```js
+const prices = new Map([["apple", 30]]);
+const tags = new Set(["js", "css"]);
+
+console.log(JSON.stringify(prices)); // {}
+console.log(JSON.stringify(tags)); // {}
+
+console.log(JSON.stringify(Object.fromEntries(prices))); // {"apple":30}
+console.log(JSON.stringify([...tags])); // ["js","css"]
+```
+
+### Class instances
+
+Only the data properties survive. The result of `JSON.parse` is a plain object, so the methods are gone:
+
+```js
+class User {
+    constructor(name) {
+        this.name = name;
+    }
+
+    greet() {
+        return "Hi, " + this.name;
+    }
+}
+
+const copy = JSON.parse(JSON.stringify(new User("Asha")));
+
+console.log(copy); // { name: 'Asha' }
+console.log(copy.greet); // undefined
+```
+
+### Cycles and BigInt throw
+
+An object that points to itself would be endless text, so `JSON.stringify` throws a TypeError ("Converting circular structure to JSON"). A `BigInt` throws too.
+
+```js
+const user = { name: "Asha" };
+user.self = user;
+
+try {
+    JSON.stringify(user);
+} catch (error) {
+    console.log(error.name); // TypeError
+}
+
+try {
+    JSON.stringify({ views: 10n });
+} catch (error) {
+    console.log(error.name); // TypeError
+}
+```
+
+## Common mistakes
+
+- **Treating a JSON string like an object.** `text.name` on the string `'{"name":"Asha"}'` is `undefined`. Parse it first.
+- **Stringifying twice.** `JSON.stringify(JSON.stringify(user))` gives `"{\"name\":\"Asha\"}"`: a string inside a string, full of backslashes. It often happens when a library already stringifies for you.
+- **No try/catch around `JSON.parse`.** One broken response or storage value crashes the code.
+- **Expecting Dates back.** They come back as strings. Use a reviver, or `new Date(value)` yourself.
+- **Writing JSON like JavaScript.** Single quotes, keys without quotes, a trailing comma or a comment in a `.json` file all make it invalid.
+- **Comparing objects with `JSON.stringify(a) === JSON.stringify(b)`.** It depends on key order: `{ a: 1, b: 2 }` and `{ b: 2, a: 1 }` give different strings, even though they hold the same data.
+- **Losing data silently.** `undefined` values, functions, Maps and Sets disappear with no error. Check what you send.
+
+## In the interview
+
+> "JSON is a text format for data. It looks like a JavaScript object, but it's a string with stricter rules: keys and strings in double quotes, no trailing commas, no comments, and only six types: string, number, boolean, null, array and object. `JSON.stringify` turns a value into that text, and `JSON.parse` turns text into new objects. Anything outside those six types is lost: `undefined` and functions are dropped, Dates become strings, Maps and Sets become empty objects, and cycles or BigInts throw. I always wrap `JSON.parse` in try/catch when the data comes from outside."
+
+**Likely follow-up:** "You send an object with a Date to the server and read it back. Why is the date a string now, and how do you fix it?"
+
+**Answer:** "`JSON.stringify` calls the Date's `toJSON()` method, which gives an ISO string like `2026-01-15T00:00:00.000Z`. JSON has no date type, so `JSON.parse` just gives back that string. To get a Date again, I pass a reviver to `JSON.parse` that turns those fields into `new Date(value)`, or I convert the field myself after parsing."
+
+<Callout title="Remember this" type="success">
+  - JSON is **text**. Keys and strings use **double quotes**. No trailing commas, no comments.
+  - Only **six types**: string, number, boolean, `null`, array, object.
+  - `JSON.stringify(value, replacer, spaces)`: object → text. `JSON.parse(text, reviver)`: text → **new** objects.
+  - Lost or changed: `undefined` and functions are **dropped**, `NaN` becomes `null`, Dates become **strings**, Maps and Sets become `{}`.
+  - Cycles and BigInts **throw** a TypeError. Bad JSON text makes `JSON.parse` throw a **SyntaxError**: use try/catch.
+  - A **replacer** (or `toJSON`) chooses what goes in. A **reviver** fixes values coming out, like rebuilding Dates.
+</Callout>

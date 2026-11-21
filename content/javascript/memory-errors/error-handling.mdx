@@ -1,14 +1,441 @@
 ---
 title: "Error Handling"
-description: "Throw, catch, and handle errors in async code."
+description: "Throw, catch and handle errors, in normal code and in async code."
 icon: TriangleExclamationPoint
-planned: true
 ---
 
-- try, catch and finally
-- Error types and custom errors
-- Errors in promises and async functions
-- Global error handlers
-- The Error object: name, message and stack
-- ReferenceError, SyntaxError, TypeError and RangeError
-- The throw keyword
+## The idea
+
+An **error** is JavaScript saying "I can't go on". If nobody handles it, the code stops right there. **Error handling** is your plan B: you catch the error, deal with it, and the program keeps going.
+
+Think of a **cash machine**. If your card is rejected, the machine doesn't break down. It shows a message and gives your card back. In JavaScript, `throw` raises the problem, `catch` deals with it, and `finally` is "always give the card back".
+
+## How it works
+
+### The throw keyword
+
+`throw` stops the function **right away** and sends an error up to whoever called it. Nothing after the `throw` runs.
+
+```js
+function splitBill(amount, people) {
+    if (people === 0) {
+        throw new Error("Need at least one person");
+    }
+
+    return amount / people;
+}
+
+console.log(splitBill(90, 3)); // 30
+console.log(splitBill(90, 0)); // Error: Need at least one person
+console.log("Done"); // never runs: the error stopped the program
+```
+
+You can throw **anything**: a string, a number, an object. But always throw an **Error object**. A string has no name, no message and no stack, so you lose the clues you need to fix the bug.
+
+```js
+try {
+    throw "Something broke";
+} catch (error) {
+    console.log(error); // Something broke
+    console.log(error.message); // undefined
+    console.log(error.stack); // undefined
+}
+```
+
+### try, catch and finally
+
+You put code that might fail inside `try`. If it throws, JavaScript jumps straight to `catch`. The `finally` part runs **every time**, error or not.
+
+```js
+function splitBill(amount, people) {
+    if (people === 0) {
+        throw new Error("Need at least one person");
+    }
+
+    return amount / people;
+}
+
+try {
+    console.log("Start"); // Start
+    const share = splitBill(90, 0);
+    console.log("Share:", share); // never runs
+} catch (error) {
+    console.log("Caught:", error.message); // Caught: Need at least one person
+} finally {
+    console.log("Clean up"); // Clean up
+}
+
+console.log("The program keeps going"); // The program keeps going
+```
+
+| Part | When it runs | Use it for |
+| --- | --- | --- |
+| `try` | always, first | the code that might fail |
+| `catch (error)` | only if `try` threw | handle the error: log it, use a default, show a message |
+| `finally` | always, last | clean up: close a connection, stop a timer, release a lock |
+
+If you don't need the error itself, you can leave out the `(error)` part: `catch { ... }`.
+
+`finally` runs even when `try` has a `return`. It runs **before** the function actually gives back the value.
+
+```js
+function getName() {
+    try {
+        return "Asha";
+    } finally {
+        console.log("finally runs first");
+    }
+}
+
+console.log(getName());
+// finally runs first
+// Asha
+```
+
+A famous trick question: a `return` inside `finally` **replaces** the one in `try`.
+
+```js
+function tricky() {
+    try {
+        return 1;
+    } finally {
+        return 2;
+    }
+}
+
+console.log(tricky()); // 2
+```
+
+### The Error object: name, message and stack
+
+Every error object has three useful properties.
+
+```js
+const error = new Error("Payment failed");
+
+console.log(error.name); // Error
+console.log(error.message); // Payment failed
+console.log(typeof error.stack); // string
+```
+
+- **name**: the kind of error, like `"TypeError"`.
+- **message**: the text you passed in.
+- **stack**: the error's name and message, then the list of function calls that led to it, most recent first. This is your best clue when debugging.
+
+A stack looks like this:
+
+```text
+Error: Payment failed
+    at chargeCard (shop.js:3:11)
+    at checkout (shop.js:9:5)
+    at shop.js:13:1
+```
+
+Read it from the top: the error happened in `chargeCard`, line 3, which was called by `checkout`, line 9.
+
+When you catch an error and throw a new, clearer one, pass the original as the **cause**. Then the real reason isn't lost.
+
+```js
+function loadSettings(text) {
+    try {
+        return JSON.parse(text);
+    } catch (error) {
+        // Add context, and keep the original error as the cause.
+        throw new Error("Could not read the settings", { cause: error });
+    }
+}
+
+try {
+    loadSettings("{bad json");
+} catch (error) {
+    console.log(error.message); // Could not read the settings
+    console.log(error.cause.name); // SyntaxError
+}
+```
+
+### ReferenceError, SyntaxError, TypeError and RangeError
+
+JavaScript has built-in error types. The `name` tells you which kind of mistake happened.
+
+| Type | When | Example |
+| --- | --- | --- |
+| `ReferenceError` | you use a variable that doesn't exist | `console.log(userName)` with no `userName` |
+| `TypeError` | you use a value the wrong way | `undefined.name`, calling a number like a function |
+| `RangeError` | a number is outside the allowed range | `new Array(-1)`, endless recursion |
+| `SyntaxError` | the code or text can't be parsed | a missing `)`, `JSON.parse("{bad")` |
+
+Here are the first three, each caught so you can see its name and message:
+
+```js
+try {
+    console.log(userName);
+} catch (error) {
+    console.log(error.name); // ReferenceError
+    console.log(error.message); // userName is not defined
+}
+
+try {
+    const user = undefined;
+    console.log(user.name);
+} catch (error) {
+    console.log(error.name); // TypeError
+    console.log(error.message); // Cannot read properties of undefined (reading 'name')
+}
+
+try {
+    const list = new Array(-1);
+} catch (error) {
+    console.log(error.name); // RangeError
+    console.log(error.message); // Invalid array length
+}
+```
+
+A **SyntaxError in your own code** can't be caught. JavaScript reads the whole file before it runs anything, so a missing `)` means **nothing** runs, not even your `try`. You can only catch a SyntaxError from code that is parsed while the program runs, like `JSON.parse`:
+
+```js
+try {
+    JSON.parse("{bad json");
+} catch (error) {
+    console.log(error.name); // SyntaxError
+}
+```
+
+The messages above are the ones Node and Chrome print. Other browsers word them a little differently, but the **names** are the same everywhere. There are a few rarer types too: `URIError` (bad text given to `decodeURIComponent`), `EvalError`, and `AggregateError` (many errors at once, used by `Promise.any`).
+
+### Error types and custom errors
+
+You can make your own error types by **extending** `Error`. This lets the code that catches the error see **what kind** of problem it was, and carry extra details.
+
+```js
+class ValidationError extends Error {
+    constructor(field, message) {
+        super(message);
+
+        // Without this line, name would still be "Error".
+        this.name = "ValidationError";
+        this.field = field;
+    }
+}
+
+const error = new ValidationError("email", "Email is required");
+
+console.log(error.name); // ValidationError
+console.log(error.message); // Email is required
+console.log(error.field); // email
+console.log(error instanceof ValidationError); // true
+console.log(error instanceof Error); // true
+```
+
+The catching code uses `instanceof` to pick what to do. A good rule: **handle the errors you expect, and re-throw the rest**. A bug you didn't plan for should not be hidden.
+
+```js
+class ValidationError extends Error {
+    constructor(field, message) {
+        super(message);
+        this.name = "ValidationError";
+        this.field = field;
+    }
+}
+
+function saveUser(user) {
+    if (!user.email) {
+        throw new ValidationError("email", "Email is required");
+    }
+
+    console.log("Saved", user.email);
+}
+
+try {
+    saveUser({ name: "Asha" });
+} catch (error) {
+    if (error instanceof ValidationError) {
+        console.log("Please fix:", error.field); // Please fix: email
+    } else {
+        // Not an error we know how to handle: pass it up.
+        throw error;
+    }
+}
+```
+
+### Errors in promises and async functions
+
+`try` only watches code that runs **while the `try` block is running**. A `setTimeout` callback runs **later**, after the `try` block has already finished, so the `catch` never sees its error.
+
+```js
+try {
+    setTimeout(() => {
+        throw new Error("Timer failed");
+    }, 100);
+} catch (error) {
+    console.log("Caught:", error.message); // never runs
+}
+
+// About 100 ms later: Uncaught Error: Timer failed
+```
+
+The fix: put the `try`/`catch` **inside** the callback, or turn the work into a promise and handle it the promise way.
+
+**Promises** report errors by **rejecting**. You handle a rejection with `.catch()`. An error thrown inside a `.then()` also becomes a rejection, and goes to the next `.catch()`.
+
+```js
+function fetchUser(id) {
+    return new Promise((resolve, reject) => {
+        setTimeout(() => {
+            if (id === 0) {
+                reject(new Error("User not found"));
+                return;
+            }
+
+            resolve({ id: id, name: "Asha" });
+        }, 100);
+    });
+}
+
+fetchUser(0)
+    .then((user) => console.log(user.name))
+    .catch((error) => console.log("Caught:", error.message))
+    .finally(() => console.log("Done"));
+
+// Caught: User not found
+// Done
+```
+
+With **async/await**, you can use a normal `try`/`catch`. `await` turns a rejection back into a thrown error, right on that line.
+
+```js
+function fetchUser(id) {
+    return new Promise((resolve, reject) => {
+        setTimeout(() => {
+            if (id === 0) {
+                reject(new Error("User not found"));
+                return;
+            }
+
+            resolve({ id: id, name: "Asha" });
+        }, 100);
+    });
+}
+
+async function showUser(id) {
+    try {
+        const user = await fetchUser(id);
+        console.log("Hello,", user.name);
+    } catch (error) {
+        console.log("Caught:", error.message);
+    }
+}
+
+await showUser(1); // Hello, Asha
+await showUser(0); // Caught: User not found
+```
+
+A common trap: **forgetting `await`** inside the `try`. The function returns the promise straight away, the `try` block ends, and the rejection happens later, outside it.
+
+```js
+function failLater() {
+    return new Promise((resolve, reject) => {
+        setTimeout(() => reject(new Error("Too slow")), 100);
+    });
+}
+
+async function withoutAwait() {
+    try {
+        // No await: the promise leaves the try block before it fails.
+        return failLater();
+    } catch (error) {
+        console.log("Inside caught it"); // never runs
+    }
+}
+
+async function withAwait() {
+    try {
+        return await failLater();
+    } catch (error) {
+        console.log("Inside caught:", error.message);
+    }
+}
+
+try {
+    await withoutAwait();
+} catch (error) {
+    console.log("Caller caught:", error.message);
+}
+
+await withAwait();
+// Caller caught: Too slow
+// Inside caught: Too slow
+```
+
+Also remember: an `async` function never throws to its caller directly. A `throw` inside it **rejects** the promise it returns. A rejected promise with no `.catch()` and no `await` in a `try` is an **unhandled rejection**. See [Promises](../async/promises.mdx) and [async/await](../async/async-await.mdx).
+
+### Global error handlers
+
+A **global error handler** is the last safety net. It runs when an error reaches the top and **nobody** caught it. Use it to **log** the error (for example, send it to an error tracking service) and to fail in a clean way. Don't use it to carry on as if nothing happened.
+
+**In the browser** there are two hooks:
+
+- `window.onerror` (or `window.addEventListener("error", ...)`): runs for an uncaught thrown error. It gets the message, the file, the line, the column and the error object.
+- `window.addEventListener("unhandledrejection", ...)`: runs for a rejected promise that nobody handled. `event.reason` is the rejection value.
+
+```js noRun
+window.onerror = function (message, file, line, column, error) {
+    sendToErrorTracker(error);
+};
+
+window.addEventListener("unhandledrejection", (event) => {
+    sendToErrorTracker(event.reason);
+});
+```
+
+**In Node.js** you listen on the `process` object:
+
+- `process.on("uncaughtException", ...)`: an uncaught thrown error.
+- `process.on("unhandledRejection", ...)`: a rejected promise nobody handled. Since Node 15, an unhandled rejection **crashes** the process if you don't listen for it.
+
+```js noRun
+process.on("uncaughtException", (error) => {
+    console.error("Crashing:", error.message);
+
+    // The app may be in a broken state now. Log, then exit.
+    process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+    console.error("Unhandled rejection:", reason);
+});
+```
+
+After an uncaught exception, the Node docs advise **exiting** the process. Some work may be half done, so the app can't be trusted. A process manager (like PM2 or Kubernetes) then starts a fresh copy.
+
+In the real world, error trackers like **Sentry** work this way: their browser library hooks into `window.onerror` and `unhandledrejection`, so every crash your users hit is reported with its stack.
+
+## Common mistakes
+
+- **Throwing strings** instead of `new Error(...)`. A string has no stack, so you can't see where it came from.
+- **An empty `catch`.** The error is swallowed, and the bug hides. At least log it.
+- **Catching everything and carrying on.** Handle the errors you expect. Re-throw the rest.
+- **`try`/`catch` around async code without `await`.** The `catch` never runs. The same goes for a `setTimeout` callback.
+- **Forgetting `this.name`** in a custom error class. The name stays `"Error"`.
+- **A `return` inside `finally`.** It replaces the real return value, and it even hides a thrown error.
+- **Thinking `try` can catch a SyntaxError in the same file.** The file never starts running.
+
+## In the interview
+
+> "I use `throw new Error(...)` with a clear message, never a plain string, so I get a stack trace. I wrap code that can fail in `try`/`catch`, and put clean-up in `finally`, which always runs. For my own cases I extend `Error`, set `this.name`, and check with `instanceof`. I handle what I expect and re-throw the rest. For promises I use `.catch()`, or `try`/`catch` with `await`, and I make sure every promise is either awaited or has a `.catch()`. Global handlers like `window.onerror`, `unhandledrejection` or Node's `process.on` are only the last safety net, for logging."
+
+**Likely follow-up:** "Why doesn't `try`/`catch` catch an error thrown inside `setTimeout`?"
+
+**Answer:** "The callback runs later, from the event loop. By then the `try` block has already finished and left the call stack, so there is no `catch` around the callback any more. I put the `try`/`catch` inside the callback, or I wrap the timer in a promise and `await` it inside the `try`."
+
+**Likely follow-up:** "What does an `async` function do when you `throw` inside it?"
+
+**Answer:** "It doesn't throw to the caller. The promise it returns is rejected with that error. The caller has to `await` it inside a `try`, or add a `.catch()`. If nobody does, it becomes an unhandled rejection."
+
+<Callout title="Remember this" type="success">
+  - **`throw new Error("...")`** stops the function. Never throw a plain string: it has no stack.
+  - **`try`** runs the code, **`catch`** runs only on an error, **`finally`** always runs (even after a `return`).
+  - An error has **name, message and stack**. Pass `{ cause: error }` to keep the original error.
+  - Custom errors: `extends Error`, set **`this.name`**, check with **`instanceof`**. Handle what you expect, re-throw the rest.
+  - `try`/`catch` only catches async errors with **`await`**. Otherwise use `.catch()`.
+  - Global handlers (`window.onerror`, `unhandledrejection`, `process.on`) are the **last safety net**: log, don't hide.
+</Callout>

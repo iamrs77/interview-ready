@@ -30,6 +30,10 @@ const content = defineDocs({
             name: 'language-attribute',
             pre(node) {
               node.properties['data-language'] = this.options.lang;
+              // ```js noRun → no "Run" button (code that needs a test runner or a browser page).
+              if (/\bnoRun\b/.test(String(this.options.meta?.__raw ?? ''))) {
+                node.properties['data-no-run'] = 'true';
+              }
             },
           },
         ],

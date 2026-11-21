@@ -1,14 +1,538 @@
 ---
 title: "Objects in Depth"
-description: "Properties, getters, and locking objects."
+description: "Create, change and loop over objects, control each property, and lock objects with freeze and seal."
 icon: Boxes
-planned: true
 ---
 
-- Creating objects: literals, constructors, Object.create
-- Adding, updating and deleting properties
-- Object.keys, Object.values and Object.entries
-- Property descriptors (writable, enumerable, configurable)
-- Getters and setters
-- Object.freeze vs seal vs preventExtensions
-- Looping over keys: for...in vs Object.keys
+## The idea
+
+An **object** is a bag of **properties**. Each property has a **key** (its name) and a **value**. Every value that is not a **primitive** (a number, string, boolean, `null`, `undefined`, symbol or bigint) is an object: arrays, functions and dates too.
+
+Think of a **contact card** on your phone. It has lines like "name: Asha" and "phone: 98765". Each line is a key and a value. You can add a line, change one or delete one.
+
+```js
+const contact = {
+    name: "Asha",
+    phone: "98765",
+};
+
+console.log(contact.name); // Asha
+```
+
+## Creating and changing objects
+
+### Three ways to create an object
+
+**1. An object literal: the curly braces.** This is what you use most of the time.
+
+```js
+const toyCar = {
+    color: "red",
+    wheels: 4,
+
+    // A function stored on an object is called a method.
+    drive() {
+        console.log(`The ${this.color} car drives.`);
+    },
+};
+
+toyCar.drive(); // The red car drives.
+```
+
+**2. A constructor: a class, or a function called with `new`.** Use it when you need many objects with the same shape.
+
+```js
+class ToyCar {
+    constructor(color) {
+        this.color = color;
+    }
+}
+
+const car1 = new ToyCar("red");
+const car2 = new ToyCar("blue");
+
+console.log(car1); // ToyCar { color: 'red' }
+console.log(car2); // ToyCar { color: 'blue' }
+```
+
+See [Constructor Functions and new](../oop/constructor-functions-and-new.mdx) and [Classes](../oop/classes.mdx).
+
+**3. `Object.create(proto)`.** It makes a new, empty object that is **linked** to `proto`. When you read a property the new object doesn't have, JavaScript looks in `proto`. This link is called the **prototype** (see [Prototypes](../oop/prototypes.mdx)).
+
+```js
+const toy = {
+    play() {
+        console.log("Playing!");
+    },
+};
+
+const robot = Object.create(toy);
+robot.name = "Robo";
+
+console.log(robot); // { name: 'Robo' }
+
+// robot has no play method of its own, so JavaScript finds it on toy.
+robot.play(); // Playing!
+```
+
+`Object.create(null)` makes an object with **no prototype at all**. It doesn't even have `toString`. That makes it a clean dictionary: no built-in key can clash with your own keys. (A [Map](../modern-js/map-set-weakmap.mdx) is another good choice for this.)
+
+```js
+const normal = {};
+const dictionary = Object.create(null);
+
+console.log("toString" in normal); // true
+console.log("toString" in dictionary); // false
+```
+
+### Adding, updating and deleting properties
+
+Use a **dot** when you know the key name. Use **square brackets** when the key is in a variable, or has a space or a dash in it.
+
+```js
+const user = {
+    name: "Asha",
+};
+
+// Add a new property.
+user.age = 25;
+
+// Update an existing one.
+user.name = "Asha Rao";
+
+// The key is in a variable, so use brackets.
+const key = "city";
+user[key] = "Pune";
+
+console.log(user); // { name: 'Asha Rao', age: 25, city: 'Pune' }
+
+// A key with a dash needs brackets and quotes.
+user["home-town"] = "Nagpur";
+console.log(user["home-town"]); // Nagpur
+```
+
+`delete` removes a property completely.
+
+```js
+const user = {
+    name: "Asha",
+    age: 25,
+};
+
+delete user.age;
+
+console.log(user); // { name: 'Asha' }
+console.log(user.age); // undefined
+```
+
+Reading a key that isn't there gives `undefined`, with no error. So how do you know if a key exists? Use `in` (checks the object **and** its prototype) or `Object.hasOwn` (checks only the object's **own** keys).
+
+```js
+const user = {
+    name: "Asha",
+    nickname: undefined,
+};
+
+// Both print undefined, but only one key exists.
+console.log(user.nickname); // undefined
+console.log(user.email); // undefined
+
+// "in" tells them apart.
+console.log("nickname" in user); // true
+console.log("email" in user); // false
+
+// toString comes from the prototype, not from user itself.
+console.log("toString" in user); // true
+console.log(Object.hasOwn(user, "toString")); // false
+```
+
+## Reading all the keys and values
+
+### Object.keys, Object.values and Object.entries
+
+These three turn an object into an **array**, so you can loop over it or use array methods on it.
+
+```js
+const prices = {
+    apple: 30,
+    banana: 10,
+    mango: 50,
+};
+
+console.log(Object.keys(prices)); // [ 'apple', 'banana', 'mango' ]
+console.log(Object.values(prices)); // [ 30, 10, 50 ]
+console.log(Object.entries(prices));
+// [ [ 'apple', 30 ], [ 'banana', 10 ], [ 'mango', 50 ] ]
+```
+
+| Method | Gives back | For `prices` |
+| --- | --- | --- |
+| `Object.keys(obj)` | an array of keys | `["apple", "banana", "mango"]` |
+| `Object.values(obj)` | an array of values | `[30, 10, 50]` |
+| `Object.entries(obj)` | an array of `[key, value]` pairs | `[["apple", 30], ["banana", 10], ...]` |
+
+`Object.fromEntries` does the opposite: it turns pairs back into an object. Together they let you change every value. Here every fruit gets 5 cheaper:
+
+```js
+const prices = {
+    apple: 30,
+    banana: 10,
+};
+
+const salePairs = [];
+
+// Each entry is a pair, like [ 'apple', 30 ].
+for (const [fruit, price] of Object.entries(prices)) {
+    const salePrice = price - 5;
+    salePairs.push([fruit, salePrice]);
+}
+
+const salePrices = Object.fromEntries(salePairs);
+console.log(salePrices); // { apple: 25, banana: 5 }
+```
+
+`const [fruit, price]` pulls the two parts out of each pair. See [Destructuring](../modern-js/destructuring-and-spread.mdx).
+
+**What order do the keys come in?** Keys that look like whole numbers come first, smallest to largest. Then the other keys, in the order you added them. And keys are always strings (or symbols): `2` becomes `'2'`.
+
+```js
+const mixed = {
+    zara: "z",
+    10: "ten",
+    amit: "a",
+    2: "two",
+};
+
+console.log(Object.keys(mixed)); // [ '2', '10', 'zara', 'amit' ]
+```
+
+### Looping over keys: for...in vs Object.keys
+
+`for...in` loops over the object's own keys **and the keys it inherits** from its prototype. `Object.keys` gives **only the object's own** keys.
+
+```js
+const toy = {
+    brand: "ToyCo",
+};
+
+// car is linked to toy, so it inherits brand.
+const car = Object.create(toy);
+car.color = "red";
+
+for (const key in car) {
+    console.log(key);
+}
+// color
+// brand
+
+console.log(Object.keys(car)); // [ 'color' ]
+```
+
+| | `for...in` | `Object.keys(obj)` with `for...of` |
+| --- | --- | --- |
+| Own keys | yes | yes |
+| Inherited keys | yes | no |
+| What you get | a loop, nothing else | an array: you can use `length`, `map`, `filter` |
+
+Prefer `Object.keys` or `Object.entries`. If you do use `for...in`, check `Object.hasOwn(car, key)` inside the loop to skip inherited keys.
+
+Why doesn't `for...in` print `toString` too? Because built-in methods are **non-enumerable**: hidden from loops. That's a property flag, and it's the next topic.
+
+## Controlling each property
+
+### Property descriptors: writable, enumerable, configurable
+
+Every property has a value **and three hidden settings**, called flags. Together they are the property's **descriptor**.
+
+```js
+const user = {
+    name: "Asha",
+};
+
+const descriptor = Object.getOwnPropertyDescriptor(user, "name");
+console.log(descriptor);
+// { value: 'Asha', writable: true, enumerable: true, configurable: true }
+```
+
+| Flag | When `true` | When `false` |
+| --- | --- | --- |
+| `writable` | You can change the value | Changing it is ignored (a `TypeError` in strict mode) |
+| `enumerable` | It shows up when you list keys | Hidden from `for...in`, `Object.keys`, `JSON.stringify` and spread |
+| `configurable` | You can delete it and change its flags | You can't delete it or redefine it |
+
+Properties you make the normal way have all three flags set to `true`. `Object.defineProperty` lets you set them yourself. **Watch out: any flag you leave out is `false`.**
+
+```js
+const user = {
+    name: "Asha",
+};
+
+// Only value is given, so writable, enumerable and configurable are false.
+Object.defineProperty(user, "id", {
+    value: 101,
+});
+
+user.id = 999;
+console.log(user.id); // 101
+
+console.log(Object.keys(user)); // [ 'name' ]
+console.log(JSON.stringify(user)); // {"name":"Asha"}
+
+delete user.id;
+console.log(user.id); // 101
+```
+
+The change and the delete were **ignored with no error**. That only happens in old "sloppy" mode. In **strict mode** they throw a `TypeError`. Code inside a class or a module is always strict.
+
+```js
+"use strict";
+
+const user = {};
+
+Object.defineProperty(user, "id", {
+    value: 101,
+});
+
+try {
+    user.id = 999;
+} catch (error) {
+    console.log(error.message);
+    // Cannot assign to read only property 'id' of object '#<Object>'
+}
+```
+
+You meet these flags in built-in objects all the time. An array's `length` is non-enumerable, which is why it never shows up when you list an array's keys.
+
+```js
+const list = [10, 20];
+const lengthFlags = Object.getOwnPropertyDescriptor(list, "length");
+
+console.log(lengthFlags.enumerable); // false
+console.log(Object.keys(list)); // [ '0', '1' ]
+```
+
+### Getters and setters
+
+A **getter** is a function that runs when you **read** a property. A **setter** runs when you **write** to it. From outside, they look like normal properties: no parentheses. ([Classes](../oop/classes.mdx) have them too.)
+
+```js
+const user = {
+    firstName: "Asha",
+    lastName: "Rao",
+
+    // Runs when you read user.fullName.
+    get fullName() {
+        return `${this.firstName} ${this.lastName}`;
+    },
+
+    // Runs when you write user.fullName = "...".
+    set fullName(value) {
+        const parts = value.split(" ");
+        this.firstName = parts[0];
+        this.lastName = parts[1];
+    },
+};
+
+console.log(user.fullName); // Asha Rao
+
+user.fullName = "Ravi Kumar";
+console.log(user.firstName); // Ravi
+console.log(user.lastName); // Kumar
+```
+
+A setter is also a good place to **check a value** before you store it, and refuse bad ones. The `Person` example in [Classes](../oop/classes.mdx) does exactly that.
+
+You can add a getter with `Object.defineProperty` too. A property with a getter or setter is called an **accessor property**. Its descriptor has `get` and `set` instead of `value` and `writable`.
+
+```js
+const box = {
+    width: 2,
+    height: 3,
+};
+
+Object.defineProperty(box, "area", {
+    get() {
+        return this.width * this.height;
+    },
+});
+
+console.log(box.area); // 6
+
+// The getter works the area out again on every read.
+box.width = 10;
+console.log(box.area); // 30
+
+const flags = Object.getOwnPropertyDescriptor(box, "area");
+console.log(typeof flags.get); // function
+console.log("value" in flags); // false
+```
+
+## Locking objects
+
+### Object.freeze vs seal vs preventExtensions
+
+Three built-in ways to lock an object, from weakest to strongest:
+
+| | Add new keys | Delete keys | Change values | Check with |
+| --- | --- | --- | --- | --- |
+| `Object.preventExtensions` | No | Yes | Yes | `Object.isExtensible` |
+| `Object.seal` | No | No | Yes | `Object.isSealed` |
+| `Object.freeze` | No | No | No | `Object.isFrozen` |
+
+**preventExtensions:** no new keys. Everything else still works.
+
+```js
+const settings = {
+    theme: "light",
+};
+
+Object.preventExtensions(settings);
+
+// Adding is blocked.
+settings.fontSize = 16;
+console.log(settings.fontSize); // undefined
+
+// Changing and deleting still work.
+settings.theme = "calm";
+console.log(settings.theme); // calm
+
+delete settings.theme;
+console.log(settings); // {}
+```
+
+**seal:** no new keys, no deleting. You can still change the values.
+
+```js
+const settings = {
+    theme: "light",
+};
+
+Object.seal(settings);
+
+// Adding and deleting are blocked.
+settings.fontSize = 16;
+delete settings.theme;
+console.log(settings); // { theme: 'light' }
+
+// Changing a value still works.
+settings.theme = "calm";
+console.log(settings); // { theme: 'calm' }
+```
+
+**freeze:** nothing can change. The object is read-only.
+
+```js
+const settings = {
+    theme: "light",
+};
+
+Object.freeze(settings);
+
+// Add, delete and change are all blocked.
+settings.fontSize = 16;
+delete settings.theme;
+settings.theme = "calm";
+
+console.log(settings); // { theme: 'light' }
+console.log(Object.isFrozen(settings)); // true
+```
+
+Under the hood they just flip the flags from the last section. All three stop new keys. `seal` also sets `configurable: false` on every property. `freeze` also sets `writable: false`. And like before, a blocked change is silent in sloppy mode and a `TypeError` in strict mode.
+
+**`const` is not `freeze`.** `const` only stops the **variable** from pointing to a different object. The object itself can still change.
+
+```js
+const settings = {
+    theme: "light",
+};
+
+// The object can change...
+settings.theme = "calm";
+console.log(settings); // { theme: 'calm' }
+
+// ...but the variable can't point to a new object.
+try {
+    settings = {};
+} catch (error) {
+    console.log(error.message); // Assignment to constant variable.
+}
+```
+
+**`freeze` is shallow.** It locks only the first level. A nested object can still change.
+
+```js
+const user = {
+    name: "Asha",
+    address: {
+        city: "Pune",
+    },
+};
+
+Object.freeze(user);
+
+user.name = "Ravi";
+user.address.city = "Delhi";
+
+console.log(user.name); // Asha
+console.log(user.address.city); // Delhi
+```
+
+To lock every level, freeze the object, then go into each nested object and freeze that too.
+
+```js
+function deepFreeze(object) {
+    // Freeze first. If two objects point at each other,
+    // the isFrozen check below stops us from looping forever.
+    Object.freeze(object);
+
+    for (const value of Object.values(object)) {
+        const isObject = typeof value === "object" && value !== null;
+
+        if (isObject && !Object.isFrozen(value)) {
+            deepFreeze(value);
+        }
+    }
+
+    return object;
+}
+
+const user = {
+    address: {
+        city: "Pune",
+    },
+};
+
+deepFreeze(user);
+user.address.city = "Delhi";
+console.log(user.address.city); // Pune
+```
+
+## Common mistakes
+
+- **Thinking `const` makes an object unchangeable.** It only stops reassigning the variable. Use `Object.freeze` to lock the object.
+- **Thinking `freeze` is deep.** Nested objects can still change. You need a `deepFreeze`.
+- **Expecting an error from a blocked change.** Outside strict mode, writing to a frozen object or a read-only property fails **silently**.
+- **Forgetting that `defineProperty` flags default to `false`.** The property ends up read-only, hidden and undeletable.
+- **Using a dot with a variable key.** `user.key` looks for a key literally named `"key"`. Use `user[key]`.
+- **Using `for...in` and getting inherited keys.** Use `Object.keys`, or check `Object.hasOwn` in the loop.
+- **Expecting keys in the order you added them.** Number-like keys always come first, sorted.
+- **A setter that sets its own name.** `set name(value) { this.name = value; }` calls itself forever: `RangeError: Maximum call stack size exceeded`. Store the value under another key, like `_name`.
+
+## In the interview
+
+A common question is "What's the difference between `const`, `Object.freeze` and `Object.seal`?"
+
+> "`const` only stops the variable from pointing to a new object: the object can still change. To lock the object, there are three levels. `preventExtensions` blocks adding keys. `seal` also blocks deleting, but values can still change. `freeze` also blocks changing values, so the object is read-only. All three are shallow, so for nested data I'd write a recursive `deepFreeze`. Outside strict mode, blocked changes fail silently. In strict mode they throw a `TypeError`."
+
+**Likely follow-up:** "How can you hide a property from `Object.keys` and `JSON.stringify`?"
+
+**Answer:** "Every property has three flags: `writable`, `enumerable` and `configurable`. I'd use `Object.defineProperty` with `enumerable: false`. Then `Object.keys`, `for...in`, spread and `JSON.stringify` all skip it, but you can still read it directly. That's how built-ins like an array's `length` stay hidden. One trap: with `defineProperty`, every flag I leave out is `false`."
+
+<Callout title="Remember this" type="success">
+  - Create objects with a **literal** `{}`, a **constructor** (`new`), or **`Object.create(proto)`**. `Object.create(null)` has no prototype at all.
+  - **`Object.keys`, `values`, `entries`** give arrays of the object's **own** keys, values or pairs. **`for...in`** also visits inherited keys.
+  - Every property has 3 flags: **writable, enumerable, configurable**. `defineProperty` sets any flag you leave out to `false`.
+  - **Getters and setters** run when a property is read or written: `get fullName()`, `set fullName(value)`.
+  - **preventExtensions** (no adding) → **seal** (no adding or deleting) → **freeze** (no changes at all). All are **shallow**.
+  - **`const` is not `freeze`:** it locks the variable, not the object.
+</Callout>

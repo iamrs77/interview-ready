@@ -1,12 +1,169 @@
 ---
 title: "Classes"
-description: "Class syntax, and what it really does under the hood."
+description: "A blueprint for making objects: constructor, methods, this, static, getters and setters."
 icon: Building
-planned: true
 ---
 
-- Class syntax: constructor and methods
-- Classes as sugar over prototypes
-- Static members
-- Getters and setters
-- Class fields and #private fields
+## What is a class?
+
+In Object-Oriented Programming (OOP), **classes** are one of the core building blocks. A class is a **blueprint**, or template, for creating objects.
+
+Imagine you have **toys**. Each toy is a **thing**, like a car, a doll or a robot. Each toy has:
+
+- **Properties:** things about the toy, like its color and size.
+- **Actions:** things the toy can do, like move or talk.
+
+A class describes the properties and actions once. Then you can make as many objects from it as you want.
+
+```js
+class Car {
+    constructor(brand, model) {
+        this.brand = brand;
+        this.model = model;
+    }
+
+    startEngine() {
+        console.log(`${this.brand} ${this.model} engine started.`);
+    }
+}
+
+const myCar = new Car("Toyota", "Corolla");
+myCar.startEngine(); // Toyota Corolla engine started.
+```
+
+Here:
+
+- `Car` → the class
+- `myCar` → an object, also called an **instance** of `Car`
+- `new Car(...)` → creates a new object from the class
+- `constructor()` → sets up the new object with its first values
+- `brand` and `model` → properties
+- `startEngine()` → a method (an action)
+- `this` → the current object. Inside `myCar.startEngine()`, `this` is `myCar`.
+
+## Key concepts
+
+| Concept | Description |
+| --- | --- |
+| **Class** | A blueprint to create objects |
+| **Object** | An instance of a class |
+| **Constructor** | A special method that sets up a new object |
+| **Method** | A function defined inside a class |
+| **this** | The current instance of the class |
+| [**Inheritance**](./inheritance.mdx) | One class can inherit from another class |
+| [**Encapsulation**](./encapsulation.mdx) | Controlling access to an object's data and behavior |
+| [**Abstraction**](./abstraction.mdx) | Hiding details that don't matter |
+| [**Polymorphism**](./polymorphism.mdx) | The same method call can behave differently, depending on the object |
+
+## Object: one toy
+
+An **object** is like one toy. For example, a red toy car.
+
+- Properties: color is red, wheels is 4.
+- Action: `drive()`. The car can drive!
+
+In code:
+
+```js
+let toyCar = {
+    color: "red",
+    wheels: 4,
+    drive: function () {
+        console.log("Vroom! The car is driving.");
+    },
+};
+
+toyCar.drive(); // Vroom! The car is driving.
+```
+
+## Class: a blueprint for many toys
+
+An object like `toyCar` is **one** toy. To make many toys with the same shape, write a class:
+
+```js
+class ToyCar {
+    constructor(color, wheels) {
+        this.color = color; // property
+        this.wheels = wheels;
+    }
+
+    // action
+    drive() {
+        console.log(`Vroom! The ${this.color} car is driving.`);
+    }
+}
+
+// Make two toy cars from the same blueprint.
+let car1 = new ToyCar("red", 4);
+let car2 = new ToyCar("blue", 3);
+
+console.log(car1.color); // red
+console.log(car2.color); // blue
+
+car1.drive(); // Vroom! The red car is driving.
+car2.drive(); // Vroom! The blue car is driving.
+```
+
+**Instance properties** belong to each object: `car1.color` and `car2.color` are separate values. Every instance can call the class's methods, like `drive()`.
+
+## Static properties and methods
+
+A **static** property or method belongs to the **class itself**, not to the objects made from it.
+
+```js
+class Calculator {
+    static add(a, b) {
+        return a + b;
+    }
+}
+
+console.log(Calculator.add(5, 7)); // 12
+
+// An instance doesn't have it.
+const calc = new Calculator();
+console.log(calc.add); // undefined
+```
+
+You call it on the class name: `Calculator.add(...)`. You don't need to create an object first.
+
+## Getters and setters
+
+A **getter** controls how a property is **read**. A **setter** controls how a property is **changed**.
+
+```js
+class Person {
+    constructor(name) {
+        this._name = name;
+    }
+
+    get name() {
+        return this._name.toUpperCase();
+    }
+
+    set name(newName) {
+        if (newName.length > 2) {
+            this._name = newName;
+        } else {
+            console.log("Name too short");
+        }
+    }
+}
+
+let p = new Person("Rohit");
+console.log(p.name); // ROHIT
+
+p.name = "Al"; // Name too short
+p.name = "Alex"; // valid
+console.log(p.name); // ALEX
+```
+
+- `p.name` looks like a normal property, but reading it runs `get name()`.
+- `p.name = "Al"` runs `set name("Al")`, which can check the value and refuse it.
+- The real value is kept in `_name`. The `_` is a naming habit that means "internal, don't use from outside". It needs a different name: inside the setter, `this.name = newName` would call the setter again, forever.
+
+<Callout title="Remember this" type="success">
+  - A **class** is a blueprint. An **object** (instance) is one thing made from it with `new`.
+  - The **constructor** sets up a new object. **Methods** are its actions. **`this`** is the current object.
+  - **Instance properties** belong to each object. **Static** members belong to the class: `Calculator.add(5, 7)`.
+  - A **getter** runs when a property is read. A **setter** runs when it's changed, and can refuse bad values.
+</Callout>

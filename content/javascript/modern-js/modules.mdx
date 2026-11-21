@@ -1,11 +1,320 @@
 ---
 title: "Modules"
-description: "ES modules vs CommonJS, and how imports work."
+description: "Named vs default exports, ES modules vs CommonJS, live bindings, caching and dynamic import()."
 icon: Package
-planned: true
 ---
 
-- import and export (named and default)
-- ES modules vs CommonJS (require)
-- Live bindings and module caching
-- Dynamic import()
+## The idea
+
+A **module** is one file with its **own scope**. Variables and functions inside it are private. The file chooses what to share with `export`, and other files take what they need with `import`.
+
+Think of a restaurant kitchen. Each station (a file) has its own tools and ingredients, which nobody else touches. It only hands out finished dishes (exports) through the counter. The waiter (another file) asks for a dish by name (import).
+
+Before modules, every script on a page shared **one global scope**. Two scripts with a function called `init` would overwrite each other. Modules fix that, and they make it clear which file depends on which.
+
+Each example below shows its file name in a comment at the top, like `// math.js`.
+
+## import and export
+
+### Named exports
+
+Put `export` in front of anything you want to share. A file can have **many** named exports. Anything without `export` stays private to the file.
+
+```js noRun
+// math.js
+export const PI = 3.14;
+
+export function add(first, second) {
+    return first + second;
+}
+
+// No export: only code inside math.js can use this.
+function roundToTwo(number) {
+    return Math.round(number * 100) / 100;
+}
+```
+
+To import named exports, use **curly braces** and the **exact same names**:
+
+```js noRun
+// app.js
+import { add, PI } from "./math.js";
+
+console.log(add(2, 3)); // 5
+console.log(PI); // 3.14
+```
+
+You can also:
+
+```js noRun
+// app.js
+
+// Rename while importing, with "as".
+import { add as sum } from "./math.js";
+console.log(sum(1, 2)); // 3
+
+// Import everything into one object.
+import * as math from "./math.js";
+console.log(math.add(1, 2)); // 3
+console.log(math.PI); // 3.14
+```
+
+Instead of writing `export` in front of each item, you can list them once at the bottom of the file: `export { add, PI };`.
+
+### Default exports
+
+A file can have **one** default export. It's the "main thing" the file gives out, like a React component or a class.
+
+```js noRun
+// logger.js
+export default function log(message) {
+    console.log("[log] " + message);
+}
+```
+
+To import a default export, use **no curly braces**. You can pick **any name** you like:
+
+```js noRun
+// app.js
+import log from "./logger.js";
+import writeLog from "./logger.js";
+
+log("hello"); // [log] hello
+writeLog("same function"); // [log] same function
+```
+
+One file can have a default export **and** named exports. You've seen this with React:
+
+```js noRun
+// The default export first, then the named exports in curly braces.
+import React, { useState, useEffect } from "react";
+```
+
+### Named vs default: the must-know table
+
+| | Named export | Default export |
+| --- | --- | --- |
+| How many per file | As many as you like | One at most |
+| Export | `export function add() {}` | `export default function add() {}` |
+| Import | `import { add } from "./math.js"` | `import add from "./math.js"` |
+| Curly braces | **Yes** | **No** |
+| Name when importing | Must match (or rename with `as`) | Any name you like |
+| A wrong name | Error when the file loads | No error: you just get the default |
+| Good for | A file with many helpers (utils) | A file with one main thing (a component, a class) |
+
+Many teams prefer **named exports**:
+
+- A typo is caught right away. `import { ad } from "./math.js"` fails with `SyntaxError: The requested module './math.js' does not provide an export named 'ad'`.
+- The same thing has the **same name** in every file, so search and rename work well.
+- Editors can suggest and auto-import named exports more easily.
+
+Default exports are still needed in some places. For example, Next.js wants each `page.tsx` file to `export default` its page component.
+
+### Re-exporting
+
+A file can pass on exports from other files. This is often used in an `index.js` that collects a folder's exports in one place:
+
+```js noRun
+// utils/index.js
+export { add, PI } from "./math.js";
+export { default as log } from "./logger.js";
+```
+
+```js noRun
+// app.js
+import { add, log } from "./utils/index.js";
+```
+
+## ES modules vs CommonJS (require)
+
+JavaScript has **two** module systems. **ES modules** (ESM) use `import` and `export`. They are the official standard, and they work in browsers and in Node.js. **CommonJS** (CJS) uses `require` and `module.exports`. It's Node's older system, from before ES modules existed, and you'll still see it in a lot of Node code.
+
+Here is the same code in CommonJS:
+
+```js noRun
+// math.cjs
+function add(first, second) {
+    return first + second;
+}
+
+module.exports = { add };
+```
+
+```js noRun
+// app.cjs
+const { add } = require("./math.cjs");
+
+console.log(add(2, 3)); // 5
+```
+
+| | ES modules (ESM) | CommonJS (CJS) |
+| --- | --- | --- |
+| Syntax | `import` / `export` | `require()` / `module.exports` |
+| Works in | Browsers and Node.js | Node.js (browsers need a bundler) |
+| When imports are read | **Before** any code runs (static) | When the `require` line runs (dynamic) |
+| Can it be inside an `if`? | No, `import` must be at the top level | Yes, `require` is a normal function call |
+| What you get | A **live binding** (see below) | The `module.exports` object. A number or string in it is a **copy**, taken at export time |
+| Top-level `await` | Yes | No |
+| Strict mode | Always | Only with `"use strict"` |
+| `this` at the top | `undefined` | `module.exports` |
+
+**How Node.js picks one:** a `.mjs` file is ESM, and a `.cjs` file is CommonJS. A `.js` file is ESM if the nearest `package.json` has `"type": "module"`, and CommonJS if not. In a browser, a script is a module when it's loaded with `<script type="module">`.
+
+You can't use `require` inside an ES module. Node throws `ReferenceError: require is not defined in ES module scope, you can use import instead`. To load an ES module from CommonJS code, use `import()` (see below). Recent Node.js versions can also `require()` an ES module.
+
+**Why static imports matter:** in ESM, the tools can see every `import` and `export` **without running the code**. So a bundler like webpack or Vite can find exports that nobody imports, and drop them from the final file. This is called **tree shaking**. With `require`, the tool can't be sure what is used, because `require` can run anywhere, with any value.
+
+## Live bindings and module caching
+
+### Live bindings
+
+An ES module import is **not a copy**. It's a **live view** of the variable inside the other file. If that file changes the variable, you see the new value.
+
+```js noRun
+// counter.js
+export let count = 0;
+
+export function increment() {
+    count = count + 1;
+}
+```
+
+```js noRun
+// app.js
+import { count, increment } from "./counter.js";
+
+console.log(count); // 0
+increment();
+console.log(count); // 1
+```
+
+But the view is **read-only**. Only the file that owns the variable can change it:
+
+```js noRun
+// app.js
+import { count } from "./counter.js";
+
+// TypeError: Assignment to constant variable.
+count = 5;
+```
+
+CommonJS is different. `module.exports = { count }` puts a **copy** of the current value into a new object. When the file changes its own `count` later, the copy doesn't change.
+
+```js noRun
+// counter.cjs
+let count = 0;
+
+function increment() {
+    count = count + 1;
+}
+
+module.exports = { count, increment };
+```
+
+```js noRun
+// app.cjs
+const counter = require("./counter.cjs");
+
+console.log(counter.count); // 0
+counter.increment();
+// Still 0: counter.count was copied when the file was loaded.
+console.log(counter.count); // 0
+```
+
+### Module caching: the code runs once
+
+A module's code runs **only once**, the first time any file imports it. Every later import gets the **same** module from a cache. So all the importers share the same objects.
+
+```js noRun
+// config.js
+console.log("config.js runs");
+
+export const settings = { theme: "light" };
+```
+
+```js noRun
+// a.js
+import { settings } from "./config.js";
+
+settings.theme = "dark";
+```
+
+```js noRun
+// app.js
+import "./a.js";
+import { settings } from "./config.js";
+
+console.log(settings.theme);
+
+// What Node prints:
+// config.js runs
+// dark
+```
+
+- `config.js runs` is printed **once**, even though two files import `config.js`.
+- `a.js` changed `settings.theme`, and `app.js` sees `"dark"`, because both got the **same object**.
+
+This is why a module is a natural **singleton**: export one object (a database connection, a logger, a store), and every file that imports it shares that one object. CommonJS caches modules in the same way.
+
+## Dynamic import()
+
+A normal `import` is **static**: it sits at the top of the file and always loads, before any code runs. **Dynamic `import()`** looks like a function call. It loads a module **when that line runs**, and gives back a **promise** of the module.
+
+```js noRun
+// app.js
+async function openChart() {
+    // chart.js is downloaded and run only now, when the user asks for it.
+    const chartModule = await import("./chart.js");
+
+    chartModule.drawChart();
+}
+```
+
+The promise gives you the module object. A default export is in its `default` property:
+
+```js noRun
+// app.js
+const loggerModule = await import("./logger.js");
+
+loggerModule.default("hello"); // [log] hello
+```
+
+When to use it:
+
+- **Code splitting:** load a heavy part of the app (a chart library, an editor, an admin page) only when it's needed. Bundlers put each `import()` in its own small file, so the first page load is faster. React's `lazy()` and Next.js's `dynamic()` both take a function that calls `import()`.
+- **Loading on a condition:** `import()` can be inside an `if`, and the path can be a variable.
+- **Loading an ES module from CommonJS**, where `import` statements are not allowed.
+
+| | Static `import` | Dynamic `import()` |
+| --- | --- | --- |
+| Where | Top level of the file only | Anywhere, even inside an `if` or a function |
+| When it loads | Before any code in the file runs | When that line runs |
+| The path | A fixed string | Can be a variable |
+| Gives back | The bindings directly | A promise of the module object |
+| Tree shaking | Yes | Harder |
+
+## Common mistakes
+
+- **Curly braces mixed up.** `import add from "./math.js"` when `add` is a **named** export fails: `does not provide an export named 'default'`. And `import { log } from "./logger.js"` when `log` is the **default** export fails too.
+- **`export default const x = 1`.** That's a SyntaxError. Write `const x = 1;` and then `export default x;` on the next line.
+- **Leaving out the file extension.** Bundlers allow `import "./math"`, but Node.js and browsers need the full path: `"./math.js"`. Node throws `ERR_MODULE_NOT_FOUND`.
+- **Mixing the two systems.** Using `require` in an ES module, or `import` in a CommonJS file, without changing the file type.
+- **Thinking an import is a copy.** ES module imports are live and read-only. You can't assign to them, but you **can** change the inside of an imported object, and everyone sees it.
+- **Expecting module code to run on every import.** It runs once, then it's cached.
+
+## In the interview
+
+> "A module is a file with its own scope. It shares things with `export`, and other files take them with `import`. Named exports can be many per file and are imported with curly braces and the exact name. A default export is one per file, imported without braces, under any name. ES modules are the standard: imports are static, so bundlers can tree shake, and an import is a live, read-only binding. CommonJS is Node's older `require` and `module.exports`: it loads when the line runs, and gives me the `module.exports` object, where a number or string is only a copy taken at export time. Both run a module once and cache it. And `import()` loads a module later, as a promise, which is how code splitting works."
+
+**Likely follow-up:** "Why does tree shaking work with ES modules, but not well with CommonJS?"
+
+**Answer:** "ES module imports and exports are static: they must be at the top level, with fixed names and paths. So a bundler can read them without running the code, see which exports are never imported, and remove them. With CommonJS, `require` is a normal function call. It can be inside an `if`, the path can be a variable, and `module.exports` can be changed at runtime. The bundler can't know for sure what is used, so it has to keep everything."
+
+<Callout title="Remember this" type="success">
+  - **Named export:** many per file, `import { add } from "./math.js"`, the name must match (or use `as`).
+  - **Default export:** one per file, `import anyName from "./logger.js"`, no curly braces.
+  - **ESM** (`import`/`export`) is the standard and static, so it allows **tree shaking**. **CommonJS** (`require`/`module.exports`) is Node's older, dynamic system.
+  - ESM imports are **live, read-only bindings**. CommonJS gives the `module.exports` object: a number or string in it is a **copy**, taken at export time.
+  - A module runs **once**, then it's **cached**: every importer shares the same objects.
+  - **`import()`** loads a module on demand and gives back a **promise**. It's used for code splitting.
+</Callout>

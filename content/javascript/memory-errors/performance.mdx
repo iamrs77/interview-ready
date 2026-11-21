@@ -1,10 +1,55 @@
 ---
 title: "Performance"
-description: "Measure code, and make slow code faster."
+description: "Measure how long your code takes with performance.now()."
 icon: Zap
-planned: true
 ---
 
-- Measuring: performance.now() and console.time
-- Debounce, throttle and memoize as speed tools
-- Long loops block the event loop: split heavy work into chunks
+## The performance object
+
+`performance` is a **built-in global object**, in browsers and in Node.js. You don't import anything.
+
+`performance.now()` returns the time in **milliseconds, with decimals**, counted from when the page (or the Node.js process) started. Call it before and after some code, and subtract to get how long the code took.
+
+## Measuring a function
+
+```js
+function measurePerformance(fn, args = [], runs = 1) {
+    let totalTime = 0;
+
+    for (let i = 0; i < runs; i++) {
+        const start = performance.now();
+
+        fn(...args); // Call your function with arguments
+
+        const end = performance.now();
+        totalTime += end - start;
+    }
+
+    const averageTime = totalTime / runs;
+
+    console.log(
+        `⏱️ Average Time: ${averageTime.toFixed(4)} ms over ${runs} run(s)`
+    );
+}
+
+// Testing the performance function
+function sum(a, b) {
+    return a + b;
+}
+
+measurePerformance(sum, [5, 10], 10);
+// ⏱️ Average Time: 0.0005 ms over 10 run(s)   (the number changes each time)
+```
+
+- `end - start` is how long **one** run took.
+- One run can be faster or slower by chance, so the function runs `runs` times and takes the **average**.
+- `toFixed(4)` shows the time with 4 decimals.
+
+Why not `Date.now()`? It only counts **whole** milliseconds. `sum` takes far less than 1 millisecond, so `Date.now()` would show `0`. `performance.now()` has the decimals to measure it.
+
+<Callout title="Remember this" type="success">
+  - `performance` is a **built-in global** object (browsers and Node.js).
+  - `performance.now()` = the time in milliseconds, **with decimals**. Measure with `end - start`.
+  - Run the code **many times** and take the **average**, because one run can be off by chance.
+  - `Date.now()` has only whole milliseconds, too rough for fast code.
+</Callout>

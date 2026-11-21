@@ -1,11 +1,69 @@
 ---
 title: "Generics"
-description: "Write code that works for many types, safely."
+description: "Write one function that works for many types, and keep the exact type."
 icon: Puzzle
-planned: true
 ---
 
-- Generic functions
-- Generic constraints with extends
-- Generic classes and interfaces
-- Default type parameters
+## The problem
+
+Say you want a function that returns the first item of any array: numbers, strings, anything.
+
+**Bad: `any`**
+
+```ts
+function first(arr: any[]) {
+    return arr[0];
+}
+
+const num = first([1, 2, 3]);       // num is any: the type is lost
+const str = first(["a", "b", "c"]); // str is any too
+```
+
+The result is `any`, so TypeScript stops checking it. A mistake like `num.toUpperCase()` gets no error, and crashes when the code runs.
+
+**Okay, but not good: a union**
+
+```ts
+function first(arr: (number | string)[]) {
+    return arr[0];
+}
+
+const num = first([1, 2, 3]);       // num is number | string, not just number
+const str = first(["a", "b", "c"]); // str is number | string, not just string
+```
+
+Better than `any`, but the exact type is still lost. You passed numbers, yet TypeScript only knows the result is "a number or a string":
+
+```ts
+num.toFixed(2);
+// ❌ Error: Property 'toFixed' does not exist on type 'string | number'.
+```
+
+It also only works for numbers and strings. An array of booleans isn't allowed.
+
+## Using generics
+
+```ts
+function first<T>(arr: T[]): T {
+    return arr[0];
+}
+
+const num = first<number>([1, 2, 3]);       // num: number
+const str = first<string>(["a", "b", "c"]); // str: string
+```
+
+- `<T>` is a **type placeholder**. It stands for "whatever type you call this with".
+- `arr: T[]` means "an array of T". `: T` means "returns one T".
+- `first<number>(...)` sets T to `number`, so the result is a `number`. With strings, T is `string`.
+
+You can usually leave out the `<number>`. TypeScript works out T from the array you pass: `first([1, 2, 3])` also gives a `number`.
+
+The placeholder can have any name, like `Type` or `ElementType`, but `T` is the usual choice.
+
+<Callout title="Remember this" type="success">
+  - `any` loses the type. A union keeps only "one of these types", not the exact one.
+  - A **generic** (`<T>`) is a type placeholder. It becomes the type you call the function with.
+  - `function first<T>(arr: T[]): T` works for any array, and returns the **exact** item type.
+  - TypeScript can usually work out `T` by itself: `first([1, 2, 3])` is a `number`.
+  - Any name works, but `T` is the convention.
+</Callout>

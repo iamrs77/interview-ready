@@ -1,11 +1,308 @@
 ---
 title: "Flatten and Memoize"
-description: "Flatten nested arrays and objects, and cache function results."
+description: "Write flatten for arrays and objects, memoize, and a curry that works for any length."
 icon: Layers
-planned: true
 ---
 
-- Flatten an array (with depth)
-- Flatten a nested object into dot keys
-- Memoize a function
-- Curry a function of any length
+## The idea
+
+Four short coding questions that often come together. Each one is solved with **recursion** (a function that calls itself) or a **closure** (a function that remembers variables from where it was made).
+
+| Write this | It does | Example |
+| --- | --- | --- |
+| `flatten(array, depth)` | Pulls nested arrays up into one array | `[1, [2, [3]]]` → `[1, 2, 3]` |
+| `flattenObject(object)` | Turns nested objects into dot keys | `{ user: { name: "Asha" } }` → `{ "user.name": "Asha" }` |
+| `memoize(fn)` | Remembers results, so the same call is instant next time | `fastAdd(2, 3)` is worked out once |
+| `curry(fn)` | Lets you pass arguments one at a time | `add(1)(2)(3)` gives `6` |
+
+## Flatten an array (with depth)
+
+Think of **boxes inside boxes**. Flattening means unpacking every box and putting all the items on one table. The **depth** says how many layers of boxes to open.
+
+JavaScript has this built in: `array.flat(depth)`. In the interview, you are asked to write it yourself.
+
+The plan: walk through the items.
+
+- An item that is an **array**, while depth is still above 0: flatten it with **depth - 1**, then add its items one by one.
+- Anything else: add it as it is.
+
+```js
+function flatten(array, depth = Infinity) {
+    const result = [];
+
+    for (const item of array) {
+        if (Array.isArray(item) && depth > 0) {
+            // Flatten the inner array one level less, then add its items.
+            const flatItems = flatten(item, depth - 1);
+            for (const flatItem of flatItems) {
+                result.push(flatItem);
+            }
+        } else {
+            result.push(item);
+        }
+    }
+
+    return result;
+}
+
+const nested = [1, [2, [3, [4]]]];
+
+console.log(flatten(nested)); // [ 1, 2, 3, 4 ]
+console.log(flatten(nested, 1)); // [ 1, 2, [ 3, [ 4 ] ] ]
+console.log(flatten(nested, 2)); // [ 1, 2, 3, [ 4 ] ]
+console.log(nested.flat(Infinity)); // [ 1, 2, 3, 4 ]
+```
+
+How `flatten(nested, 1)` runs:
+
+| Call | depth | What happens |
+| --- | --- | --- |
+| `flatten([1, [2, [3, [4]]]], 1)` | 1 | push `1`. `[2, [3, [4]]]` is an array and depth is 1, so flatten it with depth 0. |
+| `flatten([2, [3, [4]]], 0)` | 0 | depth is 0, so nothing is opened: push `2`, push `[3, [4]]` as it is. |
+
+The result is `[1, 2, [3, [4]]]`.
+
+- With no depth, ours flattens **everything** (`Infinity`). The built-in `flat()` opens only **1** level by default.
+- **Time:** O(n) · **Space:** O(n), where n is the number of items at every level.
+
+## Flatten a nested object into dot keys
+
+The task: turn `{ user: { name: "Asha" } }` into `{ "user.name": "Asha" }`. Each key is the **path** to a value, with dots between the names, like a street address: country, city, street.
+
+The plan: walk the keys and carry a `prefix`, the path so far.
+
+- A value that is a **plain object**: go deeper. The new prefix is the full key so far.
+- Anything else (a string, a number, an array, `null`): save it under the full key.
+
+```js
+function flattenObject(object, prefix = "", result = {}) {
+    for (const key of Object.keys(object)) {
+        const value = object[key];
+
+        // "user" + "." + "name" becomes "user.name".
+        let fullKey = key;
+        if (prefix !== "") {
+            fullKey = prefix + "." + key;
+        }
+
+        const isObject = typeof value === "object" && value !== null;
+        if (isObject && !Array.isArray(value)) {
+            // Go deeper, and keep adding to the same result.
+            flattenObject(value, fullKey, result);
+        } else {
+            result[fullKey] = value;
+        }
+    }
+
+    return result;
+}
+
+const settings = {
+    theme: "light",
+    user: { name: "Asha", city: "Pune" },
+};
+
+console.log(flattenObject(settings));
+// { theme: 'light', 'user.name': 'Asha', 'user.city': 'Pune' }
+console.log(flattenObject({ a: { b: { c: 1 } } })); // { 'a.b.c': 1 }
+```
+
+- All the calls share **one** `result` object, passed down as the third argument. Each call only adds keys to it.
+- The `value !== null` check matters: `typeof null` is `"object"`, and `Object.keys(null)` throws.
+- Arrays are kept as they are. If the interviewer wants keys like `"tags.0"`, remove the `!Array.isArray(value)` check: arrays have keys `0`, `1` too, so they get walked like objects.
+
+## Memoize a function
+
+Think of a hard sum you worked out on paper. You write the answer on a **sticky note**. Next time someone asks the same sum, you read the note instead of working it out again.
+
+`memoize(fn)` returns a new function with a **cache** (the sticky notes). The cache is a `Map` from "these arguments" to "this result".
+
+```js
+function memoize(fn) {
+    // Results we already worked out: key -> result.
+    const cache = new Map();
+
+    return function (...args) {
+        // Turn all the arguments into one string key, like "[2,3]".
+        const key = JSON.stringify(args);
+
+        if (cache.has(key)) {
+            return cache.get(key);
+        }
+
+        const result = fn.apply(this, args);
+        cache.set(key, result);
+        return result;
+    };
+}
+
+let calls = 0;
+function slowAdd(a, b) {
+    calls = calls + 1;
+    return a + b;
+}
+
+const fastAdd = memoize(slowAdd);
+
+console.log(fastAdd(2, 3)); // 5
+console.log(fastAdd(2, 3)); // 5 (from the cache)
+console.log(fastAdd(4, 1)); // 5
+console.log(calls); // 2: slowAdd ran only twice
+```
+
+- `cache` is created once. The returned function keeps it alive, because it is a **closure**. See [Closures](../functions/closures.mdx).
+- Check with `cache.has(key)`, not `if (cache.get(key))`. A saved result can be `0`, `""` or `false`, and those look like "nothing" to an `if`.
+- `fn.apply(this, args)` passes on `this` and the arguments, so memoize also works for object methods. Same idea as in [Debounce and Throttle](./debounce-and-throttle.mdx).
+
+**Memoizing a recursive function.** The recursive calls must go through the memoized version too. Here `fib` calls `fib`, and `fib` is the memoized function, so every smaller answer is cached:
+
+```js
+function memoize(fn) {
+    const cache = new Map();
+
+    return function (...args) {
+        const key = JSON.stringify(args);
+
+        if (cache.has(key)) {
+            return cache.get(key);
+        }
+
+        const result = fn.apply(this, args);
+        cache.set(key, result);
+        return result;
+    };
+}
+
+const fib = memoize(function (n) {
+    if (n < 2) {
+        return n;
+    }
+
+    return fib(n - 1) + fib(n - 2);
+});
+
+// Without memoize: about 40 billion calls. With it: 51 calls do real work.
+console.log(fib(50)); // 12586269025
+```
+
+Only memoize **pure** functions: the same arguments must always give the same result. A function that reads the time, a random number or a database would return old answers from the cache.
+
+## Curry a function of any length
+
+Currying turns `add(a, b, c)` into `add(a)(b)(c)`: you pass the arguments **one call at a time**. It's like ordering a sandwich at a counter. You choose the bread, then the filling, then the sauce. The sandwich is made only when every choice is in.
+
+A good `curry` also accepts arguments in groups: `add(1, 2)(3)` and `add(1)(2, 3)` should work too.
+
+The key fact: **`fn.length`** is the number of parameters a function declares. `add(a, b, c)` has length 3. So `curry` keeps **collecting arguments** until it has at least `fn.length` of them, and then calls `fn`.
+
+```js
+function curry(fn) {
+    return function curried(...args) {
+        // Enough arguments? Call the real function.
+        if (args.length >= fn.length) {
+            return fn(...args);
+        }
+
+        // Not enough yet: return a function that waits for more.
+        return function (...moreArgs) {
+            const allArgs = args.concat(moreArgs);
+            return curried(...allArgs);
+        };
+    };
+}
+
+function add(a, b, c) {
+    return a + b + c;
+}
+
+const curriedAdd = curry(add);
+
+console.log(add.length); // 3
+console.log(curriedAdd(1)(2)(3)); // 6
+console.log(curriedAdd(1, 2)(3)); // 6
+console.log(curriedAdd(1)(2, 3)); // 6
+
+// A half-filled function can be reused safely.
+const addOne = curriedAdd(1);
+console.log(addOne(2)(3)); // 6
+console.log(addOne(10)(20)); // 31
+```
+
+How `curriedAdd(1)(2)(3)` runs:
+
+| Call | Arguments so far | Enough (3)? | Gives back |
+| --- | --- | --- | --- |
+| `curriedAdd(1)` | `[1]` | no | a function that waits for more |
+| `(2)` | `[1, 2]` | no | a function that waits for more |
+| `(3)` | `[1, 2, 3]` | yes | `add(1, 2, 3)`, which is `6` |
+
+- `curried` has a name, so the inner function can call it again with all the arguments so far.
+- `args.concat(moreArgs)` makes a **new** array. It never changes `args`, so `addOne` can be reused with different numbers.
+- Currying is about making reusable, half-filled functions. More on why in [Higher-Order Functions and Currying](../functions/higher-order-functions-and-currying.mdx).
+
+## Edge cases interviewers check
+
+| Function | Case | What should happen |
+| --- | --- | --- |
+| `flatten` | `[1, [], [2]]` | `[1, 2]`: an empty array adds nothing. |
+| `flatten` | depth `0` | A shallow copy. Nothing is opened. |
+| `flatten` | `["ab", ["c"]]` | `["ab", "c"]`: a string is not an array, so it stays whole. |
+| `flattenObject` | `{ a: null }` | `{ a: null }`: `null` is a value, not an object to walk into. |
+| `flattenObject` | `{ a: {} }` | The key `a` disappears: there's no value inside it. Save `{}` if it must stay. |
+| `memoize` | The result is `0` or `false` | Still cached, because we check `cache.has`. |
+| `memoize` | Objects as arguments | `JSON.stringify` gives equal objects the same key, if their keys are in the same order. For one object argument, you can use the object itself as the `Map` key. |
+| `curry` | More arguments than needed | `curriedAdd(1, 2, 3, 4)` still calls `add`, because we check `>=`, not `===`. |
+| `curry` | Rest or default parameters | `fn.length` doesn't count them: `(...nums) => {}` has length `0`. `curry` can't know when to stop. |
+
+## In the real world
+
+- `array.flat()` is built into JavaScript. **Lodash** also has `_.flattenDeep`, `_.memoize` and `_.curry`.
+- **React** uses memoization: `useMemo` and `React.memo` skip work when the inputs didn't change.
+- **Dot keys** are everywhere: MongoDB updates nested fields with keys like `"address.city"`, and Lodash's `_.get(user, "address.city")` reads a value by its path.
+
+## Common mistakes
+
+- **`result.push(flatten(item))`.** That pushes the whole inner array, so nothing gets flatter. Push its **items**.
+- **Forgetting `depth - 1`** in the recursive call. Then the depth never goes down.
+- **`if (cache.get(key))` in memoize.** Results like `0` or `false` are never found, so they are worked out again every time.
+- **Memoizing a recursive function from the outside only.** The inner calls still call the slow version. They must call the memoized one.
+- **A cache that grows forever.** Every new argument adds an entry. For many different inputs, limit the size (for example, an LRU cache that drops the oldest entry).
+- **`args.push(...)` inside curry.** It changes the shared array, so a reused half-filled function still holds the old arguments. Use `concat` to make a new array.
+
+## In the interview
+
+- **flatten:** say "recursion, and the depth goes down by one each level". Mention the built-in `flat()`.
+- **memoize:** say where the cache lives (a closure), how you build the key, and why you check with `has`.
+- **curry:** say "`fn.length` tells me how many arguments to wait for".
+
+> "For memoize, I return a new function that closes over a Map. I turn the arguments into a key with JSON.stringify. If the key is in the cache, I return the saved result. If not, I call the real function, save the result, and return it."
+
+> "For curry, I return a function that collects arguments. When it has at least `fn.length` of them, it calls the real function. If not, it returns another function that adds the next arguments to the ones so far, and tries again."
+
+**Likely follow-up:** "Write `sum` so that `sum(1)(2)(3)()` gives 6, for any number of calls."
+
+**Answer:** "`fn.length` can't help here, because there is no fixed number of arguments. So an **empty call** means 'stop'. `sum(a)` returns a function. If that function gets no value, it returns `a`. Otherwise it returns `sum(a + b)`, so the running total moves into the next call."
+
+```js
+function sum(total) {
+    return function (value) {
+        // An empty call means "done": give back the total.
+        if (value === undefined) {
+            return total;
+        }
+
+        return sum(total + value);
+    };
+}
+
+console.log(sum(1)(2)(3)()); // 6
+console.log(sum(5)()); // 5
+```
+
+<Callout title="Remember this" type="success">
+  - **flatten:** for each item, if it's an array and depth is above 0, flatten it with **depth - 1** and add its items. Built in: `array.flat(depth)`.
+  - **flattenObject:** carry a **prefix**, walk into plain objects, and save everything else under `prefix.key`. Check for `null`.
+  - **memoize:** a `Map` cache in a **closure**, a key from `JSON.stringify(args)`, and check with **`cache.has`**.
+  - **curry:** collect arguments until there are at least **`fn.length`**, then call `fn`. Use `concat`, never change the shared array.
+  - `sum(1)(2)(3)()`: there's no fixed length, so an **empty call** means stop.
+</Callout>

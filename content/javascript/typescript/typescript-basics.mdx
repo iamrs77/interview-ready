@@ -1,11 +1,238 @@
 ---
 title: "TypeScript Basics"
-description: "Types, interfaces and the questions interviewers ask most."
+description: "JavaScript plus types: core types, objects, functions, and types vs interfaces."
 icon: Type
-planned: true
 ---
 
-- Basic types and type inference
-- interface vs type
-- any vs unknown vs never
-- Optional and readonly
+## JavaScript + types = TypeScript
+
+**TypeScript is JavaScript with types.** You say what type each value should be, and TypeScript checks your code **before it runs**.
+
+In plain JavaScript, this mistake is only found when the code runs:
+
+```js
+function greet(name) {
+    return "Hello, " + name.toUpperCase();
+}
+
+greet(5); // ❌ Crashes when it runs: TypeError: name.toUpperCase is not a function
+```
+
+The same function in TypeScript:
+
+```ts
+function greet(name: string): string {
+    return "Hello, " + name.toUpperCase();
+}
+
+greet(5);
+// ❌ Error: Argument of type 'number' is not assignable to parameter of type 'string'.
+```
+
+- `name: string` means the parameter must be a string.
+- `): string` means the function returns a string.
+
+TypeScript shows this error in your editor, **before** the code runs. Browsers and Node.js only run JavaScript, so TypeScript code is turned into plain JavaScript first, and the types are removed.
+
+## Core types
+
+| Type | Example |
+| --- | --- |
+| `string` | `"hello"`, `'Rohit'` |
+| `number` | `42`, `3.14` |
+| `boolean` | `true`, `false` |
+| `null` | `null` |
+| `undefined` | `undefined` |
+| `any` | Turns type checking off |
+| `unknown` | A safer alternative to `any` |
+
+```ts
+let userName: string = "Rohit";
+let age: number = 27;
+let isActive: boolean = true;
+
+let nothing: null = null;
+let notDefined: undefined = undefined;
+```
+
+A value of the wrong type is an error:
+
+```ts
+let userName: string = 123;   // ❌ Error: Type 'number' is not assignable to type 'string'.
+let age: number = "twenty";   // ❌ Error: Type 'string' is not assignable to type 'number'.
+```
+
+## any vs unknown
+
+```ts
+let something: any = "Could be anything";
+something = 42;             // ✅ Works
+something.toUpperCase();    // No error from TypeScript, but it crashes when it runs: 42 has no toUpperCase
+
+let safe: unknown = "Hello";
+safe.toUpperCase();         // ❌ Error: 'safe' is of type 'unknown'.
+
+if (typeof safe === "string") {
+    console.log(safe.toUpperCase()); // ✅ Safe: inside this if, TypeScript knows it's a string
+}
+```
+
+- **`any`** turns type checking **off**. TypeScript lets you do anything with the value, so mistakes only show up when the code runs.
+- **`unknown`** means "this could be anything, so **check it first**". TypeScript won't let you use the value until you check its type, here with `typeof`. See [Unions and Narrowing](./narrowing-and-unions.mdx).
+
+## Arrays
+
+```ts
+let scores: number[] = [90, 85, 100];
+let names: string[] = ["Rohit", "Ankit"];
+let mixed: (number | string)[] = [1, "two", 3];   // ✅ Numbers or strings (a union)
+let anything: any[] = [1, "two", true];           // Works, but not recommended: no type checks
+```
+
+`number | string` means "a number **or** a string". It's called a **union**. See [Unions and Narrowing](./narrowing-and-unions.mdx).
+
+## Objects
+
+A `type` describes the shape of an object: which properties it has, and the type of each one.
+
+```ts
+type User = {
+    name: string;
+    age: number;
+    isAdmin?: boolean; // ? means it's optional
+};
+
+let u1: User = { name: "Rohit", age: 27 };
+let u2: User = { name: "Ankit", age: 30, isAdmin: true };
+```
+
+`u1` has no `isAdmin`, and that's fine, because `isAdmin?` is optional.
+
+### Nested objects
+
+A type can use another type for one of its properties:
+
+```ts
+type Address = {
+    street: string;
+    city: string;
+};
+
+type User = {
+    name: string;
+    address: Address;
+};
+
+const user: User = {
+    name: "Rohit",
+    address: {
+        street: "123 King St",
+        city: "Toronto",
+    },
+};
+```
+
+## Functions
+
+Give a type to each parameter and to the return value:
+
+```ts
+// c is an optional parameter
+const add = (a: number, b: number, c?: number): number => {
+    return a + b + (c ?? 0);
+};
+
+add(1, 2);     // 3
+add(1, 2, 3);  // 6
+```
+
+When `c` is not passed, it's `undefined`, so `c ?? 0` uses `0` instead.
+
+### Object parameters
+
+There are two ways to type a parameter that is an object.
+
+**Option 1: a named type.**
+
+```ts
+type Person = {
+    name: string;
+    age: number;
+};
+
+function greet({ name, age }: Person) {
+    console.log(`Hello, ${name}. You are ${age}.`);
+}
+```
+
+**Option 2: the type written inline.**
+
+```ts
+function greet({ name, age }: { name: string; age: number }) {
+    console.log(`Hello, ${name}. You are ${age}.`);
+}
+```
+
+Both work the same. A named type is easier to read and can be reused.
+
+### void and never
+
+- **`void`:** the function **doesn't return** anything.
+
+```ts
+function log(msg: string): void {
+    console.log(msg);
+}
+```
+
+- **`never`:** the function **never finishes**. It always throws an error, or it loops forever.
+
+```ts
+function fail(message: string): never {
+    throw new Error(message);
+}
+```
+
+## Types vs interfaces
+
+Both describe the shape of an object. They differ in how you extend them.
+
+A **type** is extended with `&`:
+
+```ts
+type User = {
+    name: string;
+    age: number;
+};
+
+// Employee = everything in User, plus employeeId
+type Employee = User & {
+    employeeId: number;
+};
+```
+
+An **interface** is extended with `extends`:
+
+```ts
+interface User {
+    name: string;
+    age: number;
+}
+
+// Employee = everything in User, plus employeeId
+interface Employee extends User {
+    employeeId: number;
+}
+```
+
+For object shapes, both work. Only `type` can name other things, like a union: `type Id = string | number`.
+
+<Callout title="Remember this" type="success">
+  - **TypeScript = JavaScript + types.** Mistakes are caught **before** the code runs.
+  - Core types: `string`, `number`, `boolean`, `null`, `undefined`.
+  - **`any`** turns checking off. **`unknown`** makes you check the type before using the value.
+  - Arrays: `number[]`, `string[]`, `(number | string)[]`.
+  - `type User = { ... }` describes an object. `?` makes a property or parameter **optional**.
+  - **`void`**: returns nothing. **`never`**: never finishes (always throws, or loops forever).
+  - Extend a **type** with `&`. Extend an **interface** with `extends`.
+</Callout>

@@ -1,11 +1,65 @@
 ---
 title: "Unions and Narrowing"
-description: "Make TypeScript know the exact type."
+description: "A value that can be one of several types, and how to check which one it is."
 icon: Funnel
-planned: true
 ---
 
-- Union and intersection types
-- Type guards: typeof, in, instanceof
-- Discriminated unions
-- Custom type guards
+## Union types
+
+A **union** means a value can be **one of several types**. You write it with `|`, which you read as "or".
+
+```ts
+let value: string | number;
+
+value = "Hello";   // ✅ OK
+value = 42;        // ✅ OK
+value = true;      // ❌ Error: Type 'boolean' is not assignable to type 'string | number'.
+```
+
+It works for arrays too:
+
+```ts
+let mixed: (number | string)[] = [1, "two", 3];
+```
+
+## Narrowing
+
+When a value is `string | number`, TypeScript only lets you do things that work for **both** types. `toUpperCase` only exists on strings, so this is an error:
+
+```ts
+function format(value: string | number) {
+    return value.toUpperCase();
+    // ❌ Error: Property 'toUpperCase' does not exist on type 'string | number'.
+}
+```
+
+Check the type first with `typeof`. Inside the `if`, TypeScript knows the exact type. This is called **narrowing**.
+
+```ts
+function format(value: string | number): string {
+    if (typeof value === "string") {
+        return value.toUpperCase();   // here, value is a string
+    }
+    return value.toFixed(2);          // here, value can only be a number
+}
+
+format("hello");   // "HELLO"
+format(3.14159);   // "3.14"
+```
+
+The same check makes an `unknown` value safe to use (see [any vs unknown](./typescript-basics.mdx#any-vs-unknown)):
+
+```ts
+let safe: unknown = "Hello";
+
+if (typeof safe === "string") {
+    console.log(safe.toUpperCase()); // ✅ Safe
+}
+```
+
+<Callout title="Remember this" type="success">
+  - A **union** (`string | number`) means the value is one of these types.
+  - With a union, TypeScript only allows what works for **every** type in it.
+  - **Narrowing:** check with `typeof`, and inside the `if`, TypeScript knows the exact type.
+  - The same `typeof` check makes an `unknown` value safe to use.
+</Callout>

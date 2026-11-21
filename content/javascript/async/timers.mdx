@@ -2,9 +2,259 @@
 title: "Timers"
 description: "setTimeout, setInterval, and how to clear them."
 icon: AlarmClock
-planned: true
 ---
 
-- setTimeout and clearTimeout
-- setInterval and clearInterval
-- Why setInterval drifts, and recursive setTimeout
+## The idea
+
+Timers run code **later**. `setTimeout` runs a function **once**, after a delay. `setInterval` runs it **again and again**, until you stop it.
+
+Think of a **kitchen timer** and an **alarm clock**. The kitchen timer rings once, when the pasta is ready: that's `setTimeout`. The alarm clock rings every morning until you switch it off: that's `setInterval`. Both have an "off" button: `clearTimeout` and `clearInterval`.
+
+## How it works
+
+### setTimeout and clearTimeout
+
+`setTimeout(fn, ms)` means "run `fn` after **at least** `ms` milliseconds". Your code doesn't wait for it. It goes straight on to the next line.
+
+```js
+console.log("order the pizza");
+
+setTimeout(() => {
+    console.log("the pizza is here");
+}, 1000);
+
+console.log("watch TV while waiting");
+// order the pizza
+// watch TV while waiting
+// the pizza is here
+```
+
+Things to know:
+
+- The delay is in **milliseconds**: 1000 ms is 1 second.
+- It's the **shortest** wait, not an exact time. The callback goes into the task queue and runs only when the thread is free. See [The Event Loop](./event-loop.mdx).
+- Pass the function, don't call it: `setTimeout(sayHi, 1000)`, not `setTimeout(sayHi(), 1000)`.
+- Extra arguments after the delay are passed to your function: `setTimeout(greet, 1000, "Asha")` calls `greet("Asha")`.
+
+`setTimeout` gives back an **id**. Pass that id to `clearTimeout` to cancel the timer before it runs:
+
+```js
+const timerId = setTimeout(() => {
+    console.log("this never prints");
+}, 500);
+
+clearTimeout(timerId);
+console.log("timer cancelled");
+// timer cancelled
+```
+
+The id is a number in browsers and an object in Node. You never need to look inside it: keep it, and pass it back. Clearing a timer that has already run (or clearing `undefined`) does nothing, with no error.
+
+A real-world use: "you will be logged out after 15 minutes of no activity". Every time the user does something, the app clears the old timer and starts a new one. [Debounce](../write-your-own/debounce-and-throttle.mdx) works the same way.
+
+A classic interview question mixes timers with a loop:
+
+```js
+for (var i = 0; i < 3; i++) {
+    setTimeout(() => {
+        console.log("var:", i);
+    }, 100);
+}
+
+for (let j = 0; j < 3; j++) {
+    setTimeout(() => {
+        console.log("let:", j);
+    }, 200);
+}
+// var: 3
+// var: 3
+// var: 3
+// let: 0
+// let: 1
+// let: 2
+```
+
+Both loops finish **before** any timer runs. With `var`, there is only **one** `i`, shared by all three callbacks, and by then it is 3. With `let`, each round of the loop gets its **own** `j`, so each callback remembers its own value. See [Closures](../functions/closures.mdx).
+
+### setInterval and clearInterval
+
+`setInterval(fn, ms)` runs `fn` every `ms` milliseconds, until you call `clearInterval` with its id:
+
+```js
+let count = 0;
+
+const intervalId = setInterval(() => {
+    count = count + 1;
+    console.log("tick", count);
+
+    if (count === 3) {
+        clearInterval(intervalId);
+        console.log("stopped");
+    }
+}, 500);
+// tick 1
+// tick 2
+// tick 3
+// stopped
+```
+
+- The first run comes after **one full interval**, not right away. If you need a run right away, call the function once yourself first.
+- An interval runs **forever** until you clear it. A forgotten interval keeps running, and keeps everything its callback uses alive in memory: a memory leak. See [Memory and Garbage Collection](../memory-errors/memory-and-garbage-collection.mdx). In React, you clear it in the cleanup function of `useEffect`.
+
+Real-world uses: a clock on the screen, a slideshow, a dashboard that refreshes every 30 seconds.
+
+### Why setInterval drifts, and recursive setTimeout
+
+`setInterval` has two weak spots.
+
+**1. Ticks come late, and the lateness adds up.** Each tick runs only when the thread is free, so it can be a few milliseconds late, or much later if the thread is busy. Browsers also slow down timers in background tabs, often to once a second or less, to save battery. So if you **count ticks** to keep time ("each tick is one second"), your clock slowly falls behind the real time. This is called **drift**.
+
+**2. setInterval doesn't wait for your async work.** Say each tick asks a server for news, and the server takes 3 seconds to answer. With `setInterval(check, 1000)`, a new request starts every second anyway. Requests pile up, and the answers can come back in the wrong order.
+
+The fix for the second problem is a **recursive `setTimeout`**: plan the next run **at the end** of the current one. Then runs never overlap, and you can change the delay each time.
+
+| | `setInterval(check, 1000)` | Recursive `setTimeout(check, 1000)` |
+| --- | --- | --- |
+| The next run is planned | on a fixed beat, every 1000 ms | 1000 ms after this run **finishes** |
+| A run waits 3 s for a server | new runs start anyway, and overlap | the next run waits for it. No overlap. |
+| Change the delay between runs | no (you have to clear it and start again) | yes, every time |
+| Stop it | `clearInterval(id)` | don't plan the next run |
+
+Here a fake server call takes 300 ms. The next check is planned only after the answer is back:
+
+```js
+// A fake server call: takes 300 ms. The job is done on the 3rd check.
+function fetchStatus(attempt) {
+    return new Promise((resolve) => {
+        setTimeout(() => {
+            if (attempt === 3) {
+                resolve("done");
+            } else {
+                resolve("still processing");
+            }
+        }, 300);
+    });
+}
+
+let attempt = 0;
+
+async function poll() {
+    attempt = attempt + 1;
+    const status = await fetchStatus(attempt);
+    console.log("check", attempt, status);
+
+    if (status === "done") {
+        return;
+    }
+
+    // Plan the next check only now, after the answer is back.
+    setTimeout(poll, 500);
+}
+
+poll();
+// check 1 still processing
+// check 2 still processing
+// check 3 done
+```
+
+This is how apps check whether a video has finished processing, or a payment has gone through. To be kinder to a busy server, make the delay longer each time (for example, double it). That is called **backoff**.
+
+For the first problem (drift), don't count ticks. On every tick, **ask the real clock** with `Date.now()`:
+
+```js
+function startCountdown(seconds) {
+    const endTime = Date.now() + seconds * 1000;
+
+    const intervalId = setInterval(() => {
+        // Ask the real clock how much time is left. Don't count ticks.
+        const msLeft = endTime - Date.now();
+        const secondsLeft = Math.round(msLeft / 1000);
+
+        if (secondsLeft <= 0) {
+            clearInterval(intervalId);
+            console.log("time is up");
+        } else {
+            console.log("seconds left:", secondsLeft);
+        }
+    }, 1000);
+}
+
+startCountdown(2);
+// seconds left: 1
+// time is up
+```
+
+Even if a tick comes late (a busy thread, a background tab), the number on screen is right, because it comes from the clock, not from a counter. Think of a "resend the code in 30 s" button, a quiz timer, or an auction countdown.
+
+### Build setInterval with setTimeout
+
+A common interview task: "write your own `setInterval` using only `setTimeout`". The function `run` calls the callback, then plans itself again. The caller gets back a `stop` function.
+
+```js
+function mySetInterval(callback, delay) {
+    let timerId = null;
+    let stopped = false;
+
+    function run() {
+        callback();
+
+        // Plan the next run, unless the callback stopped us.
+        if (!stopped) {
+            timerId = setTimeout(run, delay);
+        }
+    }
+
+    timerId = setTimeout(run, delay);
+
+    return function stop() {
+        stopped = true;
+        clearTimeout(timerId);
+    };
+}
+
+let count = 0;
+
+const stop = mySetInterval(() => {
+    count = count + 1;
+    console.log("tick", count);
+
+    if (count === 3) {
+        stop();
+        console.log("stopped");
+    }
+}, 300);
+// tick 1
+// tick 2
+// tick 3
+// stopped
+```
+
+Why the `stopped` flag? When `stop()` is called **from inside** the callback, the current timer has already fired, so `clearTimeout` has nothing to cancel. Without the flag, `run` would plan the next run anyway, and it would never stop.
+
+## Common mistakes
+
+- **Calling the function instead of passing it.** `setTimeout(sayHi(), 1000)` runs `sayHi` right now, and gives `setTimeout` its return value (`undefined`).
+- **Expecting an exact delay.** The delay is the shortest wait. Browsers also make deeply nested timers wait at least 4 ms, and Node turns a delay under 1 ms into 1 ms.
+- **Forgetting to clear an interval.** It runs forever and leaks memory.
+- **`var` in a loop with timers.** Every callback sees the last value. Use `let`.
+- **Losing `this`.** `setTimeout(user.sayHi, 1000)` passes the function alone, without `user`, so `this` is wrong when it runs. Write `setTimeout(() => user.sayHi(), 1000)`. See [The this Keyword](../functions/this-keyword.mdx).
+- **`setInterval` with slow async work.** Calls overlap. Use a recursive `setTimeout`.
+- **Counting ticks to keep time.** Ticks come late. Use `Date.now()`.
+- **A huge delay.** The delay must fit in 32 bits: at most 2147483647 ms, about 24.8 days. A bigger number overflows, and the callback runs almost at once.
+
+## In the interview
+
+> "`setTimeout` runs a function once, after at least the delay. `setInterval` runs it again and again until I clear it. Both return an id that I pass to `clearTimeout` or `clearInterval`. The delay is a minimum, not a promise: the callback waits in the task queue and runs only when the call stack is free. For repeating work, I often prefer a recursive `setTimeout`: I plan the next run when the current one finishes, so runs never overlap and I can change the delay, for example to back off. And to show time, I read `Date.now()` instead of counting ticks, because ticks can come late."
+
+**Likely follow-up:** "Why is a recursive `setTimeout` better than `setInterval` for polling a server?"
+
+**Answer:** "`setInterval` starts a new request on a fixed beat, even if the last one hasn't come back. On a slow network, requests pile up and answers can arrive out of order. With a recursive `setTimeout`, I plan the next request only after the answer is back, so there is only one request at a time, and I can wait longer after errors."
+
+<Callout title="Remember this" type="success">
+  - `setTimeout` runs **once**. `setInterval` runs **until cleared**. Both give back an **id** for `clearTimeout` / `clearInterval`.
+  - The delay is the **shortest** wait, never exact.
+  - Pass the function, don't call it: `setTimeout(fn, 1000)`.
+  - **Always clear intervals**, or they run forever and leak memory.
+  - **Recursive `setTimeout`:** plan the next run when this one ends. No overlap, and the delay can change.
+  - To show time, read **`Date.now()`**. Don't count ticks.
+</Callout>

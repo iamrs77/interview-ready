@@ -1,11 +1,424 @@
 ---
 title: "Destructuring, Spread and Rest"
-description: "Pull values out, and spread them in."
+description: "Pull values out of arrays and objects, spread them in, and read missing values safely with ?. and ??."
 icon: Sparkles
-planned: true
 ---
 
-- Array and object destructuring
-- Default values and renaming
-- Spread vs rest
-- Optional chaining and nullish coalescing
+## The idea
+
+**Destructuring** pulls values out of an array or an object and puts them into variables, in one line. **Spread** (`...`) takes the items out of an array or object and puts them into a new one. **Rest** uses the same `...` to do the opposite: it **collects** "everything else" into one array or object.
+
+Think of unpacking a shopping bag. You take out the milk and the bread by name: that's destructuring. You empty the whole bag into a bigger bag: that's spread. You take out the milk, and leave "the rest" in the bag: that's rest.
+
+You see this syntax everywhere in modern code: React props (`function Card({ title })`), state updates (`{ ...user, age: 29 }`), and function arguments (`function sum(...numbers)`).
+
+## Array and object destructuring
+
+### Array destructuring: by position
+
+With arrays, the **position** decides which value goes where. The first variable gets the first item, the second gets the second, and so on.
+
+```js
+const colors = ["red", "green", "blue"];
+
+const [first, second] = colors;
+
+console.log(first); // red
+console.log(second); // green
+```
+
+To skip an item, leave an empty spot between the commas:
+
+```js
+const colors = ["red", "green", "blue"];
+
+// The two commas skip "red" and "green".
+const [, , third] = colors;
+
+console.log(third); // blue
+```
+
+A neat use: **swap two variables** without a temporary variable. The right side builds a new array `[2, 1]`, and the left side unpacks it.
+
+```js
+let left = 1;
+let right = 2;
+
+[left, right] = [right, left];
+
+console.log(left); // 2
+console.log(right); // 1
+```
+
+### Object destructuring: by name
+
+With objects, the **name** decides, not the position. The variable must have the same name as the property.
+
+```js
+const user = {
+    name: "Asha",
+    age: 28,
+    city: "Pune",
+};
+
+const { name, city } = user;
+
+console.log(name); // Asha
+console.log(city); // Pune
+```
+
+It's the same as writing `const name = user.name;` and `const city = user.city;`, just shorter.
+
+You can also destructure **nested** objects. The left side copies the shape of the object:
+
+```js
+const order = {
+    id: 7,
+    customer: {
+        name: "Ravi",
+        city: "Delhi",
+    },
+};
+
+// Go into order.customer, and take out city.
+const { customer: { city } } = order;
+
+console.log(city); // Delhi
+```
+
+Note: here `customer` is only the path, not a variable. Only `city` becomes a variable.
+
+### Destructuring in function parameters
+
+This is where you'll use it most. The function takes an object and unpacks it right in the parameter list. React components do this with props.
+
+```js
+function describeUser({ name, age }) {
+    console.log(name + " is " + age);
+}
+
+const user = {
+    name: "Asha",
+    age: 28,
+    city: "Pune",
+};
+
+describeUser(user); // Asha is 28
+```
+
+The caller passes one object, and the order of the properties doesn't matter. That's easier to read than `describeUser("Asha", 28)`, where you have to remember which argument comes first.
+
+## Default values and renaming
+
+### Default values
+
+If a value is **missing** (`undefined`), you can give a default with `=`:
+
+```js
+const settings = { theme: "dark" };
+
+// fontSize is missing in settings, so the default 16 is used.
+const { theme, fontSize = 16 } = settings;
+
+console.log(theme); // dark
+console.log(fontSize); // 16
+```
+
+Arrays work the same way: `const [first = "none"] = [];` gives `"none"`.
+
+Careful: the default is used **only for `undefined`**. A `null` is a real value, so it's kept.
+
+```js
+const { size = 10 } = { size: null };
+const { color = "red" } = { color: undefined };
+
+console.log(size); // null
+console.log(color); // red
+```
+
+### Renaming
+
+Sometimes the property name is not a good variable name, or it clashes with one you already have. Use `property: newName`:
+
+```js
+const response = { id: 42, name: "Asha" };
+
+// Read response.id, but call the variable userId.
+const { id: userId } = response;
+
+console.log(userId); // 42
+```
+
+Read `id: userId` as "take `id`, and put it in `userId`". After this, there is no variable called `id`.
+
+You can rename **and** give a default at the same time:
+
+```js
+const response = { id: 42 };
+
+// Take response.role, call it userRole, and use "guest" if it's missing.
+const { role: userRole = "guest" } = response;
+
+console.log(userRole); // guest
+```
+
+### Destructuring undefined throws an error
+
+You can't destructure `undefined` or `null`. This often happens when a function is called with no argument:
+
+```js
+function describeUser({ name }) {
+    console.log(name);
+}
+
+describeUser();
+// TypeError: Cannot destructure property 'name' of 'undefined' as it is undefined.
+```
+
+The fix is a default for the **whole parameter**: `= {}`. With no argument, the function gets an empty object, and `name` is just `undefined`.
+
+```js
+function describeUser({ name = "Guest" } = {}) {
+    console.log(name);
+}
+
+describeUser(); // Guest
+describeUser({ name: "Asha" }); // Asha
+```
+
+## Spread vs rest
+
+Spread and rest both use three dots `...`, but they do **opposite** jobs:
+
+| | Spread | Rest |
+| --- | --- | --- |
+| Job | **Unpacks**: one array or object becomes many items | **Collects**: many items become one array or object |
+| Where it appears | Inside `[ ]`, inside `{ }`, or in a function **call** | On the **left** of `=` when destructuring, or in a function's **parameters** |
+| Example | `const all = [...first, ...second];` | `const [head, ...others] = list;` |
+
+An easy way to tell them apart: if the `...` is **giving** values, it's spread. If it's **receiving** values, it's rest.
+
+### Spread with arrays
+
+Spread puts all the items of an array into a new array, or into a function call:
+
+```js
+const fruits = ["apple", "mango"];
+const vegetables = ["carrot"];
+
+const basket = [...fruits, ...vegetables, "bread"];
+console.log(basket); // [ 'apple', 'mango', 'carrot', 'bread' ]
+
+// In a function call, each item becomes one argument: Math.max(5, 1, 9).
+const numbers = [5, 1, 9];
+console.log(Math.max(...numbers)); // 9
+```
+
+Spread works on anything you can loop over, like a string: `[..."hi"]` gives `[ 'h', 'i' ]`. See [Iterators and Generators](./iterators-and-generators.mdx).
+
+### Spread with objects
+
+Spread copies all the properties of an object into a new one. If two objects have the same key, the **later one wins**.
+
+```js
+const defaults = { theme: "light", fontSize: 14 };
+const userChoice = { theme: "dark" };
+
+const settings = { ...defaults, ...userChoice };
+
+console.log(settings); // { theme: 'dark', fontSize: 14 }
+```
+
+This is how you update an object **without changing the original**, as React state updates do. Copy everything, then overwrite one property:
+
+```js
+const user = { name: "Asha", age: 28 };
+
+const olderUser = { ...user, age: 29 };
+
+console.log(user.age); // 28
+console.log(olderUser.age); // 29
+```
+
+Spread makes a **shallow** copy: only the first level is copied. A nested array or object is still **shared** between the copy and the original.
+
+```js
+const original = { name: "Asha", tags: ["admin"] };
+const copy = { ...original };
+
+// tags is the same array in both objects.
+copy.tags.push("editor");
+
+console.log(original.tags); // [ 'admin', 'editor' ]
+```
+
+For a full copy, see [shallow and deep copies](../core-basics/value-vs-reference.mdx).
+
+### Rest in destructuring
+
+Rest collects **whatever is left over** into a new array or object:
+
+```js
+const runners = ["Asha", "Ravi", "Meera"];
+
+const [winner, ...others] = runners;
+
+console.log(winner); // Asha
+console.log(others); // [ 'Ravi', 'Meera' ]
+```
+
+With objects, this is a clean way to **remove a property** without changing the original. Here we take out `password`, and keep everything else:
+
+```js
+const user = { id: 1, password: "secret", name: "Asha" };
+
+const { password, ...safeUser } = user;
+
+console.log(safeUser); // { id: 1, name: 'Asha' }
+console.log(user.password); // secret
+```
+
+### Rest in function parameters
+
+A **rest parameter** collects all the arguments into a real array. The function can then take any number of arguments.
+
+```js
+function sum(...numbers) {
+    let total = 0;
+
+    for (const number of numbers) {
+        total = total + number;
+    }
+
+    return total;
+}
+
+console.log(sum(1, 2, 3)); // 6
+console.log(sum(10)); // 10
+console.log(sum()); // 0
+```
+
+Rest must be the **last** thing in the list, because it takes "everything else". Anything after it is a SyntaxError:
+
+```js noRun
+// SyntaxError: Rest element must be last element
+const [...firstOnes, last] = [1, 2, 3];
+
+// SyntaxError: Rest parameter must be last formal parameter
+function log(...messages, level) {}
+```
+
+Rest parameters replaced the old `arguments` object. `arguments` is not a real array (it has no `map` or `filter`), and arrow functions don't have their own `arguments`. See [Functions](../functions/functions.mdx).
+
+## Optional chaining and nullish coalescing
+
+### Optional chaining: ?.
+
+Reading a property of `undefined` throws an error. That happens often with data from an API, where some parts may be missing:
+
+```js
+const user = { name: "Asha" };
+
+console.log(user.address.city);
+// TypeError: Cannot read properties of undefined (reading 'city')
+```
+
+**Optional chaining** `?.` checks the value on its **left**. If it's `null` or `undefined`, it stops and gives back `undefined`, with no error. If not, it goes on as normal.
+
+```js
+const user = { name: "Asha" };
+
+console.log(user.address?.city); // undefined
+console.log(user.name?.length); // 4
+```
+
+It has three forms:
+
+| Form | Meaning |
+| --- | --- |
+| `object?.property` | Read a property, if `object` exists |
+| `object?.[key]` | Read a property by a key in a variable, if `object` exists |
+| `object.method?.()` | Call a method, only if it exists |
+
+```js
+const user = {
+    name: "Asha",
+    greet() {
+        return "Hi, I'm Asha";
+    },
+};
+
+const key = "name";
+
+console.log(user?.[key]); // Asha
+console.log(user.greet?.()); // Hi, I'm Asha
+console.log(user.sayBye?.()); // undefined
+```
+
+Once `?.` finds `null` or `undefined`, it skips **the whole rest** of the chain. In `user.address?.city.name`, if `address` is missing, `.city` and `.name` are never read, so there's no error.
+
+### Nullish coalescing: ??
+
+`a ?? b` gives back `b` **only when `a` is `null` or `undefined`**. Otherwise it gives back `a`. ("Nullish" means `null` or `undefined`.)
+
+The older trick was `a || b`. But `||` replaces **every falsy value**: `0`, `""`, `false`, `NaN`, `null` and `undefined`. That's a bug when `0` or `""` is a real, valid value.
+
+```js
+const volume = 0;
+
+// || throws away the 0, because 0 is falsy.
+console.log(volume || 50); // 50
+
+// ?? keeps the 0, because 0 is not null or undefined.
+console.log(volume ?? 50); // 0
+```
+
+| Value of `x` | `x \|\| "default"` | `x ?? "default"` |
+| --- | --- | --- |
+| `0` | `"default"` | `0` |
+| `""` | `"default"` | `""` |
+| `false` | `"default"` | `false` |
+| `null` | `"default"` | `"default"` |
+| `undefined` | `"default"` | `"default"` |
+
+Use `??` when you mean "only if it's missing". Use `||` when you mean "if it's empty or false".
+
+`?.` and `??` work well together: read a value that may be missing, and give a default if it is.
+
+```js
+const user = { name: "Asha" };
+
+// settings is missing, so ?. gives undefined, and ?? gives 50.
+const volume = user.settings?.volume ?? 50;
+
+console.log(volume); // 50
+```
+
+There's also a short way to write "set it only if it's missing": `options.size ??= 10`. It means `if (options.size === null || options.size === undefined) { options.size = 10; }`.
+
+## Common mistakes
+
+- **Thinking a default works for `null`.** Defaults are used only for `undefined`. `const { size = 10 } = { size: null }` gives `null`.
+- **Destructuring `undefined`.** `function f({ name })` called with no argument throws a TypeError. Add `= {}` after the parameter.
+- **Thinking spread makes a deep copy.** `{ ...user }` copies only the first level. Nested objects are still shared.
+- **Using `||` for defaults when `0` or `""` is valid.** A volume of `0` or an empty name gets replaced. Use `??`.
+- **Putting rest in the middle.** `const [...rest, last] = list` is a SyntaxError. Rest goes last.
+- **Destructuring into existing variables without parentheses.** `{ name } = user;` on its own line is a SyntaxError, because a line that starts with `{` is read as a block. Write `({ name } = user);`.
+- **Adding `?.` everywhere.** If a value should always be there, `?.` hides the bug and you get a quiet `undefined` far away. Use it only where a value can really be missing.
+
+## In the interview
+
+> "Destructuring pulls values out into variables: arrays by position, objects by name. I can rename with `id: userId` and give defaults with `=`, but defaults only apply when the value is `undefined`. Spread and rest both use three dots: spread unpacks, like `[...a, ...b]` or `{ ...user, age: 29 }`, and rest collects the leftovers, like `function sum(...numbers)`. Spread is a shallow copy, so nested objects are still shared."
+
+**Likely follow-up:** "What's the difference between `||` and `??`?"
+
+**Answer:** "`||` falls back for any falsy value: `0`, an empty string, `false`, `null` and `undefined`. `??` falls back only for `null` and `undefined`. So for a value like a count or a volume, where `0` is valid, `count ?? 10` keeps the `0`, but `count || 10` would wrongly give `10`."
+
+<Callout title="Remember this" type="success">
+  - **Destructuring:** arrays by **position** (`const [first] = list`), objects by **name** (`const { name } = user`).
+  - **Rename** with `{ id: userId }`. **Default** with `{ size = 10 }`, used only for `undefined`, not `null`.
+  - **Spread unpacks** (`[...a, ...b]`, `{ ...user, age: 29 }`). **Rest collects** (`const [head, ...others]`, `function sum(...numbers)`). Rest must be **last**.
+  - Spread is a **shallow** copy: nested objects are shared.
+  - `?.` gives `undefined` instead of an error when the left side is `null` or `undefined`.
+  - `??` falls back only for `null` or `undefined`. `||` falls back for **any** falsy value, including `0` and `""`.
+</Callout>

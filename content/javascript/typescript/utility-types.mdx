@@ -1,11 +1,320 @@
 ---
 title: "Utility Types"
-description: "Partial, Pick, Omit, Record and friends."
+description: "Partial, Pick, Omit, Record and friends: build new types from the ones you have."
 icon: GitMerge
-planned: true
 ---
 
-- Partial, Required, Readonly
-- Pick, Omit, Record
-- ReturnType and Parameters
-- keyof and mapped types
+## The idea
+
+**Utility types** are tools built into TypeScript that make a **new type from a type you already have**. "Make every field optional." "Keep only these two fields." "Everything except the password."
+
+Think of a **photocopier with settings**. You keep one original page, and print a copy in black and white, or only page 2. You write the `User` type **once**, and build the other versions from it. When `User` changes, every version changes with it, so they never drift apart.
+
+Every example on this page starts from this `User` type:
+
+```ts
+type User = {
+    id: number;
+    name: string;
+    email: string;
+    password: string;
+    age?: number;
+};
+```
+
+## How it works
+
+### Partial, Required, Readonly
+
+These three change **every** field in the same way.
+
+**`Partial<User>`** makes every field **optional**. It fits an "update" function, where the caller sends only the fields that changed.
+
+```ts
+function updateUser(user: User, changes: Partial<User>): User {
+    // Copy the user, then overwrite it with the changed fields.
+    return { ...user, ...changes };
+}
+
+const asha: User = {
+    id: 1,
+    name: "Asha",
+    email: "asha@mail.com",
+    password: "secret",
+};
+
+updateUser(asha, { name: "Asha Rao" });  // ✅ Only one field
+updateUser(asha, { nickname: "A" });
+// ❌ Error: Object literal may only specify known properties,
+//    and 'nickname' does not exist in type 'Partial<User>'.
+```
+
+**`Required<User>`** does the opposite: every field must be there, even the optional `age`.
+
+```ts
+const full: Required<User> = {
+    id: 1,
+    name: "Asha",
+    email: "asha@mail.com",
+    password: "secret",
+};
+// ❌ Error: Property 'age' is missing in type '{ id: number; name: string; email: string; password: string; }'
+//    but required in type 'Required<User>'.
+```
+
+**`Readonly<User>`** makes every field **read-only**: you can read it, but not change it.
+
+```ts
+const asha: Readonly<User> = {
+    id: 1,
+    name: "Asha",
+    email: "asha@mail.com",
+    password: "secret",
+};
+
+console.log(asha.name);  // ✅ Reading is fine
+asha.name = "Ravi";
+// ❌ Error: Cannot assign to 'name' because it is a read-only property.
+```
+
+Two things `Readonly` does **not** do:
+
+- It is **shallow**. If a field holds an object, the fields inside that object can still change.
+- It exists **only while TypeScript checks your code**. The types are removed before the code runs, so nothing stops a change at run time. For that, use `Object.freeze`.
+
+| Utility | What it does | Typical use |
+| --- | --- | --- |
+| `Partial<T>` | every field optional | update or "patch" data |
+| `Required<T>` | every field required | data after defaults are filled in |
+| `Readonly<T>` | every field read-only | config, state you must not change |
+
+### Pick, Omit, Record
+
+**`Pick<User, "id" | "name">`** keeps **only** the fields you list. Here, a small preview of a user:
+
+```ts
+type UserPreview = Pick<User, "id" | "name">;
+// { id: number; name: string }
+
+const preview: UserPreview = { id: 1, name: "Asha" };
+```
+
+**`Omit<User, "password">`** keeps **everything except** the fields you list. Here, the user you can safely send to the browser:
+
+```ts
+type PublicUser = Omit<User, "password">;
+// { id: number; name: string; email: string; age?: number }
+
+function toPublic(user: User): PublicUser {
+    return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        age: user.age,
+    };
+}
+```
+
+Pick or Omit? Use whichever list is **shorter**. Keeping 2 fields out of 10 is a `Pick`. Removing 1 field out of 10 is an `Omit`.
+
+One difference trips people up: `Pick` checks that the keys exist, but `Omit` doesn't. A typo in `Omit` gives **no error**, and the field you wanted to hide is still there.
+
+```ts
+type Bad = Pick<User, "nickname">;
+// ❌ Error: Type '"nickname"' does not satisfy the constraint 'keyof User'.
+
+type Oops = Omit<User, "pasword">;
+// ✅ No error, but nothing was removed: the typo means password is still in the type
+```
+
+**`Record<Keys, Value>`** builds an object type: these keys, and each one holds this type of value. With a union of keys, TypeScript makes sure **none is missing**.
+
+```ts
+type Role = "admin" | "editor" | "viewer";
+
+const permissions: Record<Role, string[]> = {
+    admin: ["read", "write", "delete"],
+    editor: ["read", "write"],
+};
+// ❌ Error: Property 'viewer' is missing in type '{ admin: string[]; editor: string[]; }'
+//    but required in type 'Record<Role, string[]>'.
+```
+
+With `string` as the key, `Record` is a simple dictionary: any key, the same value type.
+
+```ts
+const wordCounts: Record<string, number> = {};
+
+wordCounts["hello"] = 2;
+wordCounts["world"] = 1;
+```
+
+### ReturnType and Parameters
+
+These two read the types **out of a function**. They need the function's **type**, so you write `typeof` in front of the function name. In a type, `typeof createUser` means "the type of the `createUser` function".
+
+```ts
+function createUser(name: string, age: number) {
+    return {
+        id: Date.now(),
+        name: name,
+        age: age,
+        createdAt: new Date(),
+    };
+}
+
+type NewUser = ReturnType<typeof createUser>;
+// { id: number; name: string; age: number; createdAt: Date }
+
+type CreateUserArgs = Parameters<typeof createUser>;
+// [name: string, age: number]
+```
+
+`ReturnType` helps when a function returns an object type that nobody gave a name, for example a function from a library. `Parameters` gives a **tuple** (a fixed-length array with a type for each spot), which is handy for a wrapper that passes all its arguments on:
+
+```ts
+function createUser(name: string, age: number) {
+    return { name: name, age: age };
+}
+
+function createAndLog(...args: Parameters<typeof createUser>) {
+    console.log("Creating", args[0]);
+    return createUser(...args);
+}
+
+createAndLog("Asha", 30);  // ✅
+createAndLog("Asha");
+// ❌ Error: Expected 2 arguments, but got 1.
+```
+
+For an **async** function, `ReturnType` gives a `Promise`. Wrap it in **`Awaited`** to get the value inside:
+
+```ts
+async function fetchUser() {
+    return { id: 1, name: "Asha" };
+}
+
+type Result = ReturnType<typeof fetchUser>;
+// Promise<{ id: number; name: string }>
+
+type FetchedUser = Awaited<ReturnType<typeof fetchUser>>;
+// { id: number; name: string }
+```
+
+### keyof and mapped types
+
+**`keyof User`** gives a union of the **key names** of `User`, as strings:
+
+```ts
+type UserKey = keyof User;
+// "id" | "name" | "email" | "password" | "age"
+
+const key: UserKey = "email";  // ✅
+const badKey: UserKey = "nickname";
+// ❌ Error: Type '"nickname"' is not assignable to type 'keyof User'.
+```
+
+It shines with [generics](./generics.mdx). This function reads one property, and only accepts keys the object really has. `T[K]` means "the type of the field `K` in `T`", so the result keeps its exact type.
+
+```ts
+function getField<T, K extends keyof T>(item: T, key: K): T[K] {
+    return item[key];
+}
+
+const asha: User = {
+    id: 1,
+    name: "Asha",
+    email: "asha@mail.com",
+    password: "secret",
+};
+
+const userName = getField(asha, "name");  // userName: string
+const userId = getField(asha, "id");      // userId: number
+getField(asha, "nickname");
+// ❌ Error: Argument of type '"nickname"' is not assignable to parameter of type 'keyof User'.
+```
+
+A **mapped type** is a loop over keys that builds a new object type. `[Key in keyof T]` means "for each key of T". This is exactly how `Partial`, `Readonly`, `Required`, `Pick` and `Record` are made. Here are your own versions:
+
+```ts
+// Every field optional: add ?
+type MyPartial<T> = {
+    [Key in keyof T]?: T[Key];
+};
+
+// Every field read-only: add readonly
+type MyReadonly<T> = {
+    readonly [Key in keyof T]: T[Key];
+};
+
+// Every field required: -? removes the ?
+type MyRequired<T> = {
+    [Key in keyof T]-?: T[Key];
+};
+
+// Only the keys in K. K must be real keys of T.
+type MyPick<T, K extends keyof T> = {
+    [Key in K]: T[Key];
+};
+
+// These keys, each with the same value type
+type MyRecord<K extends string | number | symbol, V> = {
+    [Key in K]: V;
+};
+
+type EditableUser = MyPartial<User>;
+// { id?: number; name?: string; email?: string; password?: string; age?: number }
+```
+
+You can make your own for real jobs too. A form needs one error message (or none) for each field:
+
+```ts
+type FormErrors<T> = {
+    [Key in keyof T]?: string;
+};
+
+const errors: FormErrors<User> = {
+    email: "Email is required",
+    password: "Too short",
+};
+```
+
+A few more built-ins you will see. They work on **unions** instead of objects:
+
+| Utility | What it does | Example result |
+| --- | --- | --- |
+| `Exclude<U, X>` | remove `X` from the union `U` | `Exclude<"a" \| "b" \| "c", "a">` is `"b" \| "c"` |
+| `Extract<U, X>` | keep only the parts of `U` that fit `X` | `Extract<"a" \| "b", "a">` is `"a"` |
+| `NonNullable<T>` | remove `null` and `undefined` | `NonNullable<string \| null>` is `string` |
+| `Awaited<T>` | the value inside a promise | `Awaited<Promise<number>>` is `number` |
+
+`Omit` is built from two of these: `Pick<T, Exclude<keyof T, K>>`. In words: pick every key **except** the ones in `K`.
+
+## Common mistakes
+
+- **Thinking `Readonly` freezes the object.** It is only checked by TypeScript, and only one level deep. Use `Object.freeze` to stop changes at run time.
+- **A typo in `Omit`.** `Omit` doesn't check its keys, so the field you meant to remove stays. `Pick` does check.
+- **`ReturnType<createUser>` without `typeof`.** `createUser` is a value, not a type. Write `ReturnType<typeof createUser>`.
+- **Forgetting `Awaited`** for an async function. `ReturnType` alone gives you the `Promise`.
+- **Using `Partial` everywhere.** If a "create" function takes `Partial<User>`, TypeScript can no longer tell you that a required field is missing.
+- **Thinking `keyof` gives the values.** It gives the key **names**: `"id" | "name" | ...`.
+
+## In the interview
+
+> "Utility types build a new type from an existing one, so I define a type once and derive the rest. `Partial` makes every field optional, which fits update functions. `Required` and `Readonly` change every field the other way. `Pick` keeps some fields, `Omit` removes some, and `Record` builds an object type from a set of keys and a value type. `ReturnType` and `Parameters` read types out of a function, with `typeof`. Under the hood, `Partial`, `Required`, `Readonly`, `Pick` and `Record` are mapped types: a loop over keys, like `keyof T`."
+
+**Likely follow-up:** "Can you write `Partial` and `Pick` yourself?"
+
+**Answer:** "Yes, with mapped types. `Partial` is `{ [K in keyof T]?: T[K] }`: loop over every key and add a question mark. `Pick` is `{ [P in K]: T[P] }`, where `K extends keyof T`, so only real keys are allowed. `Readonly` adds `readonly` in front, and `Required` uses `-?` to remove the question mark."
+
+**Likely follow-up:** "What's the difference between `Pick` and `Omit`?"
+
+**Answer:** "`Pick` lists the fields to keep, `Omit` lists the fields to remove. I use whichever list is shorter. One catch: `Pick` checks that the keys exist, but `Omit` doesn't, so a typo in `Omit` silently removes nothing."
+
+<Callout title="Remember this" type="success">
+  - Utility types make a **new type from an existing one**. Define `User` once, derive the rest.
+  - **`Partial`** = all optional, **`Required`** = all required, **`Readonly`** = no changes (TypeScript only, shallow).
+  - **`Pick`** = keep these fields, **`Omit`** = remove these fields, **`Record<Keys, Value>`** = an object with these keys.
+  - **`ReturnType<typeof fn>`** and **`Parameters<typeof fn>`**. Use `Awaited` for async functions.
+  - **`keyof T`** = the key names as a union. A **mapped type** `{ [K in keyof T]: ... }` loops over them.
+</Callout>

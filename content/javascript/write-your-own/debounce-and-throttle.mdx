@@ -1,11 +1,88 @@
 ---
 title: "Debounce and Throttle"
-description: "The most asked \"write it yourself\" question."
+description: "Two ways to stop a function from running too often."
 icon: Gauge
-planned: true
 ---
 
-- Debounce, step by step
-- Throttle, step by step
-- Leading and trailing calls
-- Where each one is used
+## Debounce
+
+**Debounce** means waiting until the user **stops** triggering an event for a set amount of time, and only then running the function.
+
+```js
+function debounce(func, delay) {
+    let timer;
+
+    return function (...args) {
+        clearTimeout(timer);
+
+        timer = setTimeout(() => func.apply(this, args), delay);
+    };
+}
+
+const log = () => console.log("Debounced!");
+
+const debouncedLog = debounce(log, 1000);
+
+debouncedLog();
+debouncedLog();
+debouncedLog();
+// After 1 second, only once: Debounced!
+```
+
+- `timer` remembers the `setTimeout` that is waiting to run.
+- Every call **cancels** the waiting timer with `clearTimeout`, and starts a new one.
+- So `func` runs only when `delay` milliseconds pass with **no new call**.
+- `func.apply(this, args)` passes on `this` and the arguments. The arrow function inside `setTimeout` keeps the same `this`, so it also works for object methods.
+
+## Throttle
+
+**Throttling** limits how often a function can run, even if an event fires many times.
+
+The key idea: many calls can happen, but the function runs **no more than once per interval**.
+
+```js
+const throttle = (func, delay) => {
+    let last = 0;
+
+    return function (...args) {
+        const now = Date.now();
+
+        if (now - last >= delay) {
+            func.apply(this, args);
+            last = now;
+        }
+    };
+};
+
+const sayHello = (name) => {
+    console.log(`Hello, ${name}!`);
+};
+
+const throttledHello = throttle(sayHello, 2000);
+
+throttledHello("Alex"); // Hello, Alex!
+throttledHello("Alex"); // ignored: less than 2 seconds since the last run
+throttledHello("Alex"); // ignored
+throttledHello("Alex"); // ignored
+throttledHello("Alex"); // ignored
+
+// 2.5 seconds later, enough time has passed, so it runs again.
+setTimeout(() => throttledHello("Sam"), 2500); // Hello, Sam!
+```
+
+- `last` stores the time when `func` last ran.
+- `Date.now()` returns the current time in milliseconds.
+- `now - last >= delay` checks whether enough time has passed. If yes, `func` runs and `last` is updated. If not, the call is ignored.
+- `last` starts at `0`, so the very first call always runs.
+
+## The difference
+
+- **Debounce** waits for a **pause**, then runs **once**. Example: a search box that searches only after the user stops typing.
+- **Throttle** runs **at most once per interval** while the calls keep coming. Example: updating something while the user scrolls.
+
+<Callout title="Remember this" type="success">
+  - **Debounce:** run only after the calls **stop** for `delay` ms. Each call does `clearTimeout`, then a new `setTimeout`.
+  - **Throttle:** run **at most once** per `delay` ms. Keep `last` (the time of the last run) and compare it with `Date.now()`.
+  - Use `func.apply(this, args)` so `this` and the arguments are passed on.
+  - Debounce: search box (wait for a pause). Throttle: scrolling (steady updates).
+</Callout>
