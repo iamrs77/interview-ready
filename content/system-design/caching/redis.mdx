@@ -51,6 +51,39 @@ To release the lock, run a small Lua script that deletes the key **only if it st
 - **It is usually not your main database.** Redis can save data to disk, but most teams keep the "real" data in a database. If the cache is lost, you can load it again from the database.
 - **It can grow.** **Redis Cluster** splits keys across many machines. **Replicas** keep copies, so if one machine dies, another takes over.
 
+## Why is Redis fast if it's single-threaded?
+
+Redis runs your commands on **one main thread**, one after another. That sounds slow, but there are three reasons it isn't.
+
+### 1. The data is in RAM
+
+A normal database keeps its data on an SSD or a disk, and reading from there is much slower than reading from RAM. Redis keeps its data **in memory**, so each read or write is extremely fast. It also uses data structures built for memory (hash tables, sorted sets, lists), so most commands do very little work.
+
+### 2. One thread means no coordination
+
+Imagine a restaurant kitchen:
+
+- **Many cooks:** they have to coordinate, share the stove and the knives, and stay out of each other's way. Time goes into waiting, not cooking.
+- **One cook:** takes each order in turn and never waits for anyone.
+
+Redis is the kitchen with one cook. With many threads, the threads would need **locks** to avoid changing the same data at the same moment, and locks cost time. With one thread, commands never run at the same time, so there is nothing to lock. This is also why `INCR` is atomic (see above).
+
+### 3. One thread can serve many connections
+
+Redis is **event-driven**. It doesn't give each client its own thread. One loop watches thousands of connections, and whenever a request arrives, it runs it. Since most commands take only microseconds, that single thread can handle a very large number of requests per second.
+
+### The catch: a slow command blocks everyone
+
+There is only one cook, so a slow order makes every other order wait. For example, `KEYS *` on a database with millions of keys goes through all of them, and no other client gets an answer until it finishes. Use `SCAN` instead, which goes through the keys in small batches.
+
+### "Single-threaded" isn't the whole story
+
+Modern Redis isn't single-threaded for everything. **Running commands** happens on one main thread. But some background work, like freeing memory and writing to disk, uses other threads. Since Redis 6, reading from and writing to the network can use extra threads too.
+
+In short:
+
+> "Redis is fast because it keeps its data in RAM, uses efficient in-memory data structures, and runs most commands on a single thread, so it avoids the cost of locks between threads. Its event-driven design lets one thread handle many client connections. Most commands are tiny, so that thread gets through a huge number of requests. But a slow, CPU-heavy command blocks the thread and makes every other request wait."
+
 ## In the real world
 
 **Twitter kept home timelines in Redis.** In a 2012 talk called "Timelines at Scale", Twitter explained that each user's home timeline was a **list of tweet IDs** stored in Redis. When someone tweeted, the tweet ID was pushed into the Redis list of each follower. Opening the app then meant reading one short list from memory, not running a big database query.
@@ -73,4 +106,5 @@ Name the Redis feature you use, and why:
   - Commands are **atomic**, so counters are safe. Locks can **expire or be lost** in a failover: use them to save work, and let the database check correctness.
   - Memory is limited. Keep only **hot** data in it.
   - Usually **not** the main database.
+  - **Fast with one thread:** data in **RAM**, no **locks** between threads, and an **event loop** that serves many connections. The catch: one slow command (like `KEYS *`) blocks everyone.
 </Callout>

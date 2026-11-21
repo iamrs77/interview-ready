@@ -191,6 +191,22 @@ Keep the real data in a database like PostgreSQL. Elasticsearch holds a **copy, 
 
 If Elasticsearch is lost, you rebuild it from the database. If the database is lost, Elasticsearch can't replace it.
 
+### SQL database vs Elasticsearch
+
+| | SQL database (like PostgreSQL) | Elasticsearch |
+| --- | --- | --- |
+| Main job | Store and manage the real data | Search and analyze a copy of it |
+| Data shape | Tables and rows | Indexes and JSON documents |
+| Full-text search | Basic: `LIKE`, or its own full-text search | Its main strength: analyzers, typos, synonyms |
+| Best match first | You build the ranking yourself | Built in: every result gets a relevance score |
+| Transactions | Yes, across many rows and tables | Not across documents |
+| Joins | Yes | No real joins. Copy the data into each document |
+| New data shows up | Right after the commit | About a second later, after a refresh |
+| Counts and analytics | `GROUP BY` | Aggregations, fast even over huge data |
+| Spread over many machines | Possible, but extra work | Built in: shards spread across nodes |
+
+So they don't compete. They work **together**: the database keeps the truth, and Elasticsearch makes it searchable.
+
 ## Keeping it in sync with the database
 
 The ways to do it (dual write, CDC, nightly rebuild) are compared in [Search](./search.mdx). The usual answer is **CDC** (Change Data Capture): read every change from the database's log and send it through Kafka to an **indexer** that writes to Elasticsearch. See [Change Data Capture](../distributed-systems/change-data-capture.mdx).
@@ -251,6 +267,10 @@ That last point is worth saying out loud. For a few million rows and simple sear
 Say where the truth lives, how the copy is fed, and how a search runs:
 
 > "Restaurants live in PostgreSQL, the source of truth. Changes go through CDC and Kafka to an indexer, which writes to Elasticsearch using the restaurant ID as the document ID, so a replayed event just overwrites. The description is a text field for full-text search. Cuisine is a keyword, and location is a geo point. A search is a bool query: match on the words, filters for rating and distance, and an aggregation for the cuisine counts. Results can be about a second behind, which is fine. The detail page reads from PostgreSQL."
+
+**Likely follow-up:** "Is Elasticsearch a database?"
+
+**Answer:** "Partly. It stores JSON documents, and I can read, update and delete them, so it has database features. But it's built for search and analytics. It has no transactions across documents and no joins, and new data shows up about a second late. So I don't use it as the main database. It holds a searchable copy, and the real data stays in PostgreSQL."
 
 <Callout title="Remember this" type="success">
   - An index is split into **primary shards** (fixed when you create it) with **replicas** on other nodes.

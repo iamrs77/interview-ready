@@ -45,6 +45,39 @@ All examples here use a **food delivery app**. Its resources are restaurants, me
 | `POST /orders/42/delete` | `DELETE /orders/42` |
 | `GET /Restaurants_List` | `GET /restaurants` |
 
+### Path params vs query params
+
+A URL can carry values in two places.
+
+**Path params** are part of the **path**. They say **which resource** you mean: one specific record.
+
+```text
+GET /restaurants/17                 → restaurant 17
+GET /orders/42                      → order 42
+GET /restaurants/17/menu-items      → the menu items of restaurant 17
+```
+
+In code and docs, a path param is written with a colon: the route `/restaurants/:id` matches `/restaurants/17`, and `id` is `17`.
+
+**Query params** come after the `?`, as `key=value` pairs joined with `&`. They don't point to a resource. They **change what you get back**: filter, sort, search or page through a list. You can use them in any combination, and all of them are optional.
+
+```text
+GET /restaurants?city=pune                       → filter
+GET /restaurants?cuisine=thai&sort=rating        → filter and sort
+GET /restaurants?search=pizza                    → search
+GET /orders?page=2&limit=20                      → page 2, 20 orders per page
+```
+
+| | Path param | Query param |
+| --- | --- | --- |
+| Where | In the path: `/orders/42` | After the `?`: `/orders?status=delivered` |
+| Use it to | Identify one specific resource | Filter, sort, search, paginate |
+| Required? | Yes. Without it, it's a different URL | No. Leave it out and you get the full list |
+
+A simple test: if the value answers **"which one?"**, it's a path param. If it answers **"which ones, and in what order?"**, it's a query param.
+
+When the search is too big or complex for query params, send it in a body instead. See [the QUERY method](#the-query-method-a-search-with-a-body) below.
+
 ## The right method and status code
 
 Here is a full example of placing an order:
@@ -135,6 +168,64 @@ flowchart LR
 - **`GET` responses can be cached** with the `Cache-Control` header.
 - **Big lists come in pages**, and **APIs need versions** when they change. See [API Pagination and Versioning](../advanced-components/api-pagination-versioning.mdx).
 
+## The QUERY method: a search with a body
+
+`QUERY` is a **new HTTP method**. It works like `GET`: it only **reads** data and never changes anything. The difference is that the search goes in the **request body**, not in the URL.
+
+### Why a new method was needed
+
+Say the food app gets an advanced search: 3 cuisines, a minimum rating, open now, vegan only, sorted by rating. With `GET`, every filter goes into the URL:
+
+```http
+GET /restaurants?city=pune&cuisines=thai,italian,south-indian&minRating=4&openNow=true&dietary=vegan&sort=rating
+```
+
+That works for a few filters. But as searches grow, putting everything in the URL causes problems:
+
+1. **URLs have a length limit.** Browsers, servers and proxies cut off or reject very long URLs, often at around 8 KB. A search with a list of 500 product IDs won't fit.
+2. **Complex filters are hard to write in a URL.** Nested conditions like "(thai AND rating ≥ 4) OR (italian AND open now)" don't fit nicely in `key=value` pairs.
+3. **URLs get saved everywhere**: server logs, proxy logs, browser history. Anything private in the query string, like an email or a phone number, ends up in all of them.
+
+So why not put the search in a body? Neither old method does that well:
+
+- **`GET` with a body:** HTTP never said what a body on `GET` means. Many servers, proxies and libraries ignore it or reject it. A browser's `fetch` throws an error if you try.
+- **`POST` with a body:** this works, and it's what most teams do today (`POST /restaurants/search`). But `POST` tells everyone "this request may **change** something". So a client can't safely **retry** it when the network fails, a cache won't **store** the answer, and someone reading the API can't tell it's only a read.
+
+`QUERY` fixes this. It has **the safety of `GET` and the body of `POST`**.
+
+### How it looks
+
+```http
+QUERY /restaurants
+Content-Type: application/json
+
+{
+  "city": "pune",
+  "cuisines": ["thai", "italian", "south-indian"],
+  "minRating": 4,
+  "openNow": true,
+  "dietary": ["vegan"],
+  "sort": "rating"
+}
+```
+
+The server answers `200 OK` with the matching restaurants, just like a `GET`.
+
+| | `GET` | `POST` | `QUERY` |
+| --- | --- | --- | --- |
+| Has a body | No | Yes | Yes |
+| Safe (only reads, changes nothing) | Yes | No | Yes |
+| Idempotent (safe to retry) | Yes | No | Yes |
+| Response can be cached | Yes | Not normally | Yes. The body is part of the cache key |
+
+The last row matters. A cache can't tell two `QUERY` requests apart by URL alone, because they all go to `/restaurants`. So it uses the URL **and the body** to decide whether it has seen this exact search before.
+
+### Can you use it today?
+
+It's new, so support is still growing. The IETF, the group that writes the HTTP rules, has been finishing the standard, and many servers, frameworks, API gateways and tools don't handle `QUERY` yet. Until yours does, use `POST /restaurants/search`, and write in the docs that it doesn't change anything.
+
+In an interview, if a search has many or complex filters, you can say: "For simple filters I'd use `GET` with a query string. For a big, complex search I'd use the new `QUERY` method, or `POST /search` if our stack doesn't support it yet."
+
 ## Common mistakes
 
 - Verbs in URLs: `/getOrders`, `/deleteUser`.
@@ -158,6 +249,8 @@ In the API step, write one endpoint for each feature, and say where the user com
 <Callout title="Remember this" type="success">
   - REST: **resources** (nouns) with **URLs**, and **HTTP methods** as the actions.
   - Plural nouns, nest only for "belongs to", filters in the **query string**.
+  - **Path param** = which one (`/orders/42`). **Query param** = filter, sort, search, page (`/orders?page=2&limit=20`).
+  - **`QUERY`** = the safety of `GET` + the body of `POST`. Use it for searches too big or complex for a URL (or `POST /search` until it's supported).
   - Use the **right status code**, plus a clear error body.
   - **One endpoint per feature.**
   - Take the **user from the token**, never from the body.
