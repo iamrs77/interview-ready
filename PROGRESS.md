@@ -7,7 +7,7 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 
 ## System Design
 
-**Written: 134 of 134**
+**Written: 143 of 143**
 
 ### Guide
 - ✅ Start Here
@@ -91,8 +91,10 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ Distributed Transactions and 2PC
 - ✅ Saga Pattern
 - ✅ Outbox Pattern
+- ✅ Multi-step Processes
 - ✅ Change Data Capture (CDC)
 - ✅ Distributed Locking
+- ✅ Dealing with Contention
 - ✅ Leader Election and Consensus
 - ✅ Clocks: Physical, Logical and Vector
 - ✅ Distributed ID Generation
@@ -118,8 +120,10 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ Object, Block and File Storage
 - ✅ Search and Inverted Indexes
 - ✅ Elasticsearch
+- ✅ Vector Databases
 - ✅ Geospatial Indexing
 - ✅ Bloom Filter, HyperLogLog, Count-Min Sketch
+- ✅ Time Series Databases
 - ✅ Batch vs Stream Processing
 - ✅ Hot Keys, Hot Partitions and Fan-out
 - ✅ API Pagination and Versioning
@@ -161,12 +165,17 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ Design Live Comments (Facebook Live)
 - ✅ Design LeetCode (Online Judge)
 - ✅ Design Tinder
+- ✅ Design an Online Auction
+- ✅ Design Facebook Post Search
+- ✅ Design a Local Delivery Service
+- ✅ Design ChatGPT
 
 **Hard**
 
 - ✅ Design YouTube
 - ✅ Design Uber
 - ✅ Design a Payment System
+- ✅ Design Robinhood (Stock Trading)
 - ✅ Design a Distributed Cache
 - ✅ Design a Distributed Message Queue
 - ✅ Design a Logging and Metrics System

@@ -604,6 +604,17 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - Result: **at-least-once delivery**. Events are never lost, but can arrive **twice**.
 - Consumers must be **idempotent**: skip event IDs they've already seen.
 
+**[Multi-step Processes](./distributed-systems/multi-step-processes.mdx)**
+
+- A **multi-step process** must finish or be cleanly undone. It must never stop halfway.
+- Every option does three things: **save progress** after each step, make each step **idempotent**, know how to **undo** each step.
+- All in one database? Use **one transaction**. It is the simplest answer.
+- A few steps: a **state machine** (a `status` column) + a **job queue** + a **sweeper**. The status is the checklist.
+- Across services: a **saga**, run by **choreography** (events) or **orchestration** (one conductor).
+- **Durable execution** (Temporal, Step Functions) saves each step's result and **replays** the code after a crash.
+- Idempotency key = **process ID + step name**. **Retry** temporary errors, **undo** permanent ones, **dead-letter** what never works.
+- Steps that **can't be undone**, like emails, go **last**.
+
 **[Change Data Capture (CDC)](./distributed-systems/change-data-capture.mdx)**
 
 - **CDC** = turn every insert, update and delete into an event.
@@ -622,6 +633,16 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - **Fencing tokens:** an always-increasing number. Storage **rejects old tokens**.
 - Redis locks for **saving work**. etcd/ZooKeeper + fencing for **correctness**.
 - Fencing can't stop side effects like a second email. Make the work **idempotent** too: one invoice per customer per month.
+
+**[Dealing with Contention](./distributed-systems/dealing-with-contention.mdx)**
+
+- **Contention** = many users want the same thing at once. Goal: **exactly one winner**.
+- **Read, check, then write** is a race. Two users can read the same value in the gap.
+- **First tool:** an **atomic conditional update** (`... WHERE stock >= 1`) or a **unique index**. Check the row count.
+- **Optimistic** (version column) when clashes are rare. **Pessimistic** (`FOR UPDATE`) when common and quick.
+- **Reservation with an expiry** when the user needs minutes. An expired hold counts as free.
+- **One very hot item:** a Redis counter or waiting room in front, split the stock, or a **queue** with one worker.
+- **Distributed locks** only when there is no single database to be the referee.
 
 **[Leader Election and Consensus](./distributed-systems/leader-election-consensus.mdx)**
 
@@ -815,6 +836,17 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - Words go in **`must`** (scored). Everything else goes in **`filter`** (yes or no, cached).
 - It is **not the source of truth**. Feed it with **CDC or the outbox**, use the database ID as the document ID, and rebuild with an **alias** swap.
 
+**[Vector Databases](./advanced-components/vector-databases.mdx)**
+
+- An **embedding** turns text or images into a list of numbers. **Similar meaning = close together.** Use the **same model** for items and searches.
+- Measure closeness with **cosine similarity** (same direction) or distance.
+- **Exact search** compares with every vector: too slow at scale. **ANN** finds almost the best, much faster.
+- **HNSW** = a graph of shortcuts, big jumps then small (fast, memory-hungry). **IVF** = buckets, search only the nearest few.
+- **Recall vs speed:** raise `ef_search` or `probes` for better recall, at a slower speed.
+- **Filter during** the search, not after, or you get too few results.
+- Uses: **semantic search**, **recommendations**, **RAG**. Mix with keyword search for **hybrid** search (RRF).
+- Start with **pgvector** or **Elasticsearch** if you have them. Go **dedicated** (Pinecone, Weaviate, Milvus, Qdrant) at huge scale.
+
 **[Geospatial Indexing](./advanced-components/geospatial-indexing.mdx)**
 
 - A normal index sorts one value. A location has **two**, so it can't find "near me" fast.
@@ -831,6 +863,16 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - **HyperLogLog:** counts **unique** items in about **12 KB**, about 1% off. Idea: the longest run of leading zeros.
 - **Count-Min Sketch:** "how many times?" Take the **smallest** counter. Can be too high, never too low.
 - Classic uses: Bloom filters in **Cassandra** reads and **crawlers**, HyperLogLog for **unique views**, Count-Min Sketch for **trending**.
+
+**[Time Series Databases](./advanced-components/time-series-databases.mdx)**
+
+- Time-series data is **append-only**, **time-ordered**, and **read by time range**. Each set of labels is one **series**.
+- A normal table struggles with **write volume**, **huge indexes**, **range scans** and **deleting** old rows.
+- **Chunks by time:** writes hit only the newest chunk, queries skip old chunks, and old chunks never change.
+- **Columnar compression:** store gaps and changes, not full values. Gorilla: 16 bytes down to about **1.37 bytes** a point.
+- **Downsampling:** raw → 1-minute → 1-hour rollups. Keep **min, max, avg, count**, not just the average.
+- **Retention:** drop a whole chunk at once, which is instant.
+- Prometheus for **monitoring**, TimescaleDB if you are on **PostgreSQL**, InfluxDB for **sensors**, ClickHouse or Druid for **event analytics**.
 
 **[Batch vs Stream Processing](./advanced-components/batch-vs-stream.mdx)**
 
@@ -1153,6 +1195,60 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
   one profile.
 - Match alerts go through a **queue** to APNs/FCM, deduped by match ID.
 
+**[Design an Online Auction](./questions/online-auction.mdx)**
+
+- **Never accept a lower or tied bid:** one conditional update,
+  `WHERE status = 'open' AND end_time > NOW() AND highest_bid_cents < new_bid`. 0 rows = too low or too late.
+- Read, compare in code, then save = **lost update**. Put the rule inside the `WHERE`.
+- Insert the bid with a unique **Idempotency-Key** first, so a retry never gets "too low" for its own bid.
+- Version-based **optimistic locking** for complex rules. A **line per auction** (Kafka keyed by auction ID) only
+  for extreme auctions.
+- **Live bids:** SSE plus one Pub/Sub channel per auction. Send the whole state with a **version**. Publish after
+  commit.
+- **Bidding stops** because of `end_time > NOW()` on the database's clock. **Closing** uses a timer queue and a
+  conditional close, with a backup sweep.
+- **Durable:** say "accepted" only after the bid is on two machines. Bids are append-only.
+- Sniping → **soft close**: a late bid pushes the end time out.
+
+**[Design Facebook Post Search](./questions/post-search.mdx)**
+
+- **Write-heavy:** about 10 writes (posts and likes) for every search. Protect the write path.
+- **Inverted index:** word → list of post IDs. Time-sorted IDs make "newest first" an append and an early stop.
+- **Keep it in sync with CDC → Kafka → Indexer**, never with dual writes. Retries are safe because adding an ID
+  to a set is idempotent.
+- **Never update the index on every like.** Exact counts live on the side, counted in batches. The index moves
+  only at milestones (1, 2, 4, 8 ...), and search re-sorts the top 1,000 with exact counts.
+- **Split by post ID**, and ask every shard (scatter-gather). Splitting by word makes hot shards.
+- Add **replicas** for more searches, and a small **recent tier** so most searches skip old data.
+- **Cache popular queries** for about 30 seconds, keyed by sorted lowercase words, and guard against a stampede.
+
+**[Design a Local Delivery Service](./questions/local-delivery.mdx)**
+
+- Inventory is stored per **DC and item**. What a user can buy = stock in the DCs that can reach them in time.
+- **Time, not distance:** a geo index narrows to a few DCs, then one maps "matrix" call checks real travel time.
+  Cache the answer per **geohash cell** for about 10 minutes.
+- **Read-heavy:** about 200 page views per order. Cache each DC's stock in Redis, kept fresh by **CDC**.
+- Browsing may be a second stale. **The truth is the atomic update** at order time.
+- **No overselling:** `quantity = quantity - 2 WHERE ... AND quantity >= 2`, one update per item, sorted by item,
+  in **one transaction**. 0 rows changed = roll back everything.
+- Keep inventory and orders in **one database**, split by DC, so an order is one plain transaction.
+- **Payment after the reservation**, never inside the transaction. Give the stock back if payment fails.
+- At peak, the real limit is **packers and drivers**. Feed each DC's wait time back into "who can deliver".
+
+**[Design ChatGPT](./questions/chatgpt.mdx)**
+
+- The model is a black box. **GPUs are the scarce, expensive part**, so the design is about using them well.
+- **POST** the message, and stream the answer back as **SSE** on the same response. One way is all we need.
+- A **queue** in front of GPU workers. Workers **pull** when they have room. **Batching** puts many answers on each
+  GPU step.
+- **Admission control**: if the expected wait is too long, say "try again" at once. Paid lane first. Quotas in
+  **tokens**.
+- When GPUs are full, **degrade**: extras off, shorter answers, a smaller model, then reject free users.
+- The model has **no memory**. Send a **token budget** of history: the newest messages + a **summary** of older ones.
+- Tokens go to a short-lived **buffer** (Redis Streams). The full answer goes to the DB **once**. Resume with
+  **Last-Event-ID**.
+- **Cost**: batching, shorter prompts, small models, **prefix caching**, and stop work nobody reads.
+
 **[Design YouTube](./questions/youtube.mdx)**
 
 - **Bytes never go through our API.** Upload straight to storage, watch straight from the CDN.
@@ -1183,6 +1279,20 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - **Webhooks are signed and de-duplicated** by event ID, saved in the same transaction as the status update.
 - **Double-entry ledger:** every movement is lines that add up to zero. Append-only. Written only when the status update changed 1 row.
 - **Reconciliation** with the PSP every day catches whatever slipped through.
+
+**[Design Robinhood (Stock Trading)](./questions/robinhood.mdx)**
+
+- Robinhood is a **broker**: it sends orders to exchanges and market makers, and they report fills later.
+- **Prices:** keep only the newest price (conflation), at most once a second. The whole market is then about
+  10,000 updates a second, so **every gateway gets every price**. Each app gets one batch per second.
+- One **WebSocket** per app, with subscribe messages. It also carries "your order filled".
+- A missed price is fine: **the next price replaces it**.
+- **Orders:** save first (with an Idempotency-Key), then send with **our order ID**. Statuses only move forward,
+  with conditional updates.
+- **Never resend on a timeout.** A sweeper **asks** the exchange about the order ID.
+- Fills are saved once per **execution ID**, and an order can never fill more than it asked for.
+- **Buying power:** check and reserve in one conditional update. Selling reserves shares.
+- **Market open is on the calendar:** scale up before 9:30, queue overnight orders, and reconnect with random delays.
 
 **[Design a Distributed Cache](./questions/distributed-cache.mdx)**
 
