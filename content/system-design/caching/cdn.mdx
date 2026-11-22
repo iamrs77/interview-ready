@@ -4,7 +4,7 @@ description: "Serving files, and even some API responses, from servers close to 
 icon: Cloud
 ---
 
-## The idea
+## What is it?
 
 A **CDN** (content delivery network) is a large group of servers spread across many cities around the world. Each one keeps copies of your files, so users download them from a server **near them** instead of from your server far away.
 
@@ -13,9 +13,17 @@ Think of a big **online shop with one warehouse** in the USA. A customer in Indi
 - The **main warehouse** is your **origin**: your own servers or storage (like S3), where the real files live.
 - The **local warehouses** are **edge servers**. A CDN location with edge servers is called a **PoP** (point of presence).
 
+## Why do we need it?
+
 Distance matters because data can't travel faster than light. A round trip from India to the USA takes around 200 ms. A round trip to a server in the same city takes a few ms. See [What is Caching](./what-is-caching.mdx) for the numbers.
 
-## How a CDN works
+Loading one page takes **several round trips**: setting up the connection, then the HTML, then its images and scripts. A far-away user pays those 200 ms again and again, and the page feels slow.
+
+The origin suffers too. Every image is downloaded millions of times **from your servers**, so you pay for all that bandwidth, and a traffic spike or an attack hits you directly. A CDN answers most requests near the user, and the origin sees only the misses.
+
+## How it works inside
+
+### From the user to the edge
 
 ```mermaid
 flowchart TB
@@ -54,17 +62,9 @@ The first user in Mumbai pays for the slow trip. Everyone after them gets the fa
 - **Pull CDN:** the edge fetches a file from the origin on the **first miss**, like above. Simple, and the most common.
 - **Push CDN:** you **upload** files to the CDN ahead of time. Useful for very large files, or a big launch where you don't want the first users to hit the origin.
 
-## What to put on a CDN
+### A shield in the middle
 
-| Put on a CDN | Don't put on a CDN |
-| --- | --- |
-| Images, videos, audio | Pages with **personal data** (your cart, your account) |
-| JavaScript, CSS, fonts | Data that must be exact right now (stock left, bank balance) |
-| Downloads: apps, PDFs, game updates | Requests that change data (`POST`, `PUT`, `DELETE`) |
-| Video streams. A video is split into small chunks of a few seconds each, and each chunk is a cacheable file | |
-| Public API responses that are the same for everyone (see below) | |
-
-A CDN also helps in other ways: it absorbs huge traffic spikes and **DDoS attacks** (floods of fake traffic) before they reach you, and it handles HTTPS close to the user.
+A CDN has hundreds of edge locations. If each one missed on its own, a new file would hit the origin hundreds of times. So many CDNs add a middle layer, often called an **origin shield** or **tiered cache**: edges ask the shield on a miss, and only the shield asks the origin. The origin sees about **one** request per file.
 
 ## Cache rules and expiry
 
@@ -118,6 +118,33 @@ Here the browser does not keep it (`max-age=0`), but the CDN keeps it for 2 seco
 
 **Private files are different.** A user's photo or a paid video is one file with its own URL, not a shared URL like `/api/me`. These can still go through a CDN, using **signed URLs**: the app gives the user a link with a signature that only works for a short time, and the CDN checks the signature before serving the file.
 
+## When to use it
+
+| Put on a CDN | Don't put on a CDN |
+| --- | --- |
+| Images, videos, audio | Pages with **personal data** (your cart, your account) |
+| JavaScript, CSS, fonts | Data that must be exact right now (stock left, bank balance) |
+| Downloads: apps, PDFs, game updates | Requests that change data (`POST`, `PUT`, `DELETE`) |
+| Video streams. A video is split into small chunks of a few seconds each, and each chunk is a cacheable file | |
+| Public API responses that are the same for everyone (see above) | |
+
+A CDN also helps in other ways: it absorbs huge traffic spikes and **DDoS attacks** (floods of fake traffic) before they reach you, and it handles HTTPS close to the user.
+
+**Don't use it when:**
+
+- **Your users are all near your servers,** and traffic is small. A CDN adds cost, and one more place where an old copy can hide.
+- **Files change often and can't get versioned names.** Each change needs a purge, and some users see the old copy until it is gone.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Serve from the origin** | Your own servers, or S3, answer every request | Users are close to your servers, and traffic is small |
+| **Browser cache only** | The browser keeps files, told by `Cache-Control` | Users come back often on the same device. It doesn't help a first visit |
+| **More regions** | Run your app and its data in several cloud regions, near users | Responses are personal or change all the time, so the edge can't cache them |
+| **Edge functions** | Run small pieces of code on the CDN's own servers (Cloudflare Workers, Lambda@Edge) | You need logic near users: redirects, A/B tests, checking a login token |
+| **Your own CDN** | Your own cache servers, placed inside internet providers' networks | Huge, steady video traffic, like Netflix (see below) |
+
 ## In the real world
 
 **Netflix built its own CDN.** Netflix's **Open Connect** places Netflix's own cache servers inside internet providers' networks, close to viewers. Netflix fills them with the shows people are likely to watch during quiet, off-peak hours (a push approach), so when you press play, the video usually comes from a server inside your own internet provider.
@@ -139,4 +166,7 @@ Bring up a CDN whenever there are **images, videos or static files**, or users *
   - `Cache-Control` decides how long: `max-age` (everyone), `s-maxage` (CDN only), `private`, `no-store`.
   - **Versioned file names** (`app.3f9a1c.js`): cache for a year, and change instantly with a new name.
   - Even **1-2 seconds** of edge caching can remove most of the load from the origin.
+  - **Why:** distance costs about 200 ms per round trip across the world, and one origin can't serve every download.
+  - **Inside:** DNS or **Anycast** sends users to a near edge. On a miss, the edge (or a **shield**) fetches once from the origin.
+  - **Alternatives:** serve from the origin, browser cache only, more regions, edge functions, your own CDN.
 </Callout>

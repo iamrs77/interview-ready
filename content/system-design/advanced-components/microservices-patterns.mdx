@@ -4,7 +4,7 @@ description: "How services talk to each other, how to split a system into servic
 icon: Component
 ---
 
-## The idea
+## What is it?
 
 Think of a **big restaurant kitchen** split into stations: grill, salads, desserts. Each station has **its own cook, its own fridge and its own job**.
 
@@ -14,7 +14,19 @@ Think of a **big restaurant kitchen** split into stations: grill, salads, desser
 
 Microservices work the same way. Whether to use them at all is covered in [Monolith vs Microservices](../hld-basics/monolith-vs-microservices.mdx). This page is about **doing it well**: how services talk, where to draw the lines, and who owns which data.
 
-## Sync vs async calls between services
+## Why do we need it?
+
+Splitting an app into services turns it into a **distributed system** (see [Why Distributed Systems Are Hard](../distributed-systems/why-distributed-is-hard.mdx)). Things that were easy inside one app get hard:
+
+- A function call becomes a **network call**. It can be slow, fail, or time out.
+- Data that sat in one database is now **spread out**. One transaction can no longer cover it all.
+- Teams can **step on each other** if the lines between services are drawn badly.
+
+Without clear rules for these, you get the worst of both worlds: all the cost of many services, with none of the freedom. That is the **distributed monolith**. The patterns on this page are those rules.
+
+## How it works inside
+
+### Sync vs async calls between services
 
 | | Synchronous (sync) | Asynchronous (async) |
 | --- | --- | --- |
@@ -45,7 +57,11 @@ Checkout **must know** that stock is reserved and the card is charged, so those 
 
 Protect every sync call with a **timeout**, a few **retries**, and a **circuit breaker** (see [Circuit Breaker](../reliability-security/circuit-breaker.mdx)). More on the two styles: [Sync vs Async Communication](../messaging/sync-vs-async.mdx) and [Event-Driven Architecture](../messaging/event-driven-architecture.mdx).
 
-## How to split a system into services
+### How one service finds another
+
+Services run as many copies that come and go, so their addresses keep changing. Before a call, the caller asks a **registry** (or the platform's DNS, like a Kubernetes Service) for the healthy copies of the service, then spreads its calls across them. Copies that fail their health checks are taken off the list. See [Health Checks and Service Discovery](../hld-basics/health-checks-service-discovery.mdx).
+
+### How to split a system into services
 
 **Split by business area, not by technical layer.** Ask "what does the business do?": take orders, take payments, manage the catalog, ship packages. Each answer is a candidate service.
 
@@ -66,7 +82,7 @@ Protect every sync call with a **timeout**, a few **retries**, and a **circuit b
 
 **Split out a piece only for a real reason:** it needs to scale differently (video encoding), a separate team owns it, it changes at a different speed, or it needs stricter security (payments).
 
-## Each service owns its data
+### Each service owns its data
 
 **Only the owning service reads and writes its database.** Other services must ask it through its API, or listen to its events. No one else connects to its tables.
 
@@ -104,6 +120,27 @@ Why it matters: with a shared database, the User team can't rename a column with
 | **Splitting too early** | A team of 5 people running 20 services | Start with a well-organized monolith. Split when there is a reason |
 | **No tracing** | Nobody can follow a request across 10 services | Pass a request ID everywhere and use distributed tracing. See [Observability](../production/observability.mdx) |
 
+## When to use it
+
+Use these patterns once you have, or truly need, **several services**:
+
+- **Several teams** that must build and deploy on their own.
+- Parts that must **scale differently** (video encoding vs the user profile page).
+- Parts with **stricter rules**, like payments, that you want to keep apart.
+
+**Don't use it when:**
+
+- The team is **small** or the product is **new**. Start with a well-organized monolith (see [Monolith vs Microservices](../hld-basics/monolith-vs-microservices.mdx)).
+- You can't yet name **clear business areas**. Lines drawn too early are costly to move later.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Modular monolith** | One deployable app, split inside into modules with clear lines. Each module owns its tables | Small or medium teams. Clean lines, no network calls |
+| **A few larger services** | A handful of bigger services, each owned by one team | You want some independence without dozens of services to run |
+| **Serverless functions** | Small functions the cloud runs on events, with no servers to manage | Spiky, event-driven work. Many tiny functions can get costly, as Prime Video found below |
+
 ## In the real world
 
 **Netflix moved to microservices after a database failure.** In 2008, a major database corruption stopped Netflix from shipping DVDs for three days. Netflix then moved from one big app in its own data center to many small services on AWS, finishing the move in 2016.
@@ -121,10 +158,12 @@ Draw services by business area, give each its own database, and label each arrow
 > "I'll split by business area: orders, payments, inventory and notifications, each with its own database. Checkout calls inventory and payments synchronously, because it needs the answer. Then the Payment Service publishes a PaymentSucceeded event, and email and shipping react to it asynchronously."
 
 <Callout title="Remember this" type="success">
+  - **Why:** services turn calls into **network calls** and spread data out. Without rules you get a **distributed monolith**.
   - **Sync** when you need the answer now. **Async** (events) to tell others something happened.
   - Long sync chains are slow and fragile. Use **timeouts, retries and circuit breakers**.
   - **Split by business area**, not by technical layer. One team owns each service.
   - **Each service owns its data.** No shared database. Copying some data is normal.
   - Cross-service transactions: **saga** + **outbox**.
   - Watch for the **distributed monolith**, too-small services and chatty calls.
+  - **Alternatives:** a modular monolith (small teams), a few larger services, serverless functions.
 </Callout>

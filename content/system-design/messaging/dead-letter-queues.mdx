@@ -4,13 +4,15 @@ description: "A place for messages that keep failing, so they don't block everyt
 icon: MailX
 ---
 
-## The idea
+## What is it?
 
 Post offices have long had a **dead letter office**. A letter that can't be delivered, like one with an unreadable address and no return address, goes there. It doesn't travel back and forth forever. Staff open it later and try to work out what to do with it by hand.
 
 A **dead-letter queue (DLQ)** does the same for messages. If a message fails again and again, it is **moved aside** into a separate queue. The main queue keeps flowing, and an engineer looks at the failed message later.
 
-## What a "poison" message is
+## Why do we need it?
+
+A queue retries a message that fails (see [Retries](./retries-backoff-timeouts.mdx)). That works for short blips. But some messages will **never** work, and retrying them causes trouble.
 
 A **poison message** is a message that fails **every time**, no matter how often you retry it. Common causes:
 
@@ -43,7 +45,7 @@ It helps to sort failures into two kinds:
 | **Short-lived** | A timeout, a database restarting, a `503` | Retry with backoff (see [Retries](./retries-backoff-timeouts.mdx)) |
 | **Permanent** | Broken JSON, a missing field, a bug | Retrying won't help. Move it to the DLQ |
 
-## How a dead-letter queue works
+## How it works inside
 
 ```mermaid
 flowchart TB
@@ -95,6 +97,12 @@ The SQS redrive policy:
 }
 ```
 
+### How the broker counts the tries
+
+- **SQS** adds 1 to a message's `ApproximateReceiveCount` every time a consumer receives it. When the count goes past `maxReceiveCount`, SQS moves the message to the DLQ. A DLQ must be the same type as its main queue: a FIFO queue needs a FIFO DLQ.
+- **RabbitMQ** adds an `x-death` header to a dead-lettered message. It records which queue it came from, the **reason** (`rejected`, `expired`, `maxlen` or `delivery_limit`) and how many times it happened.
+- **Kafka** keeps no count for you. Your code counts the tries, often in a message header.
+
 **Save the reason with the message.** When your own code moves a message to a DLQ (as with Kafka), add the error message, the number of tries and the time, for example as message headers. SQS moves messages for you but doesn't record **why**, so log each error together with the message ID.
 
 ### Retry first, then dead-letter
@@ -126,9 +134,31 @@ The main topic never waits on a failing message, and short problems fix themselv
 Watch out:
 
 - **A DLQ nobody watches is a black hole.** It is data loss, just slower.
-- **DLQ messages expire too.** Keep them longer than in the main queue. AWS recommends exactly this for SQS.
+- **DLQ messages expire too.** Keep them longer than in the main queue. AWS recommends exactly this for SQS. In a standard SQS queue, the clock keeps running from when the message **first** entered the main queue, so moving it to the DLQ doesn't give it more time.
 - **Replayed messages arrive late and out of order.** The consumer must be [idempotent](./idempotency.mdx), and must not let an old message overwrite newer data.
 - **A sudden flood into the DLQ** usually means a bug or a broken dependency, not bad messages. Don't set the limit too low (like 1 try), or every short blip fills the DLQ.
+
+## When to use it
+
+- **Every queue whose messages must not be lost**: orders, payments, emails, jobs.
+- **Consumers that read data from outside**: webhooks, user uploads, other teams' events. Bad data will come one day.
+- **At the end of a retry chain**, after the retry topics or the broker's own retries.
+
+**Don't use it when:**
+
+- Losing a message is fine, like metrics or live positions. Just log the failure and drop it.
+- **Every** message is failing because a dependency is down. Pause the consumer instead of filling the DLQ.
+- Strict order matters and you can't park the whole key. Pause the partition instead.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Retry forever, with backoff** | The message stays at the front until it works | Failures are always short-lived and order matters. Alert on the age of the oldest message |
+| **Drop and log** | Give up on the message and write an error log | Losing a message does no harm |
+| **Pause the consumer or partition** | Stop reading until the cause is fixed | Strict order matters more than speed |
+| **Error table in a database** | Save failed messages, with the error, as rows | People (like a support team) fix the data by hand in a tool and resend it |
+| **On-failure destination** | A serverless platform sends failed events somewhere for you, like AWS Lambda's on-failure destination | You use serverless functions and want no queue code of your own |
 
 ## In the real world
 
@@ -144,9 +174,12 @@ Mention a DLQ every time you add a queue. It shows you thought about failure:
 
 <Callout title="Remember this" type="success">
   - A **poison message** fails every time. Without a DLQ, it is retried **forever** and can block others.
+  - **Why:** retries fix short blips, but a message that can **never** work wastes workers and blocks the queue.
   - A **DLQ** takes a message after **N failed tries**, so the main queue keeps flowing.
+  - **Inside:** the broker **counts** deliveries (SQS `ApproximateReceiveCount`, RabbitMQ `x-death`). With Kafka, your code counts.
   - Retry **short-lived** errors with backoff. Send **permanent** errors to the DLQ.
   - Retry topics and the DLQ **break per-key order**. If order matters, park the **whole key** or pause the partition.
   - **Alert** when the DLQ is not empty. Fix the cause, then **replay** (redrive).
   - Replay is only safe if consumers are **idempotent**.
+  - **Alternatives:** retry forever, drop and log, pause the consumer, an error table, an on-failure destination.
 </Callout>

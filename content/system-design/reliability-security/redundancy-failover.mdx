@@ -4,7 +4,7 @@ description: "Removing single points of failure, so one broken part doesn't take
 icon: LifeBuoy
 ---
 
-## The idea
+## What is it?
 
 A hospital can't lose power in the middle of an operation. So it has a **backup generator**. When the city power goes out, the generator starts by itself, and within seconds the lights are back on.
 
@@ -15,7 +15,13 @@ That is the whole idea of this page:
 
 Servers crash, disks die, networks break and whole data centers lose power. You can't stop parts from failing. But you can stop one failed part from taking the whole system down.
 
-## Single points of failure
+## Why do we need it?
+
+**Every part fails sooner or later.** A server that is up 99.9% of the time is still down about **8.7 hours a year**. Multiply that by every server, disk, switch and data center in a system, and something is broken almost every day.
+
+If the system needs **every** part to work, its uptime is worse than its weakest part. The fix is to stop needing any **one** part. With two copies that fail independently, both are down at the same time far less often than either one alone. (More on uptime numbers in [Availability and Reliability](../hld-basics/availability-reliability.mdx).)
+
+### Single points of failure
 
 A **single point of failure (SPOF)** is any part that takes everything down with it when it breaks. Look at this simple setup:
 
@@ -36,7 +42,9 @@ SPOFs also hide in places people forget:
 - One **data center** or one **cloud region**.
 - One **person** who is the only one who knows how to fix something.
 
-## Redundancy: spare copies at every layer
+## How it works inside
+
+### Spare copies at every layer
 
 Here is the same system with a spare at every layer. An **availability zone** is a separate data center (or group of them) in the same area, with its own power and network. Cloud providers split each region into several zones, so a fire or power cut in one zone doesn't hit the others.
 
@@ -70,7 +78,7 @@ A common rule is **N+1**: if you need N servers to handle the load, run N+1. The
 
 Spares cost money. A spare that sits idle doubles the cost of that part, so you add them where a failure would hurt the most.
 
-## Active-passive vs active-active
+### Active-passive vs active-active
 
 There are two ways to use a spare.
 
@@ -102,7 +110,7 @@ flowchart LR
 
 Databases are usually active-passive, because two copies accepting writes at the same time can end up with different data.
 
-## Failover, step by step
+### Failover, step by step
 
 What happens when the primary database dies:
 
@@ -155,12 +163,34 @@ sequenceDiagram
   Note over S: Takes all the writes
 ```
 
-## What can go wrong
+### What can go wrong
 
 - **Split brain.** The network between the two copies breaks, but both are still alive. Each thinks the other is dead, and both accept writes. Now there are two different versions of the data. The fix is a quorum vote plus fencing.
 - **Lost writes.** If the standby is updated with a small delay (**asynchronous** replication), the last few writes before the crash may never reach it. They are gone after failover. **Synchronous** replication (the primary waits for the standby to confirm each write) avoids this, but makes every write a little slower.
 - **Flapping.** The system fails over, then back, then over again, because the health check is too touchy. Require several failed checks in a row, and don't switch back automatically right away.
 - **The spare doesn't work.** Its disk filled up months ago, or it has old settings. You only find out during the outage. Test failover regularly.
+
+## When to use it
+
+- **Anything users depend on** in production: the load balancer, app servers and the main database.
+- **Parts that hold data you can't lose.** A database replica in another zone protects both uptime and data.
+- **The pieces everything shares:** DNS, the auth service, config, the message broker.
+- **Zones always, regions only when needed.** Spreading across two or three zones is cheap. A second region is for systems where hours of downtime would be very costly.
+
+**Don't use it when:**
+
+- **Downtime is cheap.** Dev and test setups, internal tools, or a batch job that can simply run again.
+- **The spare costs more than the outage.** An idle standby doubles the cost of that part. Sometimes a restore from backup is good enough.
+- **You won't test it.** An untested spare gives false comfort. Plan the failover drill along with the spare.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Backups and restore** | No live spare. Rebuild from the last backup after a failure | Hours of downtime and some lost data are acceptable. See [Disaster Recovery](./disaster-recovery.mdx) |
+| **Auto-restart / replace** | A supervisor (Kubernetes, an auto scaling group) restarts or replaces a dead server | Stateless servers, and a short gap while a new one starts is fine |
+| **Managed services** | The cloud provider runs the spares for you (RDS Multi-AZ, S3, cloud load balancers) | You'd rather pay than build and test failover yourself |
+| **Graceful degradation** | When a part fails, show less instead of failing | The broken part is not critical. See [Graceful Degradation](./graceful-degradation.mdx) |
 
 ## In the real world
 
@@ -178,9 +208,11 @@ After you draw your first design, go box by box and remove each single point of 
 
 <Callout title="Remember this" type="success">
   - A **single point of failure** takes everything down. Ask "what if this dies?" for every box.
+  - **Why:** every part fails sooner or later. With spares, the system no longer needs any **one** part to work.
   - **Redundancy** = spares at every layer: load balancer, app servers, database, zone.
   - **Active-passive:** the spare waits. **Active-active:** all copies work and share the load.
   - **Failover** = detect, decide, promote, redirect, fence the old one.
   - Watch out for **split brain** and **lost writes** with async replication.
   - **Test failover regularly.** An untested spare often doesn't work.
+  - **Alternatives:** backups and restore, auto-restart, managed services, graceful degradation.
 </Callout>

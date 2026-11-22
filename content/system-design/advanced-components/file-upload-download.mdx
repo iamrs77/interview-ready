@@ -4,13 +4,13 @@ description: "Moving big files straight between users and storage, without overl
 icon: FileUp
 ---
 
-## The idea
+## What is it?
 
 Think of a **shop owner** who orders a huge sofa. She doesn't make the delivery truck drive through her small shop. She gives the driver a **short-lived pass** to the warehouse at the back: "Good for this one sofa, today only." The driver drops it off directly, and the shop keeps serving customers.
 
 Big file uploads work the same way. Your app server is the small shop. It should **hand out a pass** (a **presigned URL**) and let the file go **straight to storage** like S3. It never carries the heavy bytes itself.
 
-## Why files shouldn't go through your servers
+## Why do we need it?
 
 If a 2 GB video goes `phone → app server → S3`:
 
@@ -31,13 +31,17 @@ flowchart TB
   end
 ```
 
-## Presigned URLs
+## How it works inside
+
+### Presigned URLs
 
 A **presigned URL** is a normal S3 link with two extra things inside it: an **expiry time** and a **signature**. The app server makes the signature with its own secret key. It never sends the key itself.
 
 Whoever holds the URL can do **exactly one thing** (like "upload one file to the key `uploads/42/a1b2.jpg`") until it **expires**. It is not single-use: it works again and again until then. After that, the URL is useless.
 
-### The upload, step by step
+**How S3 checks it.** The server builds a short text from the request details (method, bucket, key, expiry time) and signs it with its secret key, using an **HMAC** (a hash that needs the key). S3 knows the same secret, so it builds the same text from the incoming request and signs it again. If the two signatures match and the time has not passed, the request goes through. Change the key, the method or the expiry in the URL, and the signatures no longer match: S3 answers `403 Forbidden`.
+
+#### The upload, step by step
 
 ```mermaid
 sequenceDiagram
@@ -89,7 +93,7 @@ const command = new PutObjectCommand({
 const url = await getSignedUrl(s3, command, { expiresIn: 900 });
 ```
 
-### Keeping it safe
+#### Keeping it safe
 
 - **Short expiry**, a few minutes.
 - **The server picks the key.** Then a user can't overwrite someone else's file.
@@ -97,7 +101,7 @@ const url = await getSignedUrl(s3, command, { expiresIn: 900 });
 - **The bucket stays private.** Nothing is public by default.
 - **Check the file after upload** (real file type, virus scan) before you mark it `ready` and show it to anyone.
 
-## Chunked and resumable uploads
+### Chunked and resumable uploads
 
 A phone uploads a 2 GB video. At 1.9 GB, the train goes into a tunnel and the connection drops. Starting again from zero would be painful.
 
@@ -128,7 +132,7 @@ Two more tricks:
 - **Skip parts the server already has.** Hash each part. If a part with that hash is already stored, don't upload it again. S3 multipart upload can't do this for you: it needs your own **block store**, where each part is saved as its own object named by its hash, plus a list of which parts make up each file. This is how sync apps upload only the changed parts of a big file. See [Design Google Drive](../questions/google-drive.mdx).
 - **Clean up.** Uploads that were started but never finished still take space. In S3, set a **lifecycle rule** that deletes unfinished multipart uploads after a few days.
 
-## Downloads through a CDN
+### Downloads through a CDN
 
 Downloads should also skip your app servers.
 
@@ -156,6 +160,27 @@ Content-Range: bytes 1048576-2097151/52428800
 
 `206 Partial Content` means "here is just the piece you asked for".
 
+## When to use it
+
+- **Any user upload** bigger than a few MB: photos, videos, documents, backups.
+- **Mobile apps on bad networks**: multipart, so a dropped connection costs one part, not the whole file.
+- **Private downloads**: invoices, paid videos, shared files, with short-lived signed URLs.
+- **Public downloads at scale**: a CDN in front of storage.
+
+**Don't use it when:**
+
+- Files are **tiny** and traffic is low, like a small attachment in an internal tool. Sending it through your server is simpler.
+- The file is **under about 100 MB** (for multipart). One upload request is enough.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Upload through your server** | The client sends the file to your API, which streams it on to S3 | Small files, low traffic, or the bytes must be checked before anything is stored |
+| **tus** | An open protocol for resumable uploads over HTTP, with ready client and server libraries | You run your own upload server instead of S3 multipart |
+| **Firebase Storage** | The app uploads straight to Google Cloud Storage with Firebase's SDK. Security rules decide who may write | A mobile or web app already built on Firebase |
+| **S3 Transfer Acceleration** | Uploads enter AWS at the nearest edge location, then travel over AWS's own network to the bucket | Users are far from the bucket's region |
+
 ## In the real world
 
 **S3 multipart limits.** In S3, each part can be **5 MB to 5 GB** (the last part can be smaller), one upload can have up to **10,000 parts**, so a single object can be up to **50 TB** (raised from 5 TB in December 2025). AWS suggests multipart upload for files over about 100 MB.
@@ -171,9 +196,11 @@ Any question with photos, videos or documents (Instagram, YouTube, Google Drive,
 > "The client asks my API for a presigned URL and uploads the video straight to S3, in parts, so it can resume after a dropped connection. S3 sends an event when the upload is done, and a worker starts processing. Downloads go through a CDN, with signed URLs for private files."
 
 <Callout title="Remember this" type="success">
-  - **Don't send big files through app servers.** It wastes them and hits size and time limits.
+  - **Why:** big files sent **through app servers** tie them up, cost double network, and hit size and time limits. Send them **straight to storage**.
   - **Presigned URL** = a signed, short-lived link to upload or download **one** object directly from S3.
   - Save a **metadata row** (`pending`), upload, then mark it **ready** when S3's event arrives. A **sweeper** cleans up rows stuck in `pending`.
   - Big files: **multipart upload**. Parts in parallel, retry only failed parts, **resume** after a crash.
   - Downloads: **CDN** for public files, **signed URLs** for private ones, **range requests** to resume and seek.
+  - **Inside:** the URL carries an **HMAC signature** of the method, key and expiry. S3 signs again with the same secret and compares.
+  - **Alternatives:** upload through your server (small files), tus, Firebase Storage, S3 Transfer Acceleration.
 </Callout>

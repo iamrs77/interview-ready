@@ -4,7 +4,7 @@ description: "Stop calling a service that keeps failing, and give it time to rec
 icon: ZapOff
 ---
 
-## The idea
+## What is it?
 
 Your house has a **fuse box**. If a heater goes wrong and pulls too much electricity, the breaker **trips** and cuts power to that circuit. The wires don't overheat and the house doesn't catch fire. When the problem is fixed, you flip the switch back on.
 
@@ -12,9 +12,9 @@ A software **circuit breaker** does the same for calls between services. It sits
 
 The goal: one broken service should not drag the services that call it down with it.
 
-## The problem: one slow service slows everyone
+## Why do we need it?
 
-An online shop. The **Checkout** service calls **Payments**, and also **Recommendations** (the "you may also like" box).
+**One slow service can slow everyone.** An online shop. The **Checkout** service calls **Payments**, and also **Recommendations** (the "you may also like" box).
 
 ```mermaid
 flowchart LR
@@ -34,7 +34,9 @@ This chain reaction is called a **cascading failure**. Retries make it worse: ev
 
 A shorter timeout helps (wait 1 second, not 30), but you still pay that second on every single call. A circuit breaker stops making the call at all.
 
-## Closed, open and half-open
+## How it works inside
+
+### Closed, open and half-open
 
 A circuit breaker is always in one of three states:
 
@@ -146,6 +148,14 @@ for (let i = 1; i <= 4; i++) {
 
 This breaker counts failures in a row. Real libraries look at a **failure rate** over a sliding window (the last N calls, or the last N seconds), count **slow** calls as failures too, and allow only a few calls at once in half-open.
 
+### How real breakers count
+
+- **A sliding window.** Either the last N calls (kept in a small ring of results), or the last N seconds (one counter per second, the oldest second dropped as time moves on).
+- **A minimum number of calls.** The breaker judges only after enough calls. Otherwise 1 failure out of 2 calls (50%) would trip it.
+- **Only real failures count.** Timeouts, connection errors and 5xx responses count. A `400` or `404` is the caller's mistake, not a sick service, so it is usually not counted.
+- **One breaker per dependency.** Payments and Recommendations each get their own, so one tripping doesn't block the other.
+- **Each server keeps its own state, in memory.** If you run 10 Checkout servers, each has its own breaker and trips on its own. No shared store is needed.
+
 ## Fallbacks
 
 When the breaker is open, what does the caller get? A **fallback**: a backup answer.
@@ -159,6 +169,28 @@ When the breaker is open, what does the caller get? A **fallback**: a backup ans
 | **A clear error** | "Payments are slow right now. Please try again in a minute." |
 
 Choose the fallback by how important the feature is. For recommendations, hiding the box is fine. For payments, you can never fake a success: show a clear error, or queue the payment and tell the user it is being processed. More on this in [Graceful Degradation](./graceful-degradation.mdx).
+
+## When to use it
+
+- **Calls over the network to a service that can be slow or down**, especially third-party APIs: payments, maps, SMS, email.
+- **Features with a good fallback**, like recommendations, reviews or ads. The breaker trips and the page still loads.
+- **A dependency that many requests share.** Without a breaker, its slowness spreads to everyone.
+
+**Don't use it when:**
+
+- **The call is local** (a function in the same process, an in-memory lookup). There is no network to fail.
+- **Traffic is very low.** The window rarely fills, so the breaker can't judge well. A good timeout is usually enough.
+- **The work can wait.** Put it in a queue and let a worker retry later, so nobody is waiting on the call at all.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Just a timeout** | Give up on each call after a short wait | Failures are rare and short. Simpler, but every call still pays the wait |
+| **Bulkhead** | A separate, capped pool of threads per dependency | You want to limit the damage. Calls still go out, but a slow service can only block its own pool. See [Bulkhead](./bulkhead.mdx) |
+| **A queue (async call)** | Put the work in a queue, and a worker does it later | The caller doesn't need the answer right now (emails, reports). See [Message Queues](../messaging/message-queues-pub-sub.mdx) |
+| **Outlier detection** | The load balancer or service mesh stops sending traffic to one bad server | Only some servers of a service are sick, not all of them |
+| **Load shedding** | The busy service itself rejects extra work | You own the service being called. See [Backpressure](./backpressure.mdx) |
 
 ## Working with other patterns
 
@@ -200,9 +232,12 @@ Bring it up whenever one service calls another that may be slow or down, especia
 
 <Callout title="Remember this" type="success">
   - One slow service can use up all of its callers' threads: a **cascading failure**.
+  - **Why:** a timeout still costs a wait on every call. A breaker **stops calling** a sick service, so the caller stays fast and the service gets time to recover.
   - **Closed** = normal. **Open** = fail fast, don't call. **Half-open** = let a few test calls through.
   - It opens on a **failure rate** (errors and timeouts), and closes when the test calls succeed.
   - Always pair it with a **fallback**: cached data, a default, or hide the feature.
   - Use it with **timeouts**, **retries with backoff** (the retry wraps the breaker) and **bulkheads**.
+  - **Inside:** a **sliding window** of recent calls, a minimum number of calls, one breaker **per dependency**, state kept in each server's memory.
   - Tools: **Resilience4j**, Polly, opossum, or a service mesh like Istio.
+  - **Alternatives:** just a timeout, a bulkhead, a queue, outlier detection, load shedding.
 </Callout>

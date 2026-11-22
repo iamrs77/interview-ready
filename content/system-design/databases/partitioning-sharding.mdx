@@ -4,7 +4,7 @@ description: "Splitting data into smaller pieces, on one machine or across many.
 icon: Split
 ---
 
-## The idea
+## What is it?
 
 Think of a big **exam**. One hall can't hold 3,000 students, so the school splits them by roll number: 1 to 1,000 in Hall A, 1,001 to 2,000 in Hall B, the rest in Hall C. Every student knows their hall from their roll number. Each hall has its own invigilator, so no single person is overloaded.
 
@@ -13,7 +13,17 @@ Databases do the same with data that is too big or too busy for one table or one
 - **Partitioning** splits a big table into smaller pieces, **inside one database server**. Like splitting one huge filing drawer into twelve smaller drawers in the same cabinet.
 - **Sharding** splits the data across **many database servers**. Each server, called a **shard**, holds some of the rows and has its own CPU, memory and disk. Like the exam halls, each with its own invigilator.
 
-## Partitioning vs sharding
+## Why do we need it?
+
+Every database server has a **ceiling**: so much CPU, so much memory, so much disk. [Replication](./replication.mdx) adds copies, but every copy holds **all** the rows and replays **every** write. So replicas give you more reads, but no more write capacity and no more disk space.
+
+As an app grows, it hits that ceiling. Writes queue up on the one primary, the disk fills up, and the hot data no longer fits in memory. The only way out is to **split the data**, so each machine holds and writes only its share.
+
+Even on one machine, one huge table is painful. Its indexes get big, and removing old data means a slow `DELETE` of millions of rows. Splitting it into smaller pieces makes both easier.
+
+## How it works inside
+
+### Partitioning: one table, many pieces
 
 **Partitioning** in PostgreSQL. One `orders` table, split into one piece per month:
 
@@ -38,6 +48,8 @@ The app still uses one table called `orders`. But:
 
 It still runs on **one machine**, so it does not give you more CPU or disk.
 
+### Sharding: same tables, different rows
+
 **Sharding** gives you more machines. Every shard has the **same tables**, but **different rows**:
 
 ```mermaid
@@ -52,21 +64,18 @@ The **router** decides which shard holds a row. It can be a library inside the a
 
 The words get mixed up in practice. Cassandra and DynamoDB call their pieces "partitions", even though they live on many machines.
 
-## When you really need sharding
+### Range vs hash sharding
 
-Sharding is **hard work**. Joins across shards, transactions across shards, moving data between shards, backups of many databases: all of it gets harder. Try these first:
+| | Range sharding | Hash sharding |
+| --- | --- | --- |
+| **How** | Each shard owns a range of keys: users 1 to 1M, then 1M + 1 to 2M ... | Run the key through a hash function, and use the number to pick a shard |
+| **Range queries** | Easy: "users 500 to 600" is on one shard | Hard: neighbors are scattered on every shard |
+| **Even spread** | Often not. New IDs and new dates all land on the last shard | Yes. Keys spread out evenly |
+| **Adding shards** | Split a range in two | Simple "hash mod N" moves almost every key |
 
-1. **Indexes** and better queries. See [Indexes](./indexes.mdx).
-2. A **cache** for hot reads. See [Caching](../caching/what-is-caching.mdx).
-3. **Read replicas** for more reads. See [Replication](./replication.mdx).
-4. A **bigger machine**. Today's servers have a lot of memory and fast disks.
-5. **Partitioning** and archiving old data.
+To add shards without moving almost everything, hash sharding uses [Consistent Hashing](./consistent-hashing.mdx) or a fixed set of slots.
 
-Shard when one machine truly can't keep up:
-
-- **Too many writes** for one primary. Replicas don't help here, because every write still goes to the primary. See [Scaling Writes](../hld-basics/scaling-writes.mdx).
-- **Too much data** for one machine's disk.
-- The data that is used often **no longer fits in memory**, so everything gets slow.
+A third option is a **directory**: a lookup table that says which shard each key lives on. It is the most flexible, because you can move any key, but the directory must be fast and never go down.
 
 ## Picking a good shard key
 
@@ -86,19 +95,6 @@ For our shop's `orders` table:
 | `country` | No. Few values, and one country can be huge | No | **Bad** |
 | `order_id` | Yes | No. A user's orders are on every shard | **OK** only if you mostly look up single orders |
 
-## Range vs hash sharding
-
-| | Range sharding | Hash sharding |
-| --- | --- | --- |
-| **How** | Each shard owns a range of keys: users 1 to 1M, then 1M + 1 to 2M ... | Run the key through a hash function, and use the number to pick a shard |
-| **Range queries** | Easy: "users 500 to 600" is on one shard | Hard: neighbors are scattered on every shard |
-| **Even spread** | Often not. New IDs and new dates all land on the last shard | Yes. Keys spread out evenly |
-| **Adding shards** | Split a range in two | Simple "hash mod N" moves almost every key |
-
-To add shards without moving almost everything, hash sharding uses [Consistent Hashing](./consistent-hashing.mdx) or a fixed set of slots.
-
-A third option is a **directory**: a lookup table that says which shard each key lives on. It is the most flexible, because you can move any key, but the directory must be fast and never go down.
-
 ## Hot shards and queries across shards
 
 **Hot shard.** One shard gets much more traffic than the others. Causes: a bad key (like time), or one huge customer or celebrity. Fixes:
@@ -117,6 +113,33 @@ See [Hot Keys and Fan-out](../advanced-components/hot-keys-fan-out.mdx).
 - **Transactions across shards** need [Two-Phase Commit](../distributed-systems/distributed-transactions-2pc.mdx) or a [Saga](../distributed-systems/saga-pattern.mdx). Choose a shard key that avoids them.
 - **Unique IDs** can't come from one auto-increment counter anymore. See [Distributed ID Generation](../distributed-systems/distributed-id-generation.mdx).
 - **Adding shards** means moving data while the app is live. A common trick: create **many small logical shards** up front (say, 1,000), and place several on each machine. To grow, move whole logical shards to new machines. No key ever changes shard.
+
+## When to use it
+
+- **Partitioning:** one big table that keeps growing and is mostly queried by time, like orders, logs or events. Old months are dropped in one quick step.
+- **Sharding:** when one machine truly can't keep up:
+  - **Too many writes** for one primary. Replicas don't help here, because every write still goes to the primary. See [Scaling Writes](../hld-basics/scaling-writes.mdx).
+  - **Too much data** for one machine's disk.
+  - The data that is used often **no longer fits in memory**, so everything gets slow.
+
+**Don't use it when:**
+
+- **One machine can still keep up.** Sharding is **hard work**. Joins across shards, transactions across shards, moving data between shards, backups of many databases: all of it gets harder.
+- **Your main queries need every shard,** like reports or search across all users. Each one becomes a slow scatter-gather.
+- **No column makes a good shard key** for your main queries.
+
+## Alternatives
+
+Try these first, roughly in this order:
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Indexes** | Better indexes and better queries. See [Indexes](./indexes.mdx) | Queries are slow, but the machine is not full |
+| **Cache** | Keep hot reads in memory. See [Caching](../caching/what-is-caching.mdx) | The same reads repeat a lot |
+| **Read replicas** | Copies that serve reads. See [Replication](./replication.mdx) | Reads, not writes, are the problem |
+| **Bigger machine** | Today's servers have a lot of memory and fast disks | One machine can still hold the load. The simplest fix |
+| **Partitioning and archiving** | Split the table on one machine, and move old data to cheap storage | The table is huge, but most of it is old |
+| **A database that shards for you** | Cassandra, DynamoDB, or distributed SQL like CockroachDB | You know from the start that the data will outgrow one machine. See [Cassandra and DynamoDB](./cassandra-dynamodb.mdx) |
 
 ## In the real world
 
@@ -141,4 +164,6 @@ Bring it up when the numbers show that one machine can't take the **writes** or 
   - **Range** sharding is good for ranges but makes hot spots. **Hash** sharding spreads evenly.
   - Watch for **hot shards** and slow **scatter-gather** queries across all shards.
   - Start with **many logical shards** so you can move them later.
+  - **Why:** one machine has a ceiling. Replicas add reads, but **not** writes or disk space.
+  - **Alternatives:** a bigger machine, archiving old data, or a database that shards for you (Cassandra, DynamoDB, CockroachDB).
 </Callout>

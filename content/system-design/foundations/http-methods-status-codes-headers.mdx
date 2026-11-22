@@ -4,7 +4,7 @@ description: The parts of every HTTP request and response.
 icon: FileText
 ---
 
-## The idea
+## What is it?
 
 Every HTTP request is like a short letter:
 
@@ -13,6 +13,53 @@ Every HTTP request is like a short letter:
 - The **headers** are the notes on the envelope: what format, who you are, how long to keep it.
 
 All the examples below use a **food delivery app**.
+
+## Why do we need it?
+
+Without shared rules, every API would invent its own: one uses `?action=delete`, another returns "OK" with an error hidden in the body. Then nothing in between could help you.
+
+Because these parts are **standard**, every machine on the way understands them, not only your app:
+
+- A **CDN** knows a `GET` response with `Cache-Control` may be cached.
+- A **client** knows a `503` may be retried, and a `400` may not.
+- A **browser** knows to follow a `301` to the new address.
+
+## How it works inside
+
+### Where they sit in a message
+
+A request and its response, as they travel in HTTP/1.1:
+
+```http
+POST /orders HTTP/1.1
+Host: food.example.com
+Content-Type: application/json
+Idempotency-Key: 7f3a9c
+
+{ "item": "pizza", "qty": 1 }
+```
+
+```http
+HTTP/1.1 201 Created
+Location: /orders/43
+Content-Type: application/json
+
+{ "id": 43, "status": "placed" }
+```
+
+- The **method** is the first word of the request.
+- The **status code** is on the first line of the response.
+- **Headers** are `Name: value` lines. One **empty line** ends them, and the body comes after.
+- **HTTP/2 and HTTP/3** send the same parts as binary frames and compress the headers. The meaning stays the same.
+
+### Who reads them
+
+| Who | Reads | To decide |
+| --- | --- | --- |
+| **Browser** | `301`, `Location`, `Set-Cookie` | Follow a redirect, save a cookie |
+| **CDN or cache** | The method, `Cache-Control`, `ETag` | Whether it may keep a copy and reuse it |
+| **Load balancer** | `Host`, the path | Which group of servers gets the request |
+| **Retry code** | `429`, `503`, `Retry-After` | Whether to try again, and when |
 
 ## Methods
 
@@ -129,6 +176,20 @@ sequenceDiagram
   S-->>B: 304 Not Modified (no image sent)
 ```
 
+## When to use which
+
+- **Read** → `GET`. **Create**, and the server picks the ID → `POST`. **Replace** the whole thing → `PUT`. **Change a part** → `PATCH`. **Remove** → `DELETE`.
+- Return the **most exact status code**: `201` after a create, `404` when it's missing, `409` on a clash. Clients, retries and dashboards all act on it.
+
+**Don't:**
+
+- **Change data in a `GET`**, like `GET /orders/42/cancel`. Crawlers, link previews and caches call `GET` freely, so one could cancel an order.
+- **Return `200` with an error in the body.** Caches, retry code and monitoring all think it worked.
+
+## Alternatives
+
+For HTTP APIs there is no real alternative: these are the rules HTTP itself uses. Before REST, many APIs (like old **SOAP** services) sent almost every call as `POST` to one URL and put the real result in the body. **gRPC** has its own status codes (like `NOT_FOUND`), and **GraphQL** often returns `200` with an `errors` list in the body. See [gRPC and GraphQL](./grpc-and-graphql.mdx).
+
 ## In the real world
 
 **Stripe never charges twice.** Stripe's payments API accepts an `Idempotency-Key` header. If your app's request times out and it retries a payment with the same key, Stripe sees the key and returns the first result. The customer is charged only once.
@@ -148,4 +209,7 @@ When you write your API, pick the right method and status code, and say them out
   - **401** not logged in, **403** not allowed, **409** conflict, **429** slow down.
   - Retry **5xx** and **429** only if the request is safe to repeat (idempotent, or has an idempotency key), with **backoff and jitter**. Don't retry other **4xx**.
   - Headers to know: `Content-Type`, `Authorization`, `Cache-Control`, `ETag`, `Location`, `Retry-After`.
+  - **Why:** shared rules let **every machine on the way** (browser, CDN, load balancer, retry code) understand the request, not only your app.
+  - **Inside:** method on the first line, status code on the reply's first line, `Name: value` headers, an empty line, then the body.
+  - **Alternatives:** none for HTTP. gRPC has its own codes. GraphQL often puts errors in a `200` body.
 </Callout>

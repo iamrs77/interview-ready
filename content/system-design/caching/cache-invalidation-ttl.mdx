@@ -4,7 +4,7 @@ description: "Keeping cached data fresh when the real data changes: delete on wr
 icon: TimerReset
 ---
 
-## The idea
+## What is it?
 
 A cache holds a **copy**. When the real data changes, the copy is now wrong. Wrong, old data in a cache is called **stale data**. **Invalidation** means removing (or fixing) the stale copy.
 
@@ -15,7 +15,7 @@ Think of a **restaurant's printed menus**. When the owner raises the price of a 
 
 Most systems use **both**: delete when you know something changed, and a TTL to catch anything you missed.
 
-## Why stale data happens
+## Why do we need it?
 
 The database and the cache are two separate places. A write to one does not change the other by itself:
 
@@ -35,7 +35,11 @@ sequenceDiagram
 
 The shopper sees 100, but the real price is 120. They will be unhappy at checkout.
 
-## Delete on write
+The cache has no idea the database changed. Without invalidation, the old copy stays until the cache runs out of memory and evicts it, which could be days. So every cache needs a plan for **how stale copies get removed**.
+
+## How it works inside
+
+### Delete on write
 
 When the app changes data, it **updates the database first, then deletes the cache key**:
 
@@ -60,7 +64,7 @@ async function updatePrice(id, price) {
 }
 ```
 
-### Why delete, and not update the cached value?
+#### Why delete, and not update the cached value?
 
 It looks smarter to write the new value into the cache. But two writes at the same time can arrive in the wrong order:
 
@@ -71,13 +75,13 @@ It looks smarter to write the new value into the cache. But two writes at the sa
 
 Now the database says 120 and the cache says 100, and it stays wrong until the TTL ends. A **delete** has no value in it, so the order does not matter: after both deletes, the next read loads the real price from the database.
 
-### Why the database first?
+#### Why the database first?
 
 If you delete the cache key first, a read can sneak in between: it misses, reads the **old** price from the database (not updated yet), and puts it back in the cache. Updating the database first makes this much less likely.
 
 One rare race is still left. A slow reader can read the **old** price just before the update, and write it into the cache **after** the writer's delete. The stale copy then lives until the TTL ends. A short TTL limits the damage. Facebook's **leases** block it: the delete cancels the slow reader's lease, so its late write is refused (leases are in [Cache Problems](./cache-problems.mdx)).
 
-### What if the delete fails?
+#### What if the delete fails?
 
 The database is updated, but the cache delete fails (a network error). The cache now holds stale data. Options:
 
@@ -86,7 +90,7 @@ The database is updated, but the cache delete fails (a network error). The cache
 
 This is why delete on write is never used alone. **Always add a TTL.**
 
-## TTL: let data expire
+### TTL: let data expire
 
 A **TTL** (time to live) is a timer on each cache key. When it runs out, the key is removed. The next read is a miss and loads fresh data.
 
@@ -96,7 +100,25 @@ SET product:42 '{"name":"Lamp","price":120}' EX 300
 TTL product:42     # how many seconds are left, e.g. 287
 ```
 
+Redis removes expired keys in two ways. When a key is read and its time is up, Redis deletes it right then. A background task also checks a few keys that have a TTL, many times per second, and deletes the expired ones. So an expired key is never returned, even if it still takes memory for a moment.
+
 TTL is simple and needs no extra code on writes. Its weakness: data can be stale **for up to the full TTL**. With a 5-minute TTL, a user may see an old price for up to 5 minutes.
+
+### Invalidation by events
+
+Sometimes many services write to the database, or many caches hold the same data. Asking every writer to remember every cache delete gets messy. Instead, **watch the database for changes**, and delete keys from there:
+
+```mermaid
+flowchart TB
+  App["App Servers"]:::service -->|"writes"| DB[("Products DB")]:::db
+  DB -->|"change log"| CDC["Change reader<br/>(CDC)"]:::service
+  CDC -->|"product 42 changed"| Q["Queue"]:::queue
+  Q --> W["Invalidation Worker"]:::service
+  W -->|"delete product:42"| C1[("Cache<br/>region 1")]:::cache
+  W -->|"delete product:42"| C2[("Cache<br/>region 2")]:::cache
+```
+
+**CDC** (change data capture) reads the database's own log of changes. Every change becomes an event, and a worker deletes the matching cache keys. See [Change Data Capture](../distributed-systems/change-data-capture.mdx).
 
 ## Picking a good TTL
 
@@ -127,21 +149,24 @@ await redis.set(key, value, "EX", ttl);
 
 More on this in [Cache Problems](./cache-problems.mdx).
 
-## Invalidation by events
+## When to use it
 
-Sometimes many services write to the database, or many caches hold the same data. Asking every writer to remember every cache delete gets messy. Instead, **watch the database for changes**, and delete keys from there:
+- **Delete on write:** whenever your own code changes data that is cached.
+- **TTL:** on **every** cached key, always. It is the safety net.
+- **Invalidation by events:** when many services write the same data, or many caches (like one per region) hold it.
 
-```mermaid
-flowchart TB
-  App["App Servers"]:::service -->|"writes"| DB[("Products DB")]:::db
-  DB -->|"change log"| CDC["Change reader<br/>(CDC)"]:::service
-  CDC -->|"product 42 changed"| Q["Queue"]:::queue
-  Q --> W["Invalidation Worker"]:::service
-  W -->|"delete product:42"| C1[("Cache<br/>region 1")]:::cache
-  W -->|"delete product:42"| C2[("Cache<br/>region 2")]:::cache
-```
+**Don't use it when:**
 
-**CDC** (change data capture) reads the database's own log of changes. Every change becomes an event, and a worker deletes the matching cache keys. See [Change Data Capture](../distributed-systems/change-data-capture.mdx).
+- **The data never changes,** like a file with a version in its name, or yesterday's totals. Cache it for a long time and skip invalidation.
+- **Only one service writes the data.** A CDC pipeline is extra parts to run. Delete on write plus a TTL is enough.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Update the cache on write** | Write the new value into the cache too (write-through). See [Caching Strategies](./caching-strategies.mdx) | Reads right after a write must be hits, and writes to one key don't race |
+| **Versioned keys** | Put a version in the key, like `product:42:v7`. A change bumps the version, so readers ask for a new key, and old keys just expire | It is hard to find every key to delete, like cached lists and pages |
+| **Don't cache it** | Read the database, or a replica, every time | The data must always be exact |
 
 ## In the real world
 
@@ -164,4 +189,6 @@ When you add a cache, the interviewer will often ask: "What happens when the dat
   - **TTL** = an expiry timer. A safety net for anything you missed.
   - Pick the TTL by asking **how bad old data is**. Add **jitter** so keys don't expire together.
   - Decisions that must be exact, like **holding a seat** or **paying from a balance**, always **check the database**. A cache with a very short TTL only helps **show** that data.
+  - **Why:** the cache doesn't know when the database changes. Without invalidation, a stale copy can live for days.
+  - **Alternatives:** write-through, versioned keys, or no cache for exact data.
 </Callout>

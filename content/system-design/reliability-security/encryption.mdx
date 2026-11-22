@@ -4,7 +4,7 @@ description: "Keeping data secret while it moves and while it is stored, and sto
 icon: FileLock
 ---
 
-## The idea
+## What is it?
 
 Think about how you protect valuables:
 
@@ -15,7 +15,16 @@ Either way, the lock is only as good as **where you keep the key**. A safe with 
 
 Passwords are different again. Nobody, not even you, should be able to unlock them. For passwords you use **hashing**.
 
-## A few words first
+## Why do we need it?
+
+- **Data travels through machines you don't control.** Between a phone and your server sit a Wi-Fi router, internet providers and cloud networks. Without encryption, anyone on the path can **read** the data, or **change** it on the way. (More in [HTTP and HTTPS](../foundations/http-and-https.mdx).)
+- **Stored data leaks.** Disks get stolen or thrown away, backups get copied, a storage bucket is left public by mistake, or an attacker gets into the database. Encrypted data is useless to them without the key.
+- **Passwords get reused.** People use the same password on many sites. A leaked list of plain passwords opens their email and bank accounts too.
+- **Rules ask for it.** For example, the card payment rules (PCI DSS) require stored card numbers to be unreadable.
+
+## How it works inside
+
+### A few words first
 
 - **Plaintext** is data you can read. **Ciphertext** is the scrambled version.
 - To **encrypt** is to turn plaintext into ciphertext using a **key**. To **decrypt** is to turn it back, with the right key.
@@ -24,7 +33,7 @@ Passwords are different again. Nobody, not even you, should be able to unlock th
 
 Real systems use both: asymmetric keys to agree on a shared secret key safely, then fast symmetric encryption for the actual data. TLS works this way.
 
-## Encryption in transit (TLS)
+### Encryption in transit (TLS)
 
 Data moving over a network should always be encrypted with **TLS**, the same thing that puts the "S" in HTTPS. It stops anyone on the way from reading or changing the data. How TLS works is in [HTTP and HTTPS](../foundations/http-and-https.mdx).
 
@@ -42,7 +51,7 @@ Where to use it:
 - **Between services: mTLS** (mutual TLS). In normal TLS, only the server shows a certificate. In mTLS **both sides** show one, so each service knows exactly who is calling it. Service meshes like Istio can set this up for every service automatically.
 - **To databases and caches:** most databases, and Redis, support TLS connections. Turn it on.
 
-## Encryption at rest
+### Encryption at rest
 
 Data stored on disks, in databases, in backups and in file storage like S3 should be encrypted too. It can happen at different levels:
 
@@ -59,7 +68,7 @@ That is also the catch. Disk and database encryption are invisible to the app, s
 
 The good news is that cloud providers make the first levels easy, and some turn them on by default (see Amazon S3, below).
 
-## Who holds the keys (KMS)
+### Who holds the keys (KMS)
 
 Encryption moves the problem: now you must protect the **key**. The rules:
 
@@ -93,7 +102,7 @@ It is like locking a letter in a box with a small key, then locking that small k
 
 A bonus is **crypto-shredding**. If each customer's data has its own key, deleting that one key makes all their data unreadable at once, even in old backups. This helps with "delete my data" requests.
 
-## Hashing passwords
+### Hashing passwords
 
 Never store passwords as plain text. Don't encrypt them either: anyone who gets the key could decrypt them all. Store a **hash**.
 
@@ -123,6 +132,30 @@ const isCorrect = await bcrypt.compare(typedPassword, user.passwordHash);
 | **Use it for** | Data you need to read later: messages, files, card numbers | Checking without storing: passwords |
 | **Examples** | AES, RSA, TLS | bcrypt and Argon2 for passwords. SHA-256 for checking a file wasn't changed. |
 
+## When to use it
+
+- **TLS: always**, on every connection that leaves a machine.
+- **Encryption at rest: always.** Turn on the provider's disk, database and storage encryption. It is cheap or free.
+- **Field-level encryption** for the most sensitive fields: card numbers, government IDs, health data.
+- **Envelope encryption with a KMS** when you encrypt large amounts of data yourself.
+- **Hashing** for passwords, and for other secrets you only need to check, never read back.
+
+**Don't use it when:**
+
+- **Storing passwords.** Hash them instead, with a slow hash (bcrypt, scrypt, Argon2), never a fast one like MD5 or SHA-256.
+- **You must search or sort by a field.** Field-level encryption makes that hard. Encrypt only the fields that really need it.
+- **You'd have to write the encryption code yourself.** Use standard, well-tested libraries and TLS. Home-made crypto almost always has holes.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Don't store it** | The safest data is data you never kept | You don't really need it. Ask before saving any sensitive field |
+| **Tokenization** | Swap the real value for a random token. The real value lives in a separate, locked-down vault | Card numbers: a payment provider like Stripe keeps the card, and you keep only the token |
+| **Masking** | Show only part of a value, like the last 4 digits of a card | Logs, support screens, receipts |
+| **Let someone else do login** | An identity provider or passkeys, so you store no passwords | You'd rather not hold passwords at all. See [OAuth and OIDC](./oauth-oidc.mdx) |
+| **Access control** | Limit who and what can read the data at all | Always, together with encryption. Encryption doesn't stop a user who is allowed in |
+
 ## In the real world
 
 **LinkedIn, 2012.** About 6.5 million LinkedIn password hashes were posted online. They were plain SHA-1 hashes with **no salt**, so attackers cracked a large share of them quickly. Years later it turned out that the breach had been much bigger.
@@ -138,10 +171,12 @@ Say it in one breath when you talk about security:
 > "All traffic uses TLS: HTTPS from users, mTLS between services. Data at rest is encrypted with keys kept in KMS, and card numbers get field-level encryption on top. Passwords are hashed with bcrypt, with a salt for each user."
 
 <Callout title="Remember this" type="success">
+  - **Why:** data crosses networks you don't control, stored data leaks, and people reuse passwords.
   - **In transit = TLS** everywhere: HTTPS for users, **mTLS** between services, TLS to databases.
   - **At rest:** disk, database and S3 encryption protect stolen files, not a hacked app. Add **field-level** encryption for the most sensitive data.
   - Keys live in a **KMS**, never in code or next to the data.
   - **Envelope encryption:** a data key locks the data, and the master key locks the data key.
   - **Passwords: hash, never encrypt.** Use bcrypt or Argon2, with a **salt**.
   - Symmetric (AES) is fast. Asymmetric (public and private keys) is used to agree on keys.
+  - **Alternatives:** don't store it, tokenization, masking, let an identity provider handle passwords.
 </Callout>

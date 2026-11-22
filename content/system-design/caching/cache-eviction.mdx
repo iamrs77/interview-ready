@@ -4,7 +4,7 @@ description: "What to throw away when the cache is full: LRU, LFU and FIFO, with
 icon: Trash
 ---
 
-## The idea
+## What is it?
 
 A cache lives in memory, and memory is small and costly. Sooner or later the cache is **full**, and something must go to make room for new data. Removing items to make room is called **eviction**. The rule that picks what to remove is the **eviction policy**.
 
@@ -18,13 +18,21 @@ Each rule is good in some homes and bad in others. Caches have the same choice.
 
 **Eviction is not expiry.** Expiry removes a key because its **TTL** ran out (see [Cache Invalidation and TTL](./cache-invalidation-ttl.mdx)). Eviction removes a key because the cache is **full**, even if its TTL has not run out.
 
-## LRU: least recently used
+## Why do we need it?
+
+A cache can't hold all your data. It only has room for the **hot** part (see [What Is Caching](./what-is-caching.mdx)). When it is full and new data arrives, it has only bad options without eviction: **refuse the write** (Redis's default does this, with an error), or run out of memory.
+
+And **what** you remove matters. Every popular key thrown out turns into misses that hit the database. Say the hit ratio drops from 95% to 90%: misses go from 5 to 10 in every 100 reads, so the database gets **twice** the load. A good policy keeps the items people will ask for next.
+
+## How it works inside
+
+### LRU: least recently used
 
 **Remove the item that was used longest ago.** The idea: if nobody asked for it recently, nobody will ask soon.
 
 Every time an item is read or written, it becomes the **most recent**. When the cache is full, the **least recent** item goes.
 
-### Step by step
+#### Step by step
 
 A cache that holds **3 items**. The last column lists items from **least recent** (left, evicted next) to **most recent** (right).
 
@@ -48,7 +56,7 @@ flowchart TB
   Full -->|"Yes"| Evict["Remove the least<br/>recently used key"] --> Add
 ```
 
-### LRU in JavaScript
+#### LRU in JavaScript
 
 A JavaScript `Map` remembers the **order in which keys were added**. That makes LRU short: the first key in the map is always the least recently used one. To mark a key as "just used", delete it and add it again, so it moves to the end.
 
@@ -119,7 +127,7 @@ Both `get` and `set` take the same short time no matter how many items there are
 
 **LRU's weak spot:** one big job that reads every item once (for example, a nightly report that scans all products) fills the cache with items nobody needs again, and pushes out the truly popular ones.
 
-## LFU: least frequently used
+### LFU: least frequently used
 
 **Remove the item that was used the fewest times.** Each item keeps a counter of how often it was read.
 
@@ -134,7 +142,7 @@ Example. A full cache holds: A (read 50 times), B (read 2 times), C (read 9 time
 
 The fix for both: make counts **slowly shrink over time**, so old popularity fades. Redis does this.
 
-## FIFO: first in, first out
+### FIFO: first in, first out
 
 **Remove the item that was added first**, like the line at a shop counter: whoever came first leaves first. It ignores how the items are used.
 
@@ -142,7 +150,7 @@ The fix for both: make counts **slowly shrink over time**, so old popularity fad
 
 **Bad:** it can throw away the most popular item just because it is old. If the home page config was the first thing loaded, FIFO evicts it first, even though it is read every second. That is why FIFO is rarely the best choice for an app cache.
 
-## Which one to use
+## When to use which
 
 | Policy | Removes | Good for | Weak spot |
 | --- | --- | --- | --- |
@@ -152,6 +160,15 @@ The fix for both: make counts **slowly shrink over time**, so old popularity fad
 | **Random** | Any item | When tracking use costs too much | Can remove a hot item by bad luck |
 
 **Start with LRU.** Move to LFU if you see popular keys being pushed out by one-time reads.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **More memory** | A bigger cache, or more cache nodes. See [Distributed Caching](./distributed-caching.mdx) | Popular keys keep getting evicted because the hot data doesn't fit |
+| **Expire only, never evict** | Size the cache so every key fits, and let TTLs remove data | The data is small and known. If you guess wrong, writes fail |
+| **W-TinyLFU** | A new item gets in only if it looks more popular than the item it would push out. The Java cache library Caffeine uses it | You want LFU's resistance to big scans, but quick reaction to new popular items |
+| **ARC** | Keeps a "recent" list and a "frequent" list, and moves space between them as traffic changes. The ZFS file system uses it | Traffic switches between new items and old favorites |
 
 ## In the real world
 
@@ -193,4 +210,6 @@ If you are asked to build an LRU cache in code, use a hash map plus a doubly lin
   - **FIFO:** remove the item **added first**. Simple, but ignores popularity.
   - LRU in JS: a `Map`. On read, delete and re-add the key. When full, remove the **first** key.
   - Redis defaults to `noeviction`. For a cache, set `allkeys-lru`.
+  - **Why:** memory only fits the hot data. Evicting the wrong keys means more misses, and more database load.
+  - **Alternatives:** more memory, expire-only, smarter policies like **W-TinyLFU** or **ARC**.
 </Callout>

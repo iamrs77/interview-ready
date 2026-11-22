@@ -4,52 +4,62 @@ description: A very fast data store that keeps everything in memory. Used for ca
 icon: MemoryStick
 ---
 
-## What is Redis?
+## What is it?
 
 Redis is a data store that keeps all its data **in memory (RAM)**. That is why it is so fast: most reads and writes take **less than 1 ms**.
 
 It is a **key-value store**. You save a value under a key, and read it back with the same key. Think of it like a big JavaScript `Map` that all your servers share.
 
-## What you use it for in interviews
+## Why do we need it?
 
-| Use | How | Example question |
+Redis is used mostly as a **cache**, so start with why caching exists (more in [What Is Caching](./what-is-caching.mdx)):
+
+- **The database is slow for repeated reads.** It keeps data on disk, and a query takes about **5–50 ms** to find, filter and join rows.
+- **Apps read the same data again and again.** The same profile, the same product page, the same short link. Running the same query every time repeats the same slow work.
+- **The database has a limit.** It can only answer so many queries per second. As traffic grows, reads often hit that limit long before the data gets big.
+
+A cache keeps a copy of the **hot** data (the data read most) in a faster place. Redis is that place: data in RAM, answers in under 1 ms, and **shared by all your servers**. A cache inside one server's own memory only helps that server, and it is lost on every restart or deploy.
+
+Redis also solves problems that have nothing to do with caching. Many servers often need **one shared place** to count (rate limits, IDs), keep things sorted (leaderboards), or agree on who holds a lock. A database can do these too, but more slowly, and it adds load to the database.
+
+## How it works inside
+
+### Everything lives in RAM, in ready-made data structures
+
+Redis does not store rows like a database. Each key holds a **data structure** built for memory:
+
+| Type | What it is | Used for |
 | --- | --- | --- |
-| **Cache** | Save results of slow queries, with a TTL | URL shortener, news feed |
-| **Counter** | `INCR` adds 1 safely, even with many servers | Unique IDs for a URL shortener |
-| **Rate limiter** | Count requests per user per minute | Rate limiter |
-| **Leaderboard** | A **sorted set** keeps items sorted by score | Game leaderboard, top K songs |
-| **Lock** | Only one server can hold a key at a time, until it expires | Uber: offer a driver only one ride at a time |
-| **Pub/Sub** | Send a message to everyone listening on a channel **right now**. Fire-and-forget: anyone not connected misses it | Chat app, live comments |
+| **String** | One value (text, a number, or bytes) | Cache entries, counters |
+| **Hash** | A small map of fields inside one key | A user object: `name`, `email`, `age` |
+| **List** | An ordered list, fast to add at either end | Queues, recent items |
+| **Set** | Unique values, no order | Tags, "who liked this" |
+| **Sorted set** | Unique values, each with a score, kept sorted | Leaderboards, top K |
 
-## Commands you should know
+Because the data is already in the shape you need, most commands do very little work.
 
-```bash
-# Cache a value for 1 hour (3600 seconds)
-SET url:abc123 "https://example.com/long/link" EX 3600
-GET url:abc123
+### One thread runs the commands
 
-# Counter: add 1 safely, even when many servers call it at once
-INCR next_url_id
+Commands run **one at a time** on one main thread. So a command like `INCR` is **atomic**: it fully happens, and no other command can mix in. This is why a Redis counter is safe even with many servers. (Why one thread is still fast is explained in the next section.)
 
-# Leaderboard with a sorted set
-ZADD leaderboard 1500 "alice"
-ZADD leaderboard 1800 "bob"
-ZRANGE leaderboard 0 9 REV WITHSCORES   # top 10 players, highest first
+### Saving to disk: RDB and AOF
 
-# Lock: set only if the key does not exist (NX), expire after 10 seconds.
-# The value is a random token, so a server can tell its own lock apart.
-SET lock:driver:42 7f3a9c NX EX 10
-```
+RAM is lost when the machine restarts. Redis can save data to disk in two ways:
 
-To release the lock, run a small Lua script that deletes the key **only if it still holds your token**, in one step (the code is in [Cache Problems](./cache-problems.mdx)). A plain `DEL`, or a `GET` and then a `DEL`, can delete a lock that another server took after yours expired.
+- **RDB (snapshot):** every few minutes, Redis writes **all** the data to a file. Restarting is fast, but you lose the writes made since the last snapshot.
+- **AOF (append-only file):** Redis adds **every write command** to the end of a log file. By default it flushes the log to disk once per second, so you lose at most about 1 second of writes. Restarting is slower, because Redis replays the log.
 
-## Things to know
+Many teams turn on both. Some turn off both, when Redis is only a cache and the data can be loaded again from the database.
 
-- **Memory is small and costly.** Keep popular data in Redis, not everything.
-- **Commands run one at a time.** So a command like `INCR` is **atomic**: it fully happens, and no other command can mix in. This is why the counter is safe with many servers.
-- **A Redis lock is not a perfect lock.** It can expire while the holder is still working (for example, during a long pause), or be lost when a replica takes over after a crash. Then two servers both think they hold it. Use it to **save work**, like not running a job twice. When two holders would break data, the database must also check, for example with a conditional update (`UPDATE ... WHERE status = 'free'`) or a **fencing token** (a number that always goes up, so the database rejects an old holder). See [Distributed Locking](../distributed-systems/distributed-locking.mdx).
-- **It is usually not your main database.** Redis can save data to disk, but most teams keep the "real" data in a database. If the cache is lost, you can load it again from the database.
-- **It can grow.** **Redis Cluster** splits keys across many machines. **Replicas** keep copies, so if one machine dies, another takes over.
+### When memory is full: eviction
+
+You set a memory limit (`maxmemory`) and a rule for what to delete when it is full. For a cache, the usual rule is `allkeys-lru`: delete the key that was used **least recently**. The default rule, `noeviction`, deletes nothing and returns an error on new writes. See [Cache Eviction](./cache-eviction.mdx).
+
+### Copies and more machines
+
+- **Replication:** one **primary** takes all the writes, and **replicas** copy its data. Replicas can serve reads. The copying is **asynchronous**: the primary answers before the replicas have the write. So if the primary dies, a few of the latest writes can be lost.
+- **Failover:** **Redis Sentinel** (or the cloud service) watches the primary. If it dies, it makes a replica the new primary.
+- **Redis Cluster:** splits the keys across many primaries. There are **16,384 slots**. Each key goes to slot `CRC16(key) % 16384`, and each primary owns a range of slots. A command that uses many keys only works when they are in the same slot, so you can put a shared part in braces, like `{user:42}:cart` and `{user:42}:orders`, to keep them together.
 
 ## Why is Redis fast if it's single-threaded?
 
@@ -84,6 +94,57 @@ In short:
 
 > "Redis is fast because it keeps its data in RAM, uses efficient in-memory data structures, and runs most commands on a single thread, so it avoids the cost of locks between threads. Its event-driven design lets one thread handle many client connections. Most commands are tiny, so that thread gets through a huge number of requests. But a slow, CPU-heavy command blocks the thread and makes every other request wait."
 
+## When to use it
+
+| Use | How | Example question |
+| --- | --- | --- |
+| **Cache** | Save results of slow queries, with a TTL | URL shortener, news feed |
+| **Counter** | `INCR` adds 1 safely, even with many servers | Unique IDs for a URL shortener |
+| **Rate limiter** | Count requests per user per minute | Rate limiter |
+| **Leaderboard** | A **sorted set** keeps items sorted by score | Game leaderboard, top K songs |
+| **Lock** | Only one server can hold a key at a time, until it expires | Uber: offer a driver only one ride at a time |
+| **Pub/Sub** | Send a message to everyone listening on a channel **right now**. Fire-and-forget: anyone not connected misses it | Chat app, live comments |
+
+**Don't use it when:**
+
+- **The data must never be lost** (orders, payments). Snapshots, the 1-second AOF flush and asynchronous replicas can all lose recent writes. Keep the real data in a database, and let Redis hold a copy you can load again.
+- **The data is big and rarely read.** Memory is small and costly. Keep only **hot** data in Redis, and the rest in the database or object storage.
+- **You need real queries.** Redis finds data by key. It cannot join tables or search by any field you like.
+- **Correctness depends on a lock.** A Redis lock can expire while the holder is still working (for example, during a long pause), or be lost when a replica takes over after a crash. Then two servers both think they hold it. Use it to **save work**, like not running a job twice. When two holders would break data, the database must also check, for example with a conditional update (`UPDATE ... WHERE status = 'free'`) or a **fencing token** (a number that always goes up, so the database rejects an old holder). See [Distributed Locking](../distributed-systems/distributed-locking.mdx).
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Memcached** | A simple in-memory cache. Values are plain strings. Uses many threads. No saving to disk | You only need a plain cache, nothing else |
+| **In-process cache** | A map or LRU cache inside each app server's memory | Small data that rarely changes (config, feature flags). Fastest (no network), but each server has its own copy, lost on restart |
+| **Valkey, Dragonfly** | Stores that speak the same commands as Redis | Valkey: the open-source fork after Redis's 2024 license change. Dragonfly: uses many threads on one big machine |
+| **DynamoDB** (with DAX) | A managed key-value database that keeps data on disk. DAX is an optional in-memory cache in front | The data must be durable and is too big for memory, but you still read by key |
+| **Just the database** | A good index, read replicas, or a precomputed table | Traffic is low. A cache would add stale data and extra parts for little gain |
+| **CDN** | Caches whole responses close to users | The response is the same for everyone (images, public pages). See [CDN](./cdn.mdx) |
+
+## Commands you should know
+
+```bash
+# Cache a value for 1 hour (3600 seconds)
+SET url:abc123 "https://example.com/long/link" EX 3600
+GET url:abc123
+
+# Counter: add 1 safely, even when many servers call it at once
+INCR next_url_id
+
+# Leaderboard with a sorted set
+ZADD leaderboard 1500 "alice"
+ZADD leaderboard 1800 "bob"
+ZRANGE leaderboard 0 9 REV WITHSCORES   # top 10 players, highest first
+
+# Lock: set only if the key does not exist (NX), expire after 10 seconds.
+# The value is a random token, so a server can tell its own lock apart.
+SET lock:driver:42 7f3a9c NX EX 10
+```
+
+To release the lock, run a small Lua script that deletes the key **only if it still holds your token**, in one step (the code is in [Cache Problems](./cache-problems.mdx)). A plain `DEL`, or a `GET` and then a `DEL`, can delete a lock that another server took after yours expired.
+
 ## In the real world
 
 **Twitter kept home timelines in Redis.** In a 2012 talk called "Timelines at Scale", Twitter explained that each user's home timeline was a **list of tweet IDs** stored in Redis. When someone tweeted, the tweet ID was pushed into the Redis list of each follower. Opening the app then meant reading one short list from memory, not running a big database query.
@@ -102,9 +163,11 @@ Name the Redis feature you use, and why:
 
 <Callout title="Remember this" type="success">
   - Redis = **in-memory key-value store**. Reads and writes in under 1 ms.
+  - **Why:** the database is slow for the same reads again and again. Redis keeps the **hot** data in RAM, **shared** by all servers.
   - Main uses: **cache, counter, rate limiter, leaderboard, lock, pub/sub**.
-  - Commands are **atomic**, so counters are safe. Locks can **expire or be lost** in a failover: use them to save work, and let the database check correctness.
-  - Memory is limited. Keep only **hot** data in it.
-  - Usually **not** the main database.
+  - **Inside:** data structures in RAM, one thread runs commands (so they are **atomic**), **RDB/AOF** to save to disk, **async replicas**, **Cluster** with 16,384 slots.
+  - Locks can **expire or be lost** in a failover: use them to save work, and let the database check correctness.
+  - Usually **not** the main database. Memory is limited, so keep only hot data in it.
   - **Fast with one thread:** data in **RAM**, no **locks** between threads, and an **event loop** that serves many connections. The catch: one slow command (like `KEYS *`) blocks everyone.
+  - **Alternatives:** Memcached (plain cache), an in-process cache, Valkey, DynamoDB, a CDN.
 </Callout>

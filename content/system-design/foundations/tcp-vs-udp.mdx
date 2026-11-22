@@ -4,14 +4,27 @@ description: Two ways to send data. TCP is safe and in order. UDP is fast, with 
 icon: ArrowLeftRight
 ---
 
-## The idea
+## What is it?
 
 Data travels across the internet in small pieces called **packets** (see [How the Internet Works](./how-the-internet-works.mdx)). TCP and UDP are two different sets of rules for sending those packets.
 
 - **TCP** is like a **tracked courier**. Every package is tracked and signed for. If one gets lost, it is sent again. Safe, but a little slower.
 - **UDP** is like **throwing flyers from a moving car**. Very fast, but nobody checks whether each flyer reached someone.
 
-## TCP: safe and in order
+## Why do we need it?
+
+**IP**, the layer below, only moves packets from computer to computer. It makes **no promises**: packets can get lost, arrive twice, or arrive out of order. And IP only knows the computer, not which app should get the data.
+
+So something on top must add **ports** (which app), and decide what to do about lost packets. Apps want different things:
+
+- A **web page or a payment** needs every byte, in order. Waiting a little is fine.
+- A **video call** needs speed. Waiting for a lost packet is worse than skipping it.
+
+One set of rules can't do both well. TCP is built for the first kind, UDP for the second.
+
+## How it works inside
+
+### TCP: safe and in order
 
 TCP makes four promises:
 
@@ -20,7 +33,7 @@ TCP makes four promises:
 3. **No duplicates.** Each piece is delivered once.
 4. **It slows down when the network is busy**, so it doesn't make traffic worse.
 
-### Step 1: the handshake
+#### Step 1: the handshake
 
 Before any data moves, TCP opens a connection with three short messages. It is like starting a phone call: "Hello, can you hear me?" "Yes, can you hear me?" "Yes!" Then you start talking.
 
@@ -38,9 +51,9 @@ sequenceDiagram
 
 This handshake costs **one full round trip** before any data is sent. If the server is in the USA and you are in India, that is about 200 ms of waiting. That is why apps **reuse open connections** instead of opening a new one for every request.
 
-### Step 2: fixing lost packets
+#### Step 2: fixing lost packets
 
-The receiver sends back an **ACK** (acknowledgment) for what it got. If a packet goes missing, the sender notices and sends it again.
+Every byte TCP sends has a **sequence number**. The receiver uses these numbers to put the pieces in order and to spot a gap. It sends back an **ACK** (acknowledgment) for what it got. If a packet goes missing, the sender notices and sends it again.
 
 ```mermaid
 sequenceDiagram
@@ -54,7 +67,14 @@ sequenceDiagram
   B-->>A: Got everything
 ```
 
-## UDP: fast, no promises
+#### Step 3: not too fast
+
+- **Flow control:** the receiver tells the sender how much free room it has. The sender never sends more than that.
+- **Congestion control:** a new connection starts slow and speeds up. When packets get lost, TCP takes it as a sign the network is busy, and slows down sharply.
+
+When the app is done, each side sends a **FIN** message to close the connection.
+
+### UDP: fast, no promises
 
 UDP skips all of that:
 
@@ -63,6 +83,8 @@ UDP skips all of that:
 - **No ordering.** Packets can arrive in any order.
 
 Less work means **less delay**. The app itself decides what to do about lost packets, and often the answer is "nothing".
+
+A UDP header is only **8 bytes**: from-port, to-port, length, and a checksum to spot broken packets. A TCP header is at least 20 bytes.
 
 ## Side by side
 
@@ -74,7 +96,7 @@ Less work means **less delay**. The app itself decides what to do about lost pac
 | **Speed** | A little slower | Faster |
 | **Used for** | Web pages, APIs, chat messages, payments, database connections | Voice and video calls (WebRTC, the system built into browsers for live calls), online games, DNS lookups |
 
-## How to choose
+## When to use which
 
 ```mermaid
 flowchart TB
@@ -89,6 +111,19 @@ flowchart TB
 - **Online game:** the game sends player positions many times a second. An old position is useless, because a newer one is already on its way.
 - **Payment:** every byte must arrive correctly. This is TCP.
 - **Streaming video** (YouTube, Netflix, even live streams on Twitch): not a UDP case. The video is sent as small chunks over normal HTTP, through a CDN. The player keeps a few seconds of video ready, so a resent packet is never noticed.
+
+**Don't use UDP when:**
+
+- **Every byte matters**, like files, payments or messages. You would end up building TCP's resending yourself.
+- **The network may block it.** Some company networks block UDP, so call apps keep a TCP fallback.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **QUIC** | Runs on UDP, but adds TCP's safety, built-in encryption and many streams in one connection | You use HTTP/3, or want faster setup and better behavior on phones (see below) |
+| **Your own layer on UDP** | The app resends only the messages that must arrive | Games: resend "player joined", but never an old position |
+| **SCTP** | Sends whole messages instead of a stream of bytes, with many streams in one connection | Phone company networks. Browsers use it inside WebRTC to send data between users |
 
 ## In the real world
 
@@ -111,4 +146,7 @@ Most of the time you won't mention TCP at all. Everything that uses HTTP already
   - **TCP by default.** UDP for **voice and video calls and games**, where late data is useless.
   - **Streaming video** (even live) is not UDP: it is HTTP chunks through a CDN.
   - **HTTP/3** runs on **QUIC**, which is built on UDP.
+  - **Why:** IP makes **no promises** and knows no ports. Some apps need every byte, others need speed.
+  - **Inside:** TCP uses **sequence numbers**, **ACKs**, **flow control** and **congestion control**. UDP is an **8-byte header** and nothing more.
+  - **Alternatives:** **QUIC**, your own layer on UDP (games), SCTP.
 </Callout>

@@ -4,7 +4,7 @@ description: "Cache stampede, cache penetration, hot keys and cold start: what g
 icon: Flame
 ---
 
-## The idea
+## What is it?
 
 A cache protects the database by answering most reads. The problems on this page all have the same shape: **for some reason, the cache stops absorbing the reads, and a flood of requests hits the database at once.**
 
@@ -15,7 +15,15 @@ Think of a busy **bakery** with a display case (the cache) and a baker in the ba
 - **Hot key:** everyone wants the same croissant, and only one clerk is allowed to sell it.
 - **Cold start:** opening morning. The display case is empty, so every order goes to the baker.
 
-## Cache stampede
+## Why do we need it?
+
+Once a cache works, the database is sized for the **misses**, not for all the reads. With a 95% hit ratio, it may only ever see about 5% of them.
+
+So when the cache stops helping, even for a moment, the database suddenly gets up to **20 times** its normal load. It slows down, requests time out, clients retry, and the load grows even more. A small cache problem becomes a **full outage**. That is why you plan for these four cases before they happen.
+
+## How it works inside
+
+### Cache stampede
 
 A **very popular key expires** (or gets deleted). In the next moment, hundreds of requests miss the cache **at the same time**, and all of them go to the database to load the same data. This is also called a **thundering herd**.
 
@@ -140,7 +148,7 @@ Three details make it safe:
 
 Now 1,000 misses turn into **1 database query** and 999 short waits. (Locks are covered in depth in [Distributed Locking](../distributed-systems/distributed-locking.mdx).)
 
-## Cache penetration
+### Cache penetration
 
 Requests ask for data that **does not exist**, like `user:-1` or random product IDs. The cache never has it (there is nothing to cache), so **every request goes to the database**, finds nothing, and returns nothing. The cache does not help at all.
 
@@ -174,7 +182,7 @@ flowchart TB
 3. **Check the input.** Reject IDs that can't be real (negative, wrong format) before touching the cache or database.
 4. **Rate limit** clients that cause many misses. See [Rate Limiting](../reliability-security/rate-limiting.mdx).
 
-## Hot keys
+### Hot keys
 
 One key gets **far more traffic than all others**. A celebrity's profile, a viral post, the product on a flash sale. In a [distributed cache](./distributed-caching.mdx), each key lives on **one shard**. So one cache server gets most of the traffic while the others sit idle, and that one server runs out of CPU or network.
 
@@ -194,7 +202,7 @@ One key gets **far more traffic than all others**. A celebrity's profile, a vira
 
 More on hot keys, and the related "celebrity problem" for feeds and databases, is in [Hot Keys, Hot Partitions and Fan-out](../advanced-components/hot-keys-fan-out.mdx).
 
-## Cold start
+### Cold start
 
 The cache is **empty**: after a restart, after adding a new cache cluster, or after someone flushed it. The hit ratio drops to zero, so all traffic goes to the database, which was never sized for that.
 
@@ -204,7 +212,7 @@ The cache is **empty**: after a restart, after adding a new cache cluster, or af
 2. **Send traffic slowly.** Move 5% of users to the new cache, then 20%, then all, so it fills up gradually.
 3. **Don't lose the cache in the first place.** Use replicas, restart cache nodes one at a time, and don't flush the whole cache during a deploy.
 
-## All four side by side
+### All four side by side
 
 | Problem | What happens | Main fixes |
 | --- | --- | --- |
@@ -212,6 +220,31 @@ The cache is **empty**: after a restart, after adding a new cache cluster, or af
 | **Penetration** | Requests for data that doesn't exist. Always a miss | Cache "not found", Bloom filter, check input |
 | **Hot key** | One key overloads one cache server | Local cache, copies of the key, replicas |
 | **Cold start** | Empty cache. Everything goes to the database | Warm up first, shift traffic slowly |
+
+## When to use which
+
+- **Lock (one reloader):** hot keys that are slow to rebuild.
+- **Refresh early, or serve the old value:** the very hottest keys, where even a short wait hurts.
+- **TTL jitter:** always, when many keys are loaded at once. It costs nothing.
+- **Cache "not found":** whenever IDs come from users or the outside world.
+- **Bloom filter:** a huge set of valid IDs, and lots of requests for made-up ones.
+- **Local copy or several copies:** only for keys you know get hot.
+- **Warm-up:** before you switch traffic to a new or empty cache.
+
+**Don't use them when:**
+
+- **The key is not hot.** A lock on every key adds a round trip and more code for nothing.
+- **"Not found" would be cached for long.** A new user or product stays invisible until that TTL ends.
+- **The value changes often.** Several copies mean every write must update all of them.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **A database big enough for all reads** | Size the database so it survives with no cache at all | Small systems, or when the cache is only for speed |
+| **Merge requests at the proxy or CDN** | Only one request for the same missing item goes to the server. The others wait for its answer (Nginx `proxy_cache_lock`, CDN request collapsing) | You cache whole HTTP responses |
+| **Never expire, update by events** | Hot keys get no TTL. A worker updates them from the database's change log | The hot keys are few and known. See [Cache Invalidation and TTL](./cache-invalidation-ttl.mdx) |
+| **Protect the database** | Timeouts, a circuit breaker, and dropping extra load. See [Circuit Breaker](../reliability-security/circuit-breaker.mdx) | Always, as the last line of defence when the cache fails anyway |
 
 ## In the real world
 
@@ -233,4 +266,6 @@ After you add a cache, the interviewer may push: "What if that key expires?" or 
   - **Penetration:** requests for data that doesn't exist. **Cache "not found"**, use a **Bloom filter**.
   - **Hot key:** one key overloads one shard. **Local cache** or **several copies** of the key.
   - **Cold start:** empty cache. **Warm it up** and **shift traffic slowly**.
+  - **Why:** the database is sized for the misses. When the cache stops helping, it gets up to **20x** the load and falls over.
+  - **Alternatives:** a bigger database, merging requests at the proxy or CDN, update-by-events, and a circuit breaker.
 </Callout>

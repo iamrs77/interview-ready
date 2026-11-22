@@ -4,7 +4,7 @@ description: "How other websites can misuse your users' cookies, and how a serve
 icon: ShieldCheck
 ---
 
-## The idea
+## What is it?
 
 Your browser is like a personal assistant who carries your ID badges. Whenever a letter goes to your bank, the assistant clips your bank badge to it, **no matter who wrote the letter**. So a stranger can hand the assistant a letter that says "send ₹10,000 to me", addressed to your bank, and the badge gets clipped on. That is **CSRF**.
 
@@ -12,7 +12,17 @@ But the assistant won't show the bank's **reply** to the stranger. Strangers can
 
 So the two names sound alike, but they are different things. CSRF is an **attack**. CORS is a way for a server to **relax a browser rule**. The rule underneath both is the **same-origin policy**.
 
-## Origins and the same-origin policy
+## Why do we need it?
+
+**Your browser runs code from every site you visit, while holding your cookies for all the others.** If `evil.com`'s JavaScript could freely read pages from `bank.com`, any site you opened could read your bank balance and your email.
+
+- So browsers keep sites apart with the **same-origin policy**: a page can't read another origin's responses.
+- But the policy still lets a page **send** requests to other sites, and cookies go along. That gap is what **CSRF** attacks use, so servers need their own defenses.
+- And the policy also blocks **good** cases, like your front end on `shop.com` reading your own API on `api.shop.com`. **CORS** is how the server says "this origin is allowed".
+
+## How it works inside
+
+### Origins and the same-origin policy
 
 An **origin** is three things together: the **scheme** (`https`), the **host** (`shop.com`) and the **port** (`443`, the default for https). Two URLs have the same origin only if all three match.
 
@@ -32,7 +42,7 @@ So `evil.com` can make your browser send a request to `bank.com`. It just can't 
 
 A **site** is looser than an origin. `shop.com` and `api.shop.com` are different origins, but the **same site**, because they share the main domain `shop.com`. The `SameSite` cookie setting, below, works by site. So it can't protect you from a sibling subdomain. If users can upload pages to `user-content.shop.com`, those pages are same-site with `shop.com`, and their requests to it carry even `Strict` cookies. Put content that users upload on a separate domain.
 
-## CSRF: cross-site request forgery
+### CSRF: cross-site request forgery
 
 **CSRF** (cross-site request forgery) tricks a logged-in user's browser into sending a request the user never meant to send.
 
@@ -67,7 +77,7 @@ The hidden form on `evil.com` can be this short:
 
 The bank sees a valid session cookie and moves the money. The attacker never sees the bank's reply, and doesn't need to. The damage is done.
 
-### Defenses
+#### Defenses
 
 **1. SameSite cookies.** The `SameSite` setting on a cookie tells the browser whether to send it on requests that **another site** started:
 
@@ -85,13 +95,13 @@ The bank sees a valid session cookie and moves the money. The attacker never see
 
 Use them in layers: `SameSite=Lax` (or `Strict`) cookies, plus CSRF tokens or an `Origin` check on everything that changes data.
 
-### APIs that use bearer tokens
+#### APIs that use bearer tokens
 
 Some apps don't log in with cookies. The app keeps the token itself and sends it in a header: `Authorization: Bearer <token>`. The browser **never adds a bearer token by itself**, and `evil.com` can't read the token, because it is stored under your site's origin. A forged request arrives without the token and fails. **No CSRF.**
 
 The catch: your own JavaScript must be able to read the token to put it in the header. So if an attacker gets a script running on your page (**XSS**, see [API Security Basics](./api-security.mdx)), that script can steal the token. An `HttpOnly` cookie can't be read by scripts, but it is sent automatically, so it needs CSRF defenses. Each choice moves the risk somewhere else. More in [Cookies, Sessions and JWT](../foundations/cookies-sessions-jwt.mdx).
 
-## CORS: letting other origins read responses
+### CORS: letting other origins read responses
 
 **CORS** (cross-origin resource sharing) is how a server tells the browser: "this other origin may read my responses."
 
@@ -105,7 +115,7 @@ If that header is missing, the `GET` still reached the server. The browser just 
 
 `Access-Control-Allow-Origin: *` allows **any** origin. That is fine for public data, like a public weather API. The header holds **one** origin or `*`, not a list. To allow several origins, the server checks the request's `Origin` against its own allowlist and sends back the one that matched. It also sends `Vary: Origin`, so caches don't mix up the answers for different origins.
 
-### The preflight request
+#### The preflight request
 
 Some requests are **simple**: a `GET`, `HEAD` or `POST` with only basic headers, and a body type a plain HTML form could send. The browser sends these straight away.
 
@@ -128,7 +138,7 @@ sequenceDiagram
 - If the answer doesn't allow the request, the browser **never sends** the real one.
 - A preflight carries no cookies and no `Authorization` header, so your login check must let `OPTIONS` requests through.
 
-### Credentials
+#### Credentials
 
 By default, a cross-origin `fetch` doesn't send cookies. To send them, the JavaScript must ask with `credentials: "include"`, and the server must reply with **both**:
 
@@ -137,7 +147,7 @@ By default, a cross-origin `fetch` doesn't send cookies. To send them, the JavaS
 
 With credentials, `*` is **not allowed**: the browser refuses the response. Why? `*` plus cookies would let **any website in the world** read a logged-in user's private data from your API, using the user's own cookies.
 
-### Common mistakes
+#### Common mistakes
 
 - **Sending back any `Origin`, with credentials allowed.** Some servers copy whatever `Origin` arrives into `Access-Control-Allow-Origin`, and also send `Access-Control-Allow-Credentials: true`. Now every site, `evil.com` included, can read your users' data. Use an exact allowlist. Watch out for loose checks like "ends with `shop.com`", which also matches `evilshop.com`.
 - **Thinking CORS protects the server.** It doesn't. The **browser** enforces CORS, to protect **users' data** inside the browser. Simple requests still reach your server, CORS or not. And curl, mobile apps and other servers ignore CORS completely. Your API still needs authentication and authorization on every request.
@@ -157,6 +167,28 @@ With credentials, `*` is **not allowed**: the browser refuses the response. Why?
 
 There is one partial exception. An API that accepts **only** `Content-Type: application/json` forces a preflight, so a plain form can't call it. Don't rely on that alone: one endpoint that also accepts form data opens the door again.
 
+## When to use it
+
+- **CSRF defenses: whenever login uses cookies.** Set `SameSite` on every cookie, and add CSRF tokens or an `Origin` check on everything that changes data.
+- **CORS: when a front end on one origin calls an API on another**, like `shop.com` calling `api.shop.com`. Allow only your own origins.
+- **CORS with `*`:** for a public, read-only API that any website may read, with no cookies.
+
+**Don't use it when:**
+
+- **CORS for server-to-server calls or mobile apps.** They aren't browsers, so they ignore CORS. Only authentication protects those calls.
+- **CSRF tokens on an API that uses only bearer tokens** in a header. No cookies are sent by themselves, so there is no CSRF to stop.
+- **CORS, when the front end and API can share one origin.** Then you need no CORS at all (see below).
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **One origin through a reverse proxy** | Serve the API under `shop.com/api`, so the browser sees one origin | You control both the front end and the API. No CORS, no preflights. See [Proxies](../foundations/proxies.mdx) |
+| **Bearer tokens instead of cookies** | The app sends the token in the `Authorization` header itself | You want no CSRF. You take on more XSS risk instead |
+| **Ask again before risky actions** | Ask for the password or a one-time code before a money transfer | The action is very sensitive. A forged request can't supply the code |
+| **postMessage** | A browser API that lets two windows or iframes from different origins send messages to each other | An embedded widget must talk to the page around it |
+| **JSONP** (old) | Loading data with a `<script>` tag, the trick used before CORS existed | Never today. It works only for `GET` and runs whatever code the server sends |
+
 ## In the real world
 
 **Chrome made `SameSite=Lax` the default (2020).** Chrome started treating cookies with no `SameSite` setting as `Lax`, and started requiring `Secure` on cookies marked `SameSite=None`. This blocked many classic CSRF attacks by default. Still, don't rely on browser defaults: set `SameSite` yourself on every cookie.
@@ -172,6 +204,7 @@ Bring it up when your design has a web front end that logs in with cookies, or a
 > "Users log in with a session cookie marked `HttpOnly`, `Secure` and `SameSite=Lax`, and every request that changes data also needs a CSRF token. The web app on shop.com calls api.shop.com, so the API sends CORS headers that allow only shop.com, with credentials. CORS isn't a CSRF defense, so we need both."
 
 <Callout title="Remember this" type="success">
+  - **Why:** the browser runs code from every site while holding your cookies. The same-origin policy blocks **reading**, but not **sending** (CSRF), and it also blocks your own front end (CORS fixes that).
   - **Origin** = scheme + host + port. Pages can **send** requests to other origins, but can't **read** the responses unless the server allows it.
   - **CSRF:** another site makes the user's browser send a request, and the browser adds the user's cookies by itself.
   - CSRF defenses: **`SameSite` cookies**, **CSRF tokens**, an **`Origin` check**, and **no data changes with `GET`**.
@@ -179,4 +212,5 @@ Bring it up when your design has a web front end that logs in with cookies, or a
   - **CORS:** the server says which origins may **read** its responses. Non-simple requests get an `OPTIONS` **preflight** first.
   - With credentials, `Access-Control-Allow-Origin` must be an **exact origin**, never `*`. Never echo back whatever `Origin` arrives.
   - **CORS protects users' data in the browser, not your server**, and it does **not** stop CSRF.
+  - **Alternatives:** one origin through a reverse proxy, bearer tokens, asking again before risky actions, postMessage. Not JSONP.
 </Callout>

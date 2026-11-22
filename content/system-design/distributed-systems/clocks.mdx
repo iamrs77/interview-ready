@@ -4,7 +4,7 @@ description: "Why server clocks can't be trusted, and how to put events in order
 icon: Clock
 ---
 
-## The idea
+## What is it?
 
 Imagine a group of friends, each with their own wristwatch. No two watches show exactly the same time. One is two minutes fast, another is a little slow. If two friends write "sent at 3:00:01" and "sent at 3:00:02" on their notes, you still can't be sure which note really came first.
 
@@ -15,7 +15,18 @@ There are two kinds of clocks to know:
 - **Physical clocks** tell the time of day, like 10:00:05.
 - **Logical clocks** don't care about the time at all. They only count events, to get the **order** right.
 
-## Clock drift
+## Why do we need it?
+
+Many systems need to know the **order** of events that happened on different servers:
+
+- **Which write is newer?** Keep the last one, throw the old one away.
+- **Which message came first?** A chat must show messages in the order they were sent.
+- **Did A cause B?** When you debug, you follow the chain of events across servers.
+- **Did two edits clash?** Two copies of the same data changed at the same time.
+
+On one machine this is easy: one clock, one memory. Across many machines there is **no shared clock** (see [Why Distributed Systems Are Hard](./why-distributed-is-hard.mdx)), and each server's own clock is a little wrong.
+
+### Clock drift breaks timestamps
 
 A server's clock is driven by a tiny quartz crystal. Crystals tick at slightly different speeds, depending on their quality and temperature. Over time, clocks move apart. This is called **clock drift**. The difference between two clocks at one moment is called **clock skew**.
 
@@ -35,26 +46,11 @@ sequenceDiagram
 
 Server B's write really happened **after** Server A's. But A's clock is fast, so A's write has the bigger timestamp. The newer value is **silently thrown away**.
 
-Clocks can also **jump**. When a clock is corrected, it can suddenly move forward or even **backward**. So inside one machine, there are two kinds of clock:
+So we need two things: physical clocks that stay **close** to the real time, and a way to get the order right **without** trusting the time at all.
 
-| Clock | What it shows | Use it for |
-| --- | --- | --- |
-| **Wall clock** (time of day) | A date and time, like `2026-11-19 10:00:05` | Showing time to people, log lines. **It can jump** |
-| **Monotonic clock** | A counter that only moves forward | Measuring how long something took, and timeouts |
+## How it works inside
 
-```js
-// Measure how long a call took.
-// performance.now() is a monotonic clock: it never goes backward.
-// Avoid Date.now() for this: it can jump when the clock is corrected.
-const start = performance.now();
-
-await callPaymentService();
-
-const end = performance.now();
-const tookMs = end - start;
-```
-
-## NTP
+### NTP: keeping physical clocks close
 
 **NTP (Network Time Protocol)** keeps clocks close to the correct time. Every server regularly asks a time server "what time is it?" and slowly adjusts its own clock. Time servers are arranged in layers called **strata**. The top layer is connected to very accurate sources like atomic clocks or GPS.
 
@@ -75,7 +71,28 @@ NTP helps a lot, but it is never perfect:
 
 The rule: **use timestamps for showing time to people and for rough ordering, not for deciding which write wins.**
 
-## Lamport clocks (logical clocks)
+### Wall clock vs monotonic clock
+
+Clocks can also **jump**. When a clock is corrected, it can suddenly move forward or even **backward**. So inside one machine, there are two kinds of clock:
+
+| Clock | What it shows | Use it for |
+| --- | --- | --- |
+| **Wall clock** (time of day) | A date and time, like `2026-11-19 10:00:05` | Showing time to people, log lines. **It can jump** |
+| **Monotonic clock** | A counter that only moves forward | Measuring how long something took, and timeouts |
+
+```js
+// Measure how long a call took.
+// performance.now() is a monotonic clock: it never goes backward.
+// Avoid Date.now() for this: it can jump when the clock is corrected.
+const start = performance.now();
+
+await callPaymentService();
+
+const end = performance.now();
+const tookMs = end - start;
+```
+
+### Lamport clocks (logical clocks)
 
 Often you don't need the real time. You only need to know **"did A happen before B?"** In 1978, Leslie Lamport showed a simple way: a **logical clock**, which is just a counter on each server.
 
@@ -149,7 +166,7 @@ console.log(serverA.tick()); // 2
 
 To get one total order for all events, break ties with the server name: compare `(counter, serverId)`.
 
-## Vector clocks, in short
+### Vector clocks, in short
 
 Lamport clocks can't tell you that two events were **concurrent**. Vector clocks can.
 
@@ -162,12 +179,30 @@ Each server keeps **a list of counters, one per server**, like `[A:2, B:1, C:0]`
 
 The cost: the list grows with every server that writes, so vector clocks are used only where conflict detection really matters.
 
+## When to use which
+
 | | Physical clock | Lamport clock | Vector clock |
 | --- | --- | --- | --- |
 | **Gives you** | The time of day | An order that respects cause and effect | Order, and spots conflicts |
 | **Detects concurrent writes** | No | No | Yes |
 | **Size** | One number | One number | One number per server |
 | **Used for** | Logs, expiry times, showing time | Ordering events and messages | Detecting conflicts in leaderless databases |
+
+**Don't use:**
+
+- **Wall-clock timestamps** to pick the winner between writes from different servers. A newer write can be silently lost.
+- **The wall clock** to measure how long something took. It can jump, even backward.
+- **Lamport numbers** to prove that one event caused another. A smaller number does not prove it.
+- **Vector clocks** when one leader already orders all writes for a key. A plain sequence number is simpler and smaller.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Sequence number from one leader** | One place (a partition leader, a database sequence) gives each event the next number | All events for one thing go through one place, like one chat or one Kafka partition. See [Leader Election and Consensus](./leader-election-consensus.mdx) |
+| **Hybrid logical clock (HLC)** | A timestamp made of physical time plus a small counter. Stays close to real time, but still respects cause and effect | You want timestamps that look like the time of day and still order correctly. CockroachDB uses them |
+| **TrueTime-style clocks** | GPS and atomic clocks that give the time with a known error range | You run on Google Spanner. Needs special hardware (see In the real world below) |
+| **CRDTs** | Data types built so concurrent changes always merge to the same result, in any order | Counters, sets or documents changed in many places at once, even offline. See [Google Docs](../questions/google-docs.mdx) |
 
 ## In the real world
 
@@ -187,9 +222,12 @@ Bring it up when someone suggests ordering events across servers by timestamp, o
 
 <Callout title="Remember this" type="success">
   - Every server's clock **drifts**. Timestamps from different servers can be in the **wrong order**.
+  - **Why:** servers need the **order** of events, but there is **no shared clock**, and each clock drifts.
   - **Last write wins** with bad clocks can silently **lose** newer writes.
   - Use a **monotonic clock** to measure durations. The wall clock can jump back.
   - **NTP** keeps clocks close (milliseconds), never perfect.
   - **Lamport clock:** a counter. If X caused Y, X's number is smaller.
   - **Vector clock:** one counter per server. Can spot **concurrent** writes (conflicts).
+  - **Inside:** NTP slowly nudges each clock toward a time server. A Lamport clock takes the **bigger** number **plus 1** when a message arrives.
+  - **Alternatives:** a sequence number from one leader, hybrid logical clocks (CockroachDB), TrueTime (Spanner), CRDTs.
 </Callout>

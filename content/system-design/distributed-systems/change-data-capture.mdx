@@ -4,7 +4,7 @@ description: "Turn every database change into an event, to keep search, caches a
 icon: FileDiff
 ---
 
-## The idea
+## What is it?
 
 Think about how you follow your bank account. You don't phone the bank every minute to ask "what is my balance now?" and compare. The bank sends you a **statement**: a list of every payment in and out, in order. From that list you can rebuild everything.
 
@@ -12,23 +12,7 @@ Think about how you follow your bank account. You don't phone the bank every min
 
 The app writes to **one place only**: its database. Search, caches and reports all follow the database's changes.
 
-## What a change event looks like
-
-When a product's price changes from 100 to 90, CDC produces an event like this (this is close to what Debezium sends):
-
-```json
-{
-  "op": "u",
-  "table": "products",
-  "before": { "id": 7, "name": "Desk lamp", "price": 100 },
-  "after": { "id": 7, "name": "Desk lamp", "price": 90 },
-  "ts_ms": 1763539200000
-}
-```
-
-`op` is the kind of change: `c` for create, `u` for update, `d` for delete. You get the row **before** and **after** the change.
-
-## Why not just write to both places?
+## Why do we need it?
 
 The simple idea: when the app saves a product, it also updates Elasticsearch and deletes the Redis key. That is the **dual write problem** again (see [Outbox Pattern](./outbox-pattern.mdx)):
 
@@ -38,7 +22,9 @@ The simple idea: when the app saves a product, it also updates Elasticsearch and
 
 With CDC, the database's own log decides the order, and nothing is skipped.
 
-## Reading the database log
+## How it works inside
+
+### Reading the database log
 
 Every serious database keeps a **log** of its changes, for its own safety. Before it changes any data, it first writes what it is about to do into an append-only file (a file you only add to at the end). After a crash, it replays this log to recover. In PostgreSQL this is called the **write-ahead log (WAL)**.
 
@@ -59,7 +45,27 @@ There are other ways to capture changes, but the log is usually best:
 | **Triggers** | A database trigger copies each change into a "changes" table | Slows down every write |
 | **Log-based** | Read the database's own log | Catches everything, in order, with little extra load. **The usual choice** |
 
-## Keeping search and caches in sync
+### What a change event looks like
+
+When a product's price changes from 100 to 90, CDC produces an event like this (this is close to what Debezium sends):
+
+```json
+{
+  "op": "u",
+  "table": "products",
+  "before": { "id": 7, "name": "Desk lamp", "price": 100 },
+  "after": { "id": 7, "name": "Desk lamp", "price": 90 },
+  "ts_ms": 1763539200000
+}
+```
+
+`op` is the kind of change: `c` for create, `u` for update, `d` for delete. You get the row **before** and **after** the change.
+
+### Remembering where it stopped
+
+The CDC tool saves its **position** in the log. After a restart, it continues from there, so nothing is skipped (but a few events may be sent twice). In PostgreSQL, a **replication slot** makes the database keep the log until the tool has read it. If the tool is down for a long time, that log keeps growing and can **fill the disk**, so watch it.
+
+## When to use it
 
 ```mermaid
 flowchart TB
@@ -82,6 +88,12 @@ What people use CDC for:
 - **Other services:** let them react to changes.
 - **Moving to a new database:** copy the existing data once, then stream every change until you switch over.
 
+**Don't use it when:**
+
+- **The copy must be up to date at once.** CDC lags a little. Read from the main database instead.
+- **Other services need business events** like `OrderPlaced`, not raw rows. Use the outbox (below).
+- **A small app with one cache.** Deleting the key after each write, or a short TTL, is much less to run than Debezium and Kafka.
+
 Things to watch:
 
 - **Lag.** Search is a little behind the database. That is [eventual consistency](./consistency-models.mdx), usually less than a second or two.
@@ -96,6 +108,15 @@ That last point is why many teams combine CDC with the outbox: CDC reads only th
 | **What is sent** | Every row change, exactly as stored | Events you designed, like `OrderPlaced` |
 | **Good for** | Search, caches, analytics copies | Telling other services about business events |
 | **Coupling** | Consumers see your table layout | Consumers see a stable event format |
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Dual writes** | The app writes to the database, then to search or the cache itself | Small apps, where a rare mismatch is fine or a TTL fixes it |
+| **Outbox** | The app writes designed events to an outbox table, in the same transaction. See [Outbox Pattern](./outbox-pattern.mdx) | Other services need business events. Often read with CDC anyway |
+| **Batch copy (ETL)** | Copy whole tables on a schedule, like every night | Reports, where data a day old is fine |
+| **Polling or triggers** | See the table under "Reading the database log" | The database's log can't be read |
 
 ## Tools: Debezium
 
@@ -123,9 +144,12 @@ Use CDC when you have a second copy of data that must follow the main database, 
 
 <Callout title="Remember this" type="success">
   - **CDC** = turn every insert, update and delete into an event.
+  - **Why:** writing to the database **and** to search or a cache is a dual write. One can fail, or arrive in the wrong order.
   - Best way: **read the database's log** (PostgreSQL WAL, MySQL binlog).
+  - **Inside:** the tool reads the log like a **replica**, and saves its **position** so a restart skips nothing.
   - The app writes to **one place**. Search, caches and analytics **follow the log**.
   - Avoids the **dual write problem**. Copies lag a little: **eventual consistency**.
   - Events can repeat, so consumers **upsert by ID**.
   - Tool to name: **Debezium**, with Kafka.
+  - **Alternatives:** dual writes, outbox, nightly batch copy, polling or triggers.
 </Callout>

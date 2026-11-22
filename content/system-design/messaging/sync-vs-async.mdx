@@ -4,7 +4,7 @@ description: "Wait for the answer, or leave a message and move on?"
 icon: ArrowRightLeft
 ---
 
-## The idea
+## What is it?
 
 When one service needs something from another, it can talk in two ways.
 
@@ -13,7 +13,20 @@ When one service needs something from another, it can talk in two ways.
 
 A restaurant shows both. At a coffee counter, you **stand and wait** until your coffee is ready: that is sync. At a busy burger place, you get an **order ticket with a number** and sit down. The kitchen works through the tickets one by one, and your number is called when the food is ready: that is async.
 
-## Synchronous calls
+## Why do we need it?
+
+Once an app is split into many services (see [Monolith vs Microservices](../hld-basics/monolith-vs-microservices.mdx)), one user action becomes **many network calls**. A function call inside one program is fast and almost never fails. A network call is **slow**, and it **can fail** or hang (see [Why Distributed Systems Are Hard](../distributed-systems/why-distributed-is-hard.mdx)).
+
+So every arrow between two services needs a choice:
+
+- **Make every call sync**, and one slow or dead service slows down or breaks every request that touches it.
+- **Make every call async**, and the user never gets an answer they need right now, like "was my payment accepted?".
+
+The way you call decides **how delays and failures spread** through the system. Picking the right style for each step is one of the main choices in a design.
+
+## How it works inside
+
+### Synchronous calls
 
 In a sync call, the caller sends a request and **waits** for the reply before it does anything else. Most HTTP and gRPC calls between services work like this.
 
@@ -29,6 +42,8 @@ sequenceDiagram
   O-->>U: Order confirmed
 ```
 
+While it waits, the caller keeps the **connection open**, and the request holds on to its **thread** (or its slot in an event loop) until the reply comes or a **timeout** fires.
+
 Sync is simple. You get the answer right away, and if something fails, the error comes straight back to you. But when calls are **chained** (A calls B, B calls C), two problems grow:
 
 - **Delays add up.** If each of three services takes 100 ms, the user waits at least 300 ms.
@@ -36,7 +51,7 @@ Sync is simple. You get the answer right away, and if something fails, the error
 
 A **slow** service is often worse than a dead one. Every caller sits waiting, and each waiting request holds a **thread** (one of the server's workers) and a connection. When they are all used up, the caller stops answering too. [Timeouts](./retries-backoff-timeouts.mdx) stop this from spreading.
 
-## Asynchronous messages
+### Asynchronous messages
 
 In an async call, the caller puts a **message** into a **queue** and moves on at once. A queue is a waiting line for messages. It is kept by a separate system called a **message broker**, like RabbitMQ, Kafka or Amazon SQS. A **worker** (a program that does background work) takes messages from the queue and does the work later.
 
@@ -48,6 +63,12 @@ flowchart TB
 ```
 
 The Order Service doesn't care if the email worker is fast, slow, or down for a few minutes. The message waits safely in the queue until a worker is ready. See [Message Queues and Pub/Sub](./message-queues-pub-sub.mdx) for how queues work.
+
+Step by step:
+
+1. The caller sends the message to the broker. The broker **saves** it (usually on disk) and replies "got it". The caller only waits for this short reply, not for the work.
+2. A worker takes the message and does the work.
+3. When it is done, the worker sends an **ack** ("done") and the broker deletes the message. If the worker crashes before the ack, the broker gives the message to a worker again.
 
 When a **client** starts slow work, the API often answers `202 Accepted`. It means "I got your request, and I will do it later". The reply usually says where to check on the work:
 
@@ -74,12 +95,20 @@ The client then checks that address now and then, or the server tells it when th
 
 Async brings its own problems. A message can arrive **twice** (see [Delivery Guarantees](./delivery-guarantees.mdx)). A message can fail again and again (see [Dead-Letter Queues](./dead-letter-queues.mdx)). And for a short time, different parts of the system can show different data (see [Eventual Consistency](./eventual-consistency-async.mdx)).
 
-## Example: placing an order
+## When to use which
 
-A real checkout uses **both**. The simple rule:
+A real system uses **both**. The simple rule:
 
 - If the user **needs the answer before they can go on**, make it **sync**.
 - If the work can **happen after** the user sees "Order placed", make it **async**.
+
+**Don't make it async when:**
+
+- The user is waiting for the result on the screen: logging in, the payment result, a search.
+- The call is quick, the other service is reliable, and nothing gains from waiting in a queue. A broker is one more system to run.
+- The next step needs the answer **right now** to be correct, like checking stock before you sell the last item.
+
+### Example: placing an order
 
 ```mermaid
 flowchart TB
@@ -103,7 +132,7 @@ One event, two readers that each need **their own copy**: that is a **topic** (p
 | Tell the warehouse to pack it | Async | Packing starts minutes or hours later anyway |
 | Update analytics and recommendations | Async | Nobody is waiting for it at all |
 
-## Example: sending an email
+### Example: sending an email
 
 Sending an email is the classic async job:
 
@@ -112,6 +141,18 @@ Sending an email is the classic async job:
 - **Spikes are smooth.** On a sale day, 10 times more emails just make the queue longer for a while. The workers keep a steady pace.
 
 The same goes for other slow work: making a PDF invoice, resizing an uploaded photo, processing a video. See [Background Jobs](../advanced-components/background-jobs.mdx).
+
+## Alternatives
+
+Between "wait for the answer" and "put it in a queue" there are other ways to get a result back:
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Polling a status URL** | The server answers `202` with a status address. The client asks it now and then | Simple clients, and the work takes seconds to minutes |
+| **Webhooks (callbacks)** | The caller gives a URL. The other system calls it when the work is done | The other side is another company, like Stripe or GitHub |
+| **Streaming** (WebSockets, SSE, gRPC streams) | One long-lived connection, and the server sends results as they come | Live updates: chat, progress bars, prices. See [Polling, WebSockets and SSE](../foundations/polling-websockets-sse.mdx) |
+| **Request-reply over a queue** | The request goes on one queue. The answer comes back on a reply queue, matched by a **correlation ID** | The caller needs an answer but can wait, and you want the queue to absorb spikes |
+| **Batch jobs** | Collect the work and run it all on a schedule, like every night | The result is needed hours later. See [Batch vs Stream](../advanced-components/batch-vs-stream.mdx) |
 
 ## In the real world
 
@@ -130,7 +171,9 @@ When you draw the design, mark which arrows are sync and which go through a queu
 <Callout title="Remember this" type="success">
   - **Sync** = phone call: wait for the answer. Simple, but delays and failures **add up** along a chain.
   - **Async** = voice message: put a message in a **queue** and move on. A worker does it later.
+  - **Why:** every call between services is slow and can fail. How you call decides how **delays and failures spread**.
   - Async survives a **down** service and soaks up **spikes**, but it is harder to debug and data catches up **later**.
   - Rule: **sync** for what the user must know now, **async** for everything after.
   - Slow work (emails, videos, PDFs) is async. APIs answer `202 Accepted` for it.
+  - **Alternatives:** polling a status URL, webhooks, streaming, request-reply over a queue, batch jobs.
 </Callout>

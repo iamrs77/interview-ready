@@ -4,7 +4,7 @@ description: "When data takes a moment to be the same everywhere, and how to liv
 icon: Hourglass
 ---
 
-## The idea
+## What is it?
 
 You move house and tell the post office your new address. For a few days, some letters still go to the old address, and some friends still have the old one. But **eventually**, everyone has the new address and every letter goes to the right place.
 
@@ -12,7 +12,20 @@ Async systems behave the same way. A change is saved in **one place first**, and
 
 In practice, you meet it whenever services talk through queues and events. (For the theory, see [Consistency Models](../distributed-systems/consistency-models.mdx).)
 
-## Why async systems are eventually consistent
+## Why do we need it?
+
+Big systems keep **many copies** of the same data: a search index, a cache, read replicas, and other services' own copy of a user's name. Each copy makes reads **fast** and lets a service work without calling another one.
+
+To change every copy **at the same moment**, a write would have to wait for all of them, for example with a [distributed transaction](../distributed-systems/distributed-transactions-2pc.mdx). That hurts:
+
+- **Writes get slow.** The user waits for the slowest copy.
+- **Writes fail more.** If one copy (or one service) is down, nobody can save anything.
+
+So we do the opposite: save the change in the **source** right away, and let the copies **catch up** through events. The write is fast, and a down service only falls behind for a while. The price is a short window where copies disagree. The [CAP Theorem](../distributed-systems/cap-theorem.mdx) explains this trade-off between staying up and being the same everywhere.
+
+## How it works inside
+
+### How a change spreads to the copies
 
 When a user changes their name, the Profile Service saves it **right away**. Other services keep their **own copy** of the name, and they update it only when the event reaches them.
 
@@ -32,6 +45,17 @@ The gap comes from: publishing the event, waiting in the queue, and the consumer
 This gap is called **lag**. In Kafka, **consumer lag** is how many messages a consumer group is behind the newest one. It is one of the most important numbers to watch.
 
 The same thing happens inside a database, when [read replicas](../databases/replication.mdx) copy the primary a little late.
+
+### What makes the copies agree in the end
+
+"Eventually" only happens if a few things are true:
+
+- **No event is lost.** The source saves the event together with its change (the [Outbox Pattern](../distributed-systems/outbox-pattern.mdx)), and the broker delivers it **at least once** (see [Delivery Guarantees](./delivery-guarantees.mdx)).
+- **Repeats do no harm.** Consumers are [idempotent](./idempotency.mdx), so a repeated event doesn't change the copy twice.
+- **Old events can't win.** Events can arrive out of order. Give each change a **version number**, and let a copy ignore an event older than the version it already has.
+- **A down consumer catches up.** It keeps its place in the stream (like a Kafka offset), and reads the missed events when it is back.
+
+If a copy still ends up wrong, for example after a bug, **rebuild** it from the source, or replay the events from the start.
 
 ## What users notice
 
@@ -80,15 +104,26 @@ Ways to get read-your-own-writes:
 - **Check the version.** The write returns a version number. The client sends it with its next read. The server only uses a copy that has caught up to that version, and otherwise reads from the source.
 - **Keep the change in the app.** The app remembers what the user just saved and shows that, until the server's copy catches up.
 
-## When "eventually" is not good enough
+## When to use it
 
-Some things must be correct **right now**:
+Use it for **copies made for reading**, where a few seconds late is fine: search indexes, feeds, "My orders" pages, caches, other services' copies of a user's name, dashboards.
+
+**Don't use it when** the data must be correct **right now**:
 
 - A **money balance** before a withdrawal.
 - The **last seat** or the last item in stock.
 - A **unique username**.
 
 For these, check the **source of truth** synchronously, with a transaction or a lock. Let everything else be eventual: emails, search, analytics, recommendations, counters. Most systems are a **mix**: a small strongly consistent core, with eventually consistent copies around it. See [CAP Theorem](../distributed-systems/cap-theorem.mdx) and [CQRS](../distributed-systems/cqrs.mdx), where the read side is often an eventually consistent copy.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Read only from the source** | No copies. Every read goes to the one database that owns the data | Traffic is small enough for one database |
+| **Update all copies together** | A distributed transaction (like 2PC) changes every copy, or none | The copies must never disagree, and slow writes are OK. See [Distributed Transactions and 2PC](../distributed-systems/distributed-transactions-2pc.mdx) |
+| **Strong reads when needed** | Ask the store for a fresh read for some queries, like DynamoDB's strongly consistent read or a quorum read | Most reads can be stale, but a few must be fresh |
+| **Strongly consistent distributed databases** (Spanner, CockroachDB) | A majority of copies agree, using a consensus algorithm, before a write counts | Data across regions must be correct right now, and slower writes are OK |
 
 ## In the real world
 
@@ -104,8 +139,11 @@ Say which parts can be eventual, which can't, and how you hide the delay:
 
 <Callout title="Remember this" type="success">
   - Async = the change is saved in **one place first**, and copies **catch up later**.
+  - **Why:** updating every copy at once makes writes **slow** and **fragile**. Save in the source, let copies catch up.
+  - **Inside:** copies agree in the end only if no event is lost (**outbox**, at-least-once), repeats are **idempotent**, and **versions** stop old events from winning.
   - The delay is **lag**: usually seconds, but minutes if a consumer is slow or down. Watch **consumer lag**.
   - Hide it: **return the result**, **optimistic UI**, **"pending" state**, **push** the update.
   - **Read-your-own-writes:** the writer always sees their own change. Read from the source for a short while.
   - Money, the last seat and unique names must be **strongly consistent**. The rest can be eventual.
+  - **Alternatives:** read only from the source, 2PC, strong reads when needed, Spanner or CockroachDB.
 </Callout>

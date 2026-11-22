@@ -4,31 +4,13 @@ description: "Spreading requests across many servers, so no single server gets o
 icon: Scale
 ---
 
-## The idea
+## What is it?
 
 A **load balancer** sits in front of a group of servers and decides which server gets each request.
 
 Think of a big bank with many counters. A staff member stands at the door and says "Counter 3, please", "Counter 5, please". Customers don't need to know which counters are open. The person at the door does. If counter 2 closes for lunch, they simply stop sending people there.
 
 Users see **one address**. Behind it, there can be 2 servers or 2,000.
-
-## What a load balancer does
-
-```mermaid
-flowchart TB
-  U["Users"]:::client --> LB["Load Balancer"]:::lb
-  LB --> S1["App Server 1"]:::service
-  LB --> S2["App Server 2"]:::service
-  LB --> S3["App Server 3"]:::service
-  LB -.->|"health check<br/>failed"| S4["App Server 4<br/>(down)"]:::service
-```
-
-It has four main jobs:
-
-1. **Spread the load,** so no server gets too much.
-2. **Skip dead servers.** It checks the servers all the time and stops sending traffic to broken ones.
-3. **Give one address for many servers.** You can add or remove servers behind it, and users never notice.
-4. **Extras.** Many load balancers also handle HTTPS for the servers (**TLS termination**: they decrypt traffic once, so the servers don't have to), keep connections to the servers open and reuse them, and route by URL.
 
 A load balancer is a kind of **reverse proxy**: a server that stands in front of your servers and passes requests to them (see [Reverse and Forward Proxies](../foundations/proxies.mdx)).
 
@@ -41,6 +23,69 @@ Load balancers come in three forms:
 | **Hardware** boxes in your own data center | F5 |
 
 They don't only sit between users and web servers. They also sit between your own services, and in front of groups of database replicas or cache servers.
+
+## Why do we need it?
+
+To [scale](./scalability.mdx) or to survive a crash, you run **more than one server**. Then someone must decide where each request goes. Without a load balancer:
+
+- **Clients would need every server's address**, and would have to change it each time a server is added or removed.
+- **Load would be uneven.** One server could be overloaded while the others sit idle.
+- **Dead servers would still get requests**, so their users would see errors.
+
+```mermaid
+flowchart TB
+  U["Users"]:::client --> LB["Load Balancer"]:::lb
+  LB --> S1["App Server 1"]:::service
+  LB --> S2["App Server 2"]:::service
+  LB --> S3["App Server 3"]:::service
+  LB -.->|"health check<br/>failed"| S4["App Server 4<br/>(down)"]:::service
+```
+
+A load balancer fixes all three. It has four main jobs:
+
+1. **Spread the load,** so no server gets too much.
+2. **Skip dead servers.** It checks the servers all the time and stops sending traffic to broken ones.
+3. **Give one address for many servers.** You can add or remove servers behind it, and users never notice.
+4. **Extras.** Many load balancers also handle HTTPS for the servers (**TLS termination**: they decrypt traffic once, so the servers don't have to), keep connections to the servers open and reuse them, and route by URL.
+
+## How it works inside
+
+### The path of one request
+
+1. The user's DNS lookup returns the **load balancer's address**, so the client connects to it, not to a server.
+2. The load balancer keeps a **list of healthy servers**. It picks one with its **algorithm** (see **Algorithms** below).
+3. It passes the request on. An **L7** load balancer ends the client's connection and sends the request over its own connection to the server, often one it keeps open and reuses. An **L4** load balancer forwards the connection's packets to the server.
+4. The answer usually comes back through the load balancer. Some L4 load balancers, like Google's Maglev, let the server answer the user directly (**direct server return**), so the load balancer only handles the small incoming side.
+
+### Health checks, briefly
+
+The load balancer checks every server regularly, for example `GET /health` every 10 seconds. After a few failures in a row (say 3), the server is marked **unhealthy** and gets no more traffic. When it passes again a few times, it is added back.
+
+When you remove a server on purpose, for example during a deploy, the load balancer first **drains** it: it stops sending new requests, but lets the requests already in progress finish. AWS calls this the **deregistration delay**.
+
+The full story is in [Health Checks and Service Discovery](./health-checks-service-discovery.mdx).
+
+### Running more than one load balancer
+
+If all traffic goes through one load balancer, that load balancer is a **single point of failure** (see [Availability and Reliability](./availability-reliability.mdx)). So you run at least two.
+
+**Active-passive with a floating IP.** Two load balancers share one **virtual IP address** (an address that can move between machines). The **active** one holds the address and takes all the traffic. The **passive** one watches it with a **heartbeat**: a small "I'm alive" message sent every second or so. If the heartbeats stop, the passive one takes over the address within seconds. A common tool for this is **keepalived**.
+
+```mermaid
+flowchart TB
+  U["Users"]:::client --> VIP["Virtual IP<br/>203.0.113.10"]:::network
+  VIP --> LB1["LB 1<br/>active"]:::lb
+  VIP -.->|"if LB 1 dies"| LB2["LB 2<br/>standby"]:::lb
+  LB1 -.-|"heartbeat"| LB2
+  LB1 --> S["App Servers"]:::service
+  LB2 -.-> S
+```
+
+**Active-active.** Both load balancers take traffic at the same time. DNS returns both addresses, or the network spreads users across them. If one dies, the other takes everything, so each one must be able to carry the full load alone.
+
+**Cloud load balancers.** A managed load balancer, like the ones on AWS or Google Cloud, already runs on many machines across several zones. You don't build the pair yourself.
+
+**Across regions.** For users all over the world, DNS first picks the nearest region, and a load balancer inside that region picks the server. See [DNS](../foundations/dns.mdx).
 
 ## Algorithms: who gets the next request?
 
@@ -128,35 +173,28 @@ flowchart TB
 
 Nginx, HAProxy and Envoy can work in either mode. Big systems often use **both**: a fast L4 layer at the edge that takes the raw traffic, and an L7 layer behind it for the smart routing.
 
-## Health checks, briefly
+## When to use it
 
-The load balancer checks every server regularly, for example `GET /health` every 10 seconds. After a few failures in a row (say 3), the server is marked **unhealthy** and gets no more traffic. When it passes again a few times, it is added back.
+- **In front of any group of identical servers:** web servers, API servers.
+- **Between your own services**, so a caller doesn't track every copy of the service it calls.
+- **In front of read replicas or cache servers**, to spread reads.
+- **During deploys:** drain old servers and add new ones while users notice nothing.
 
-When you remove a server on purpose, for example during a deploy, the load balancer first **drains** it: it stops sending new requests, but lets the requests already in progress finish. AWS calls this the **deregistration delay**.
+**Don't use it when:**
 
-The full story is in [Health Checks and Service Discovery](./health-checks-service-discovery.mdx).
+- **Each key lives on one specific node**, like database shards or a Redis Cluster. A load balancer that picks any node sends the request to the wrong one. The client or a router must send each key to the node that owns it.
+- **The callers can balance by themselves.** For internal calls, client-side balancing skips one network hop (see below).
+- **You have one server and no plans for more.** The load balancer is one more part to run and pay for.
 
-## Running more than one load balancer
+## Alternatives
 
-If all traffic goes through one load balancer, that load balancer is a **single point of failure** (see [Availability and Reliability](./availability-reliability.mdx)). So you run at least two.
-
-**Active-passive with a floating IP.** Two load balancers share one **virtual IP address** (an address that can move between machines). The **active** one holds the address and takes all the traffic. The **passive** one watches it with a **heartbeat**: a small "I'm alive" message sent every second or so. If the heartbeats stop, the passive one takes over the address within seconds. A common tool for this is **keepalived**.
-
-```mermaid
-flowchart TB
-  U["Users"]:::client --> VIP["Virtual IP<br/>203.0.113.10"]:::network
-  VIP --> LB1["LB 1<br/>active"]:::lb
-  VIP -.->|"if LB 1 dies"| LB2["LB 2<br/>standby"]:::lb
-  LB1 -.-|"heartbeat"| LB2
-  LB1 --> S["App Servers"]:::service
-  LB2 -.-> S
-```
-
-**Active-active.** Both load balancers take traffic at the same time. DNS returns both addresses, or the network spreads users across them. If one dies, the other takes everything, so each one must be able to carry the full load alone.
-
-**Cloud load balancers.** A managed load balancer, like the ones on AWS or Google Cloud, already runs on many machines across several zones. You don't build the pair yourself.
-
-**Across regions.** For users all over the world, DNS first picks the nearest region, and a load balancer inside that region picks the server. See [DNS](../foundations/dns.mdx).
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **DNS load balancing** | DNS returns several server addresses, or a different one per user (round robin DNS, GeoDNS) | Spreading users across regions or data centers. Slow to react to a dead server, because DNS answers are cached. See [DNS](../foundations/dns.mdx) |
+| **Client-side load balancing** | The client gets the server list from service discovery and picks one itself | Internal service-to-service calls, often with gRPC. No extra hop. See [Health Checks and Service Discovery](./health-checks-service-discovery.mdx) |
+| **Service mesh** | A small proxy (like Envoy) runs next to each service and balances its outgoing calls | Many microservices that all need retries, TLS and metrics |
+| **Anycast** | Servers in many places announce the same IP address, and the network sends each user to the nearest one | Global edge traffic, like CDNs and DNS servers |
+| **API gateway** | An L7 proxy that also checks logins and rate limits | A public API in front of many services. See [API Gateway](./api-gateway.mdx) |
 
 ## In the real world
 
@@ -174,9 +212,12 @@ Draw a load balancer in front of every group of stateless servers. Then say whic
 
 <Callout title="Remember this" type="success">
   - A **load balancer** spreads requests across servers and skips dead ones. Users see one address.
+  - **Why:** with many servers, someone must pick one per request, keep load even, and avoid dead servers.
+  - **Inside:** keeps a list of healthy servers, picks one with an algorithm, and passes the request on (L7 over its own reused connections, L4 by forwarding packets).
   - **Round robin** = in turn. **Least connections** = least busy. **Hashing** = same key, same server.
   - `hash % N` moves most keys when servers change. **Consistent hashing** moves only a few.
   - **L4** = fast, sees only IP and port. **L7** = reads HTTP, routes by URL, header or cookie.
   - **Drain** a server before removing it, so requests in progress can finish.
   - Never just one load balancer: use **active-passive** with a floating IP, **active-active**, or a managed cloud LB.
+  - **Alternatives:** DNS load balancing, client-side balancing, a service mesh, anycast, an API gateway.
 </Callout>

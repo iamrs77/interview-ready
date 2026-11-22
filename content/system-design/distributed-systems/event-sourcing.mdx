@@ -4,7 +4,7 @@ description: "Store every change as an event, instead of only the latest state."
 icon: ScrollText
 ---
 
-## The idea
+## What is it?
 
 Think of your **bank passbook**. The bank doesn't only write "balance: 700". It writes every deposit and every withdrawal, in order. The balance is just the result of adding them up. If you ask "why is my balance 700?", the list answers you. And if the bank makes a mistake, it doesn't erase a line. It adds a **new correcting line**.
 
@@ -15,7 +15,16 @@ Think of your **bank passbook**. The bank doesn't only write "balance: 700". It 
 - Events are **never changed or deleted**.
 - The current state is worked out by **replaying** the events in order.
 
-## State vs events
+## Why do we need it?
+
+Most apps store **only the latest state**. Every update **overwrites** the old value, so the past is gone. That hurts when:
+
+- An auditor or a customer asks "**why** is my balance 700?"
+- Support needs to know **what happened** to an order, step by step.
+- A bug wrote bad data, and you need to know **how** it got there.
+- The business wants a **new report** over past behavior that nobody saved.
+
+### State vs events
 
 The usual way stores **only the latest state**:
 
@@ -36,7 +45,23 @@ Balance = 0 + 1,000 − 500 + 200 = **700**.
 
 Both say 700. But the first table has **forgotten how** it got there. Was it one deposit of 700? Or a thousand small payments? The event list never forgets.
 
-## Rebuilding state from events
+## How it works inside
+
+### The event store
+
+An event store can be a plain database table. All the events of one thing (one account) form a **stream**, numbered by **version**:
+
+| stream_id | version | type | data |
+| --- | --- | --- | --- |
+| account-42 | 1 | `AccountOpened` | (empty) |
+| account-42 | 2 | `MoneyDeposited` | amount: 1000 |
+| account-42 | 3 | `MoneyWithdrawn` | amount: 500 |
+
+- New events are only **inserted**, never updated or deleted.
+- A **unique key on (stream_id, version)** keeps the order safe. If two servers both try to save version 4, the database accepts only one of them.
+- The main read is simple: "all events of `account-42`, in version order".
+
+### Rebuilding state from events
 
 To get the current state, start from nothing and apply each event in order:
 
@@ -100,7 +125,7 @@ flowchart TB
   P --> V[("Read views<br/>balances, statements")]:::db
 ```
 
-## Snapshots
+### Snapshots
 
 An account with a million events would be slow to replay every time. The fix is a **snapshot**: every so often (say, every 100 events), save the state at that point.
 
@@ -124,11 +149,27 @@ Snapshots are only a **speed-up**. The events are still the truth. You can delet
 | Events can feed other services | The read side is a little behind: eventual consistency |
 | Writes are fast: just add to the end | Replays get slow without snapshots |
 
+## When to use it
+
 **Good fits:** money and ledgers, accounting, orders with many status changes, anything that needs a full audit trail.
 
 **Bad fits:** simple CRUD screens. Use event sourcing for the **one part** of a system that needs history, not for everything.
 
+**Don't use it when:**
+
+- You only need to know **who changed what, and when**, not to rebuild state from history. An audit table is much simpler (see below).
+- The data must often be **fully erased**, and the "delete the key" trick is not allowed.
+
 **Don't mix up the names.** [Event-driven architecture](../messaging/event-driven-architecture.mdx) is about services **telling each other** what happened. Event sourcing is about how **one service stores** its own data. You can use either one without the other.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Plain state table** | Store only the latest state, and update it in place | Most CRUD apps, where nobody needs the history |
+| **Audit table** | Keep the normal table, and also write each change to a history table in the same transaction | You need "who changed what, when", but reads use the normal table |
+| **Temporal tables** | A database feature that keeps old versions of each row by itself. SQL Server and MariaDB have it | You want "the state at any past moment" without building it yourself |
+| **Change Data Capture** | Read the database's own change log and stream it out. See [Change Data Capture](./change-data-capture.mdx) | Other services need every change, but the app keeps storing plain state |
 
 ## In the real world
 
@@ -148,9 +189,12 @@ Bring it up when the requirements say "full history", "audit", or "show every ch
 
 <Callout title="Remember this" type="success">
   - **Event sourcing** = store every change as an **event**. Never change or delete events.
+  - **Why:** a normal table **overwrites** the past. Events keep the full story: why, how, and when.
   - Current state = **replay** the events, like adding up a bank passbook.
+  - **Inside:** one **stream** per thing, numbered by **version**. Append "only if still version N" (**optimistic locking**).
   - **Snapshots** save the state every N events, so replays stay fast.
   - Usually paired with **CQRS**: read views are built from the events.
   - Good: **full history, audit, time travel**. Bad: complex, versioning, hard to delete data.
   - Use it for **money, ledgers and audit trails**, not for simple CRUD.
+  - **Alternatives:** a plain table, an audit table, temporal tables, CDC.
 </Callout>

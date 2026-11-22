@@ -4,7 +4,7 @@ description: "How fast one request is, and how many requests the system can hand
 icon: Gauge
 ---
 
-## The idea
+## What is it?
 
 There are two different questions about "speed":
 
@@ -13,7 +13,19 @@ There are two different questions about "speed":
 
 Think of a highway. **Latency** is how long one car takes to drive from city A to city B. **Throughput** is how many cars reach city B every hour. Adding lanes lets more cars through (more throughput), but each car still takes about the same time (same latency).
 
-## Latency: the time for one request
+## Why do we need it?
+
+"The app is fast" means nothing until you put a number on it. Without these two numbers:
+
+- **You can't set a goal.** Is 500 ms OK for opening a short link? You need a target to design for and to test against.
+- **You can't size the system.** How many servers you need depends on how many requests per second arrive, and how long each one takes.
+- **You can't see trouble coming.** Latency climbing week by week tells you to add capacity **before** users feel it.
+
+Users feel latency directly. A slow page feels broken, and people leave. Throughput is what decides whether the system survives the busiest hour.
+
+## How it works inside
+
+### Latency: the time for one request
 
 **Latency** is the time from sending a request to getting the answer back. It is measured in **milliseconds** (ms). 1 second = 1,000 ms.
 
@@ -49,7 +61,7 @@ How to lower latency:
 
 For a feel of how long common actions take (memory, disk, network), see the numbers table in [Capacity Estimation](./capacity-estimation.mdx).
 
-## Throughput and QPS: requests per second
+### Throughput and QPS: requests per second
 
 **Throughput** is how much work the system finishes per second. For web systems, we usually count requests:
 
@@ -65,7 +77,7 @@ For video or file downloads, throughput is measured in **data per second** inste
 
 **Average vs peak.** Traffic is not flat. People use apps more in the evening, during a sale, or during a big cricket match. The **peak** is often 2 to 3 times the average, and much more during special events. **Design for the peak, not the average.** To turn "users per day" into QPS, see [Capacity Estimation](./capacity-estimation.mdx).
 
-## Why the average can hide slow requests
+### Why the average can hide slow requests
 
 Say a server handles 1,000 requests:
 
@@ -84,6 +96,8 @@ So we use **percentiles** instead:
 | Average | 109 ms | "Looks fine." It hides the problem |
 | p50 | 50 ms | A normal request is fast |
 | p99 | 3,000 ms | The slowest 1 in 100 users waits 3 seconds |
+
+**How a percentile is found:** sort all the request times, then take the one 99% of the way down the list. Real systems don't keep every single time. They keep a **histogram**: a count of requests in time buckets (0–10 ms, 10–50 ms, and so on), and estimate the percentile from the buckets.
 
 The slow requests are called the **tail**, and their latency is **tail latency**. They matter for two reasons:
 
@@ -105,7 +119,7 @@ Each server is slow only 1 time in 100. But the app waits for **all 100**. The c
 
 More on percentiles: [Latency Percentiles](../production/latency-percentiles.mdx).
 
-## How latency and throughput affect each other
+### How latency and throughput affect each other
 
 A simple rule, called **Little's Law**, links them:
 
@@ -133,6 +147,25 @@ Some choices trade one for the other:
 - **Caching** improves both.
 - **Queues** give the user a fast answer ("got it"), and do the slow work later.
 
+## When to use which
+
+| Situation | Watch this | Why |
+| --- | --- | --- |
+| A user waits for the answer (page load, API call) | **Latency at p99** | Users feel the slow ones, not the average |
+| Background work (a pipeline, a batch job, a queue consumer) | **Throughput** | Nobody waits on one item. What matters is keeping up |
+| Sizing servers and databases | **Peak QPS** | You must survive the busiest hour |
+| Video, downloads, uploads | **Bandwidth** (MB per second) | The size of the data matters more than the number of requests |
+
+**Don't:**
+
+- **Use the average for latency.** It hides the slow tail. Use p50 and p99.
+- **Look at throughput alone.** A system can serve many requests per second while each one takes 5 seconds. Always check both.
+- **Average percentiles** across servers. Add the histograms, then compute the percentile.
+
+## Alternatives
+
+These are measures, not tools, so nothing replaces them. But they are not the whole picture. Google's SRE book adds **errors** and **saturation** (how full the system is) to make the **four golden signals**. See [Observability](../production/observability.mdx).
+
 ## In the real world
 
 **Google's "The Tail at Scale".** In a 2013 paper, Google engineers Jeff Dean and Luiz André Barroso showed the fan-out math above: if each server is slow for 1 in 100 requests, a user request that waits for 100 servers is slow 63% of the time. One of their fixes is the **hedged request**: if the first server is slow to answer, send the same request to a second server and use whichever answers first.
@@ -147,9 +180,11 @@ Put latency and throughput in your **non-functional requirements**, with numbers
 
 <Callout title="Remember this" type="success">
   - **Latency** = the time for one request. **Throughput** = how many requests finish per second.
+  - **Why:** without numbers you can't set goals, size servers, or see trouble coming.
   - **QPS / RPS** = requests per second. Design for the **peak**, not the average.
-  - The average hides slow requests. Use **p50 and p99**.
+  - The average hides slow requests. Use **p50 and p99**, computed from **histograms**.
   - With **fan-out**, rare slowness on each server becomes common slowness for users.
-  - **Busy servers get slow.** Add capacity before you hit 100%.
+  - **Inside:** Little's Law: in progress = throughput × latency. **Busy servers get slow.** Add capacity before you hit 100%.
   - **Batching**: more throughput, more latency. **Caching**: better at both.
+  - **Alternatives:** none, but add **errors** and **saturation** to get the four golden signals.
 </Callout>

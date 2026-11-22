@@ -4,13 +4,13 @@ description: "Making sure only one server does a job at a time, and staying safe
 icon: LockKeyhole
 ---
 
-## The idea
+## What is it?
 
 Think of an office with **one key** for the meeting room, kept at reception. Whoever holds the key can use the room. Everyone else waits until the key is back.
 
 On **one** server, a lock in memory (often called a **mutex**) does this job. But with ten servers, each has its own memory. Server 1 can't see server 2's locks. So the "key" must live in a **shared place** that every server can reach, like Redis, etcd or ZooKeeper. That is a **distributed lock**.
 
-## Why you need a lock across servers
+## Why do we need it?
 
 - **A scheduled job runs on every server.** The "send monthly invoices" job starts on all 5 servers at midnight, and each customer gets 5 invoices. Only one server should run it.
 - **Expensive work is done twice.** Two servers rebuild the same big report or cache entry at the same time.
@@ -24,16 +24,9 @@ flowchart TB
   W1 --> Job["Rebuild the sales report"]:::service
 ```
 
-**First, check if you need one.** If all the data lives in **one database**, use that database's own locks or a conditional update. They are simpler and safer. See [Locks and Deadlocks](../databases/locking.mdx).
+## How it works inside
 
-It also helps to ask **why** you want the lock:
-
-| Lock for... | If two holders run at once | What to use |
-| --- | --- | --- |
-| **Saving work** | Some wasted work. Annoying, not harmful | A simple Redis lock is fine |
-| **Correctness** | Broken data, or money moved twice | A stronger lock service **plus fencing tokens** (below) |
-
-## Locks with Redis
+### Locks with Redis
 
 Say only one server should rebuild the nightly sales report. If two do it, some work is wasted, but nothing breaks. One Redis command takes the lock:
 
@@ -80,7 +73,7 @@ sequenceDiagram
 
 **Redlock** is a version that takes the lock on 5 separate Redis servers and needs a majority (3 of 5). It keeps working even if 2 of the 5 Redis servers die, but it is still debated (see "In the real world").
 
-## Lock timeouts
+### Lock timeouts
 
 Why must a lock expire? If the holder **crashes** while holding it, a lock without a timeout stays forever, and nobody can ever do the job again. A lock with an expiry time is often called a **lease**: you rent the key for a while.
 
@@ -95,7 +88,7 @@ The usual fix: pick a timeout well above the normal job time, and **renew** the 
 
 Even then, there is a nasty case. The holder can **freeze without knowing it**: a long garbage-collection pause, a paused virtual machine, or a slow network. Its lease expires, another worker takes the lock, and then the first one wakes up **still believing it holds the lock**.
 
-## Fencing tokens
+### Fencing tokens
 
 Think of a **hotel key card**. When a new guest checks into a room, the door is set to accept the new card, and the old guest's card stops working. It doesn't matter what the old guest believes: **the door checks**.
 
@@ -158,6 +151,13 @@ await db.transaction(async (transaction) => {
 
 A crash before the commit saves nothing, so the next run bills that customer. A crash after it leaves the invoice and its email together, and the next run skips that customer.
 
+### Locks with etcd or ZooKeeper
+
+These are built on consensus (see [Leader Election and Consensus](./leader-election-consensus.mdx)), so a lock survives the loss of one machine:
+
+- **ZooKeeper:** each worker creates a **sequential** node under `/locks/report`, like `lock-0007`. The lowest number holds the lock. Each other worker watches the node just before its own. The nodes are **ephemeral**: if a worker's session dies, its node is deleted, and the next worker gets the lock.
+- **etcd:** each worker writes a key tied to a **lease** that it must keep renewing. The key with the lowest **revision** (etcd's always-increasing change number) holds the lock. That revision can be used as the fencing token.
+
 ## Choosing a tool
 
 | Tool | How it works | Good for |
@@ -165,6 +165,32 @@ A crash before the commit saves nothing, so the next run bills that customer. A 
 | **Redis** `SET NX PX` | One key with an expiry | Saving work: avoid running a job twice |
 | **Your database** | A row lock (`SELECT ... FOR UPDATE`) or a conditional update | When the data is in that database anyway |
 | **etcd / ZooKeeper** | Built on consensus, with leases and increasing numbers | Correctness, and [leader election](./leader-election-consensus.mdx) |
+
+## When to use it
+
+Good uses: one scheduled job per cluster, rebuilding one cache entry or report, one worker per file or account at a time.
+
+Then ask **why** you want the lock:
+
+| Lock for... | If two holders run at once | What to use |
+| --- | --- | --- |
+| **Saving work** | Some wasted work. Annoying, not harmful | A simple Redis lock is fine |
+| **Correctness** | Broken data, or money moved twice | A stronger lock service **plus fencing tokens** (above) |
+
+**Don't use it when:**
+
+- **All the data lives in one database.** Use that database's own locks or a conditional update. They are simpler and safer. See [Locks and Deadlocks](../databases/locking.mdx).
+- **A double run can be made harmless.** Make the work idempotent instead, like the invoice rule above.
+- **The work can be split by key.** Give each key one owner, and nothing needs locking.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Optimistic locking** | Each row has a `version`. Save only if it is unchanged, else retry. See [Dealing with Contention](./dealing-with-contention.mdx) | Conflicts are rare, and the data is in one database |
+| **One owner per key** | Send all work for one key to the same worker, like one Kafka partition | You can split the work by key, so two workers never touch the same item |
+| **Leader election** | One server is the leader and runs all the jobs | Many jobs need "only one runner". See [Leader Election and Consensus](./leader-election-consensus.mdx) |
+| **Idempotent work** | Let it run twice, but make the second run do nothing, like the invoice unique rule above | A double run can be made harmless |
 
 ## In the real world
 
@@ -178,10 +204,13 @@ A crash before the commit saves nothing, so the next run bills that customer. A 
 
 <Callout title="Remember this" type="success">
   - A **distributed lock** lives in a shared place (Redis, etcd, ZooKeeper), so all servers see it.
+  - **Why:** each server's own locks live in its own memory. Without a shared lock, jobs run on every server, and work is done twice.
   - Redis: `SET key token NX PX 30000`. Release **only if the token is still yours**.
+  - **Inside:** ZooKeeper uses **ephemeral sequential nodes** (lowest number wins). etcd uses **leases** and **revisions** (the revision is a fencing token).
   - Locks must **expire** (a **lease**), or a crashed holder blocks everyone forever.
   - A paused holder can **wake up after its lease expired** and still think it has the lock.
   - **Fencing tokens:** an always-increasing number. Storage **rejects old tokens**.
   - Redis locks for **saving work**. etcd/ZooKeeper + fencing for **correctness**.
   - Fencing can't stop side effects like a second email. Make the work **idempotent** too: one invoice per customer per month.
+  - **Alternatives:** optimistic locking, one owner per key, leader election, idempotent work.
 </Callout>

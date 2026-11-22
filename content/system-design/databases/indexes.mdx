@@ -4,21 +4,11 @@ description: "How databases find data fast without reading every row."
 icon: BookOpen
 ---
 
-## The idea
+## What is it?
 
 A big textbook has an **index at the back**: "Replication ... page 214". Without it, you would read the whole book to find one topic. With it, you look up the word, jump to the page, and you are done.
 
 A database **index** is the same idea. It is a separate, **sorted** list of values from one column, and each value says where its row is stored.
-
-Without an index, this query must read **every row** in the table. That is called a **full table scan**:
-
-```sql
-SELECT * FROM users WHERE email = 'asha@example.com';
-```
-
-With 10 million users, that is 10 million rows checked to find one. With an index on `email`, the database finds it in a few small steps.
-
-## What an index is
 
 You create one with a single line:
 
@@ -32,7 +22,23 @@ The database keeps the index up to date for you on every insert, update and dele
 
 An index helps only with the column it is sorted by. Your phone contacts are sorted by name, so finding "Ravi" is instant. But "who has a number ending in 4321?" means scrolling through every contact.
 
-## B-trees: great for reads
+## Why do we need it?
+
+A table keeps its rows on disk in small blocks called **pages**, in no useful order for your question. So without an index, this query must read **every row** in the table. That is called a **full table scan**:
+
+```sql
+SELECT * FROM users WHERE email = 'asha@example.com';
+```
+
+With 10 million users, that is 10 million rows checked to find one. With an index on `email`, the database finds it in a few small steps.
+
+- **The cost grows with the table.** Twice the rows means twice the work. If each row is about 100 bytes, 10 million rows is about 1 GB read for one answer.
+- **It hurts everyone.** A full scan fills memory and disk with pages nobody else needs, so other queries slow down too.
+- **With an index, the cost barely grows.** Finding one row takes a few page reads, even in a table with hundreds of millions of rows.
+
+## How it works inside
+
+### B-trees: great for reads
 
 Almost every SQL database uses a **B-tree** as its normal index. A B-tree is a short, wide tree of **pages**. A page is a small block of disk, 8 KB in PostgreSQL, that holds many sorted keys.
 
@@ -60,7 +66,16 @@ Because the keys are sorted, a B-tree helps with:
 
 The weak side: every write must find the right page and change it **in place**, at a random spot on disk. When a page is full, it **splits** in two. Heavy write loads mean lots of small random disk writes.
 
-## LSM trees: great for writes
+### From the index to the row
+
+What "the location of its row" means depends on the database:
+
+- **PostgreSQL:** each index entry holds the row's exact spot: a page number and a slot inside that page. One jump, and you have the row.
+- **MySQL (InnoDB):** the rows themselves live inside the primary key's B-tree. Any other index stores the **primary key**, so a lookup walks two trees: the index, then the primary key tree.
+
+If a query matches a large part of the table, jumping from the index to each row is slower than reading the table straight through. The query planner knows this, and may skip the index. See [How a Query Runs](./how-a-query-runs.mdx).
+
+### LSM trees: great for writes
 
 An **LSM tree** (Log-Structured Merge tree) is built for heavy writes. Think of a **busy restaurant**. The waiter doesn't walk to the kitchen's order book after every table. He jots orders on a notepad, fast. When the page is full, he hands over the whole page at once. Later, someone neatly merges all the pages into one tidy book.
 
@@ -83,7 +98,7 @@ Step by step:
 3. **Compaction:** in the background, small files are merged into bigger ones. Old versions and deleted items are thrown away.
 4. **Read:** check the memtable, then the newest file, then older ones. To skip files quickly, each file has a **Bloom filter**, a tiny summary that can say "this key is definitely not in this file". See [Bloom Filter, HyperLogLog, Count-Min Sketch](../advanced-components/probabilistic-data-structures.mdx).
 
-## B-tree vs LSM tree
+### B-tree vs LSM tree
 
 | | B-tree | LSM tree |
 | --- | --- | --- |
@@ -114,7 +129,20 @@ The rule: the index works from the **leftmost column**. Put columns you match **
 
 **Covering index:** if the index also holds every column the query needs, the database can answer from the index alone, without visiting the table. PostgreSQL lets you add extra columns with `INCLUDE`.
 
-## The cost of indexes
+## When to use it
+
+Add an index for:
+
+- Columns your **main queries** filter by (`WHERE`), join on, or sort by.
+- **Foreign key columns** in PostgreSQL, which don't get one on their own.
+- Rules like "no two users share an email": a `UNIQUE` constraint builds the index.
+
+**Don't use it when:**
+
+- **The table is small.** A few hundred rows are fast to read straight through.
+- **The query is rare, but writes are constant.** You would pay on every write to speed up one report a month.
+
+### The cost of indexes
 
 Indexes are not free:
 
@@ -124,7 +152,18 @@ Indexes are not free:
 - **Easy to break by accident.** `WHERE lower(email) = '...'` can't use a plain index on `email`. You need an index on `lower(email)`.
 - **Building one can block writes.** On a big live table, use `CREATE INDEX CONCURRENTLY` in PostgreSQL.
 
-Index the columns your **main queries** filter, join and sort by. Drop indexes nobody uses. To check whether a query uses an index, see [How a Query Runs](./how-a-query-runs.mdx).
+Drop indexes nobody uses. To check whether a query uses an index, see [How a Query Runs](./how-a-query-runs.mdx).
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Full table scan** | No index. Read every row | The table is small, or the query is a rare report |
+| **Hash index** | A hash table instead of a sorted tree (`USING hash` in PostgreSQL) | You only ever match exactly (`=`). It can't do ranges or sorting |
+| **GIN index** (PostgreSQL) | Maps each value inside a field to the rows that hold it | Searching inside arrays, `JSONB` or text words |
+| **Search engine** (Elasticsearch) | A separate inverted index, built for text | Full-text search with typos and ranking. See [Elasticsearch](../advanced-components/elasticsearch.mdx) |
+| **Geospatial index** | An index for points on a map (geohash, quadtree, R-tree) | "Drivers near me". See [Geospatial Indexing](../advanced-components/geospatial-indexing.mdx) |
+| **Partitioning** | Split one huge table into parts, for example one per month | Queries touch only recent data. The database skips the other parts. See [Partitioning and Sharding](./partitioning-sharding.mdx) |
 
 ## In the real world
 
@@ -146,8 +185,10 @@ For a write-heavy store, mention the structure underneath:
 
 <Callout title="Remember this" type="success">
   - An **index** is a sorted copy of a column with pointers to rows. No index means a **full scan**.
+  - **Why:** a full scan grows with the table and slows everyone. A B-tree finds one row in **a few page reads**, even with millions of rows.
   - **B-tree:** short, wide, sorted tree. Fast reads and ranges. The default in SQL databases.
   - **LSM tree:** memtable, then sorted files, then compaction. Very fast writes.
   - **Multi-column index:** works from the leftmost column. Exact matches first, range or sort last.
   - Every index **slows writes** and uses space. Index your main queries only.
+  - **Alternatives:** a full scan (small tables), hash and GIN indexes, a search engine, geospatial indexes, partitioning.
 </Callout>

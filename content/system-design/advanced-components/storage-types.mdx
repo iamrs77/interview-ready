@@ -4,7 +4,7 @@ description: "Three ways to store data on disk, and when to use each one."
 icon: HardDrive
 ---
 
-## The idea
+## What is it?
 
 Every system has to keep data somewhere: database files, user photos, videos, logs, backups. In the cloud there are three main kinds of storage. They differ in **how they hand the data to you**.
 
@@ -14,7 +14,21 @@ Think of three ways to keep your things:
 - **File storage** is like a **shared office cupboard** with labelled folders. Many people can open it at the same time and find things by folder and name.
 - **Object storage** is like a **coat check** at a big event. You hand over your coat and get a ticket. Later you show the ticket and get the whole coat back. You don't care which shelf it was on.
 
-## Block storage
+## Why do we need it?
+
+A server already has its own disk. Why is that not enough?
+
+- **It dies with the server.** App servers are added, removed and replaced all the time when you scale or deploy. Data on their own disk can be lost with them.
+- **Other servers can't see it.** A photo saved on server A's disk is missing when the next request lands on server B. That is why app servers should be **stateless** (see [Stateless vs Stateful](../hld-basics/stateless-vs-stateful.mdx)).
+- **It fills up.** One disk has a fixed size. Millions of photos and videos don't fit on one machine.
+
+So the cloud offers storage that lives **apart from the servers**, with copies kept for you. The three kinds solve this for three kinds of data: database files, shared folders, and huge numbers of files.
+
+## How it works inside
+
+All three keep your data on disks in the provider's data centers, with copies so one broken disk loses nothing. They differ in **what you ask for**: a block number, a file path, or an object key.
+
+### Block storage
 
 Block storage splits a disk into small pieces of the same size, called **blocks**. Each block has a number. The storage knows nothing about files. It only understands "write these bytes into block 1042".
 
@@ -28,7 +42,9 @@ The **operating system** (Linux or Windows) puts a **file system** on top. That 
 
 Databases love block storage, because they keep changing small parts of very large files.
 
-## File storage
+An EBS disk is not really inside your server. It lives on storage machines in the same zone (data center area), and your server reaches it **over the network**. AWS keeps copies of it inside that zone. That is why you can detach it from one server and attach it to another.
+
+### File storage
 
 File storage is a **shared folder over the network**. Many servers can connect to it at once and see the same files, like a shared drive at work.
 
@@ -40,7 +56,9 @@ File storage is a **shared folder over the network**. Many servers can connect t
 
 It is easy to use, because programs treat it like a local folder. But it is harder to grow to huge sizes than object storage, and it usually costs more per GB.
 
-## Object storage
+Inside, a **file server** keeps the real folder tree and the file data. The NFS client on each app server turns every file action (open, read 64 KB from this point, write) into a network call to that file server.
+
+### Object storage
 
 Object storage keeps each file as one **object**. An object has three parts:
 
@@ -64,6 +82,8 @@ Content-Type: image/jpeg
 
 (the bytes of the image)
 ```
+
+Inside, the service keeps an **index** that maps each key to where its data lives, and spreads the data over many disks and machines. There is no folder tree to keep in sync and no editing in place, so it grows by simply **adding more machines**. Listing a "folder" is really a search for keys that start with a prefix, like `photos/2024/`.
 
 ## How they fit in one system
 
@@ -93,7 +113,7 @@ flowchart TB
 | **AWS example** | EBS | EFS | S3 |
 | **Used for** | Databases, system disks | Shared folders, older apps | Photos, videos, backups, logs |
 
-## Which one to use
+## When to use which
 
 ```mermaid
 flowchart TB
@@ -122,6 +142,15 @@ CREATE TABLE photos (
 
 How the file gets into S3 without passing through your servers is covered in [File Upload and Download](./file-upload-download.mdx). How it reaches users fast is covered in [CDN and Edge Caching](../caching/cdn.mdx).
 
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Local instance disk** | An SSD physically inside the cloud server (AWS calls it **instance store**). Very fast, but the data is gone when the server stops | Temporary data: scratch files, caches, or databases that already keep copies on other machines |
+| **Database column (BLOB)** | The file's bytes stored in a table column | Tiny files (a few KB) that must change together with the row, in one transaction |
+| **HDFS** | A file system spread over many machines, from the Hadoop world | Big batch jobs on your own hardware. In the cloud, most teams use S3 instead |
+| **MinIO, Ceph** | Storage software you run on your own machines. MinIO speaks the S3 API. Ceph offers block, file and object | You must run on your own hardware but want the same kinds of storage |
+
 ## In the real world
 
 **S3 is built not to lose data.** AWS says S3 is designed for **99.999999999% durability** ("eleven nines"). It does this by keeping copies of every object on many devices, in several separate data centers.
@@ -139,10 +168,13 @@ Whenever users upload anything (photos, videos, documents), say where the bytes 
 > "Uploaded photos go to S3, which is cheap and almost unlimited. The database only stores the photo's S3 key, owner and size. A CDN sits in front of S3 for downloads."
 
 <Callout title="Remember this" type="success">
+  - **Why:** a server's own disk dies with it, can't be shared, and fills up. Cloud storage lives **apart from the servers**.
   - **Block** = raw disk for one server. Fastest. Use it for **databases**.
   - **File** = shared network folder (NFS). Use it when many servers need **the same folder**.
   - **Object** = flat bucket of objects with keys, over **HTTP**. Cheap and almost unlimited. Use it for **photos, videos, backups, logs**.
   - You **can't edit part of an object**. You replace the whole thing.
   - Never store big files in the database. Store them in **S3** and keep the **key** in the database.
   - AWS names: **EBS** (block), **EFS** (file), **S3** (object).
+  - **Inside:** EBS is a **network disk** copied inside one zone. Object storage maps **keys** to data spread over many machines, so it grows by adding machines.
+  - **Alternatives:** a local instance disk (fast, temporary), a BLOB column (tiny files), HDFS, MinIO or Ceph on your own hardware.
 </Callout>

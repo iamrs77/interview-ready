@@ -4,7 +4,7 @@ description: When the network breaks, you must choose between correct data and a
 icon: Scale
 ---
 
-## The idea
+## What is it?
 
 Think of a bank with **two branches**. They keep the same account records, and they phone each other about every withdrawal. One day the **phone line between them goes dead**. A customer walks into one branch and asks for cash. The branch has two choices:
 
@@ -22,7 +22,17 @@ When that happens, you must choose one:
 
 You cannot have both at that moment. That is the CAP theorem.
 
-## What the three letters mean
+## Why do we need it?
+
+- **Big systems keep copies of the data on many machines.** One machine can die, and users far away want a copy close to them. See [Replication](../databases/replication.mdx).
+- **The copies stay the same by talking over the network.** And networks break: a cable is cut, a switch fails, a server freezes for a few seconds. See [Why Distributed Systems Are Hard](./why-distributed-is-hard.mdx).
+- **Without a plan, the system decides for you during the outage.** It either serves wrong data (a seat sold twice) or stops answering, and nobody chose which.
+
+CAP tells you this choice **cannot be avoided**. So you make it on purpose, ahead of time, for each feature.
+
+## How it works inside
+
+### What the three letters mean
 
 | Letter | Name | Meaning |
 | --- | --- | --- |
@@ -30,13 +40,13 @@ You cannot have both at that moment. That is the CAP theorem.
 | **A** | Availability | Every request gets an answer, not an error. |
 | **P** | Partition tolerance | The system keeps working when the network between machines breaks. A break like this is called a **partition**. |
 
-## Why the real choice is C or A
+### Why the real choice is C or A
 
 Network problems **will** happen in real life. So you must always handle them. P is not optional.
 
 That means the real question is: **when the network breaks, do you pick C or A?**
 
-## An example
+### An example
 
 You have two copies of your database. One is in Europe and one is in the USA. The network between them breaks.
 
@@ -52,26 +62,14 @@ A user in Europe changes their name from **Rob** to **Bob**. Then a user in the 
 - **Pick consistency:** the USA copy returns an error, or waits, until it can be sure it has the newest data. The data is correct, but the user gets no answer.
 - **Pick availability:** the USA copy answers right away with **Rob**. The user gets an answer, but it is old for a short time.
 
-## How to choose
+### What each choice looks like in a real system
 
-Ask yourself: **"What is worse for the user: old data for a few seconds, or an error?"**
+- **Pick C:** a write must be confirmed by a **majority** of the copies (a **quorum**) before it counts. A copy cut off from the majority **refuses** reads or writes it can't be sure of. This is how etcd, ZooKeeper and Spanner work. See [Leader Election and Consensus](./leader-election-consensus.mdx).
+- **Pick A:** every copy accepts reads and writes **on its own**, and sends the changes to the others later. When the network comes back, the copies may hold two different values for the same key. They must settle it, for example **last write wins** (keep the newest timestamp) or by **keeping both versions** and merging them, like Amazon's cart below.
 
-| Pick consistency when... | Pick availability when... |
-| --- | --- |
-| Money and bank balances | Likes and view counts |
-| Booking the last seat or ticket (never sell it twice) | News feeds and comments |
-| Stock count during checkout | Profile pictures and reviews |
-
-## Eventual consistency
+### Eventual consistency
 
 When you pick availability, the copies will become the same again soon after the network is fixed. This is called **eventual consistency**. Most big systems use it for most of their data.
-
-## You can mix both
-
-One system can choose differently for each feature. For a ticket site like Ticketmaster:
-
-- **Viewing an event page:** pick availability. Old data for a few seconds is fine.
-- **Booking a seat:** pick consistency. Two people must never get the same seat.
 
 ## Beyond CAP: PACELC
 
@@ -123,6 +121,38 @@ Some charts show three kinds of systems: CP, AP and **CA** (consistent and avail
 
 So for a distributed system, the real labels are **CP or AP**, or, with PACELC, **PC or PA** plus **EC or EL**.
 
+## When to use which
+
+Ask yourself: **"What is worse for the user: old data for a few seconds, or an error?"**
+
+| Pick consistency when... | Pick availability when... |
+| --- | --- |
+| Money and bank balances | Likes and view counts |
+| Booking the last seat or ticket (never sell it twice) | News feeds and comments |
+| Stock count during checkout | Profile pictures and reviews |
+
+### You can mix both
+
+One system can choose differently for each feature. For a ticket site like Ticketmaster:
+
+- **Viewing an event page:** pick availability. Old data for a few seconds is fine.
+- **Booking a seat:** pick consistency. Two people must never get the same seat.
+
+**CAP doesn't help when:**
+
+- **The data lives on one machine.** There is no network between copies to break. Think about failover instead.
+- **The question is speed on a normal day.** CAP is only about partitions. Use PACELC (above).
+
+## Alternatives
+
+CAP is a rule about what is possible, so there is no "other CAP". But there are other ways to think about the same trade-off:
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **PACELC** | CAP plus the latency-or-consistency choice on normal days (above) | You also want to talk about speed, not only failures |
+| **Consistency models** | A finer scale than "C or not C": strong, read-your-writes, causal, eventual. See [Consistency Models](./consistency-models.mdx) | You need to say exactly how stale a read may be |
+| **Harvest and yield** | Fox and Brewer (1999): answer every request, but with **part** of the data, instead of all or nothing | Partial answers are fine, like search results from the shards that are up |
+
 ## In the real world
 
 **Where the name comes from.** Eric Brewer presented CAP as an idea in 2000. Two years later, Seth Gilbert and Nancy Lynch of MIT proved it mathematically.
@@ -145,10 +175,13 @@ If you pick consistency, also say what it costs on a normal day (PACELC): every 
 
 <Callout title="Remember this" type="success">
   - **C** = newest data, **A** = always an answer, **P** = survives network breaks.
+  - **Why:** data is copied across machines, and the network between them **will** break. Decide C or A ahead of time, not during the outage.
   - Network breaks always happen, so the real choice is **C or A**.
+  - **Inside:** pick C = a **majority** must agree, cut-off copies refuse. Pick A = each copy answers alone, conflicts are merged later.
   - Ask: "Is old data worse, or is an error worse?"
   - **Money and bookings → consistency.** Likes, feeds, profiles → availability.
   - Availability usually comes with **eventual consistency**.
   - You can choose **per feature**.
   - **PACELC:** if **P**artition, pick **A** or **C**. **E**lse, pick **L**atency or **C**onsistency, because syncing copies costs time on **every** write.
+  - **Alternatives:** PACELC, consistency models, harvest and yield.
 </Callout>

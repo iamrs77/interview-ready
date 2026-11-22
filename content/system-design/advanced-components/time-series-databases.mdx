@@ -4,13 +4,13 @@ description: "Databases built for numbers stamped with a time, like metrics and 
 icon: ChartLine
 ---
 
-## The idea
+## What is it?
 
 Think of a **weather station** with a logbook. Every minute, someone writes down the temperature on the **next empty line**. Nobody ever goes back to change an old line. Questions are always about a **stretch of time**: "what was the hottest hour yesterday?". And after a year, nobody needs every minute from last January, so old pages are **summarized** into daily highs and lows, and the **old notebooks are thrown away**.
 
 A **time series database (TSDB)** is built for exactly this kind of data. It writes new points very fast, stores them in very little space, answers "this stretch of time" questions quickly, and summarizes and deletes old data on its own.
 
-## What time-series data is
+### What time-series data is
 
 A **time series** is a list of `(time, value)` points for one thing you measure. Examples:
 
@@ -51,7 +51,7 @@ This data has a special shape:
 - **Recent data is hot.** Last hour is read all the time. Last year is read rarely, and only in summary.
 - **Labels pick the series.** `host` and `metric` here are **labels** (also called **tags**). Each different set of labels is its own series: `cpu` on `web-1` is one series, `cpu` on `web-2` is another. (Too many label values is a classic trap. See [Logging and Metrics](../questions/logging-metrics.mdx).)
 
-## Why a normal database struggles
+## Why do we need it?
 
 Take a real monitoring setup: **10,000 servers × 100 metrics**, one reading every **10 seconds**.
 
@@ -67,7 +67,9 @@ Put this in one normal PostgreSQL or MySQL table and four things hurt:
 | **Range scans** | "Average CPU per minute for 7 days" reads millions of rows. Rows of different servers are mixed together on disk, and each row carries every column, even though we only need `value` |
 | **Deleting old data** | `DELETE ... WHERE time < 30 days ago` removes billions of rows one by one. It is slow, heavy, and in PostgreSQL it leaves dead rows that must be cleaned up later |
 
-## How a TSDB handles it
+A TSDB is built around these four problems. Each part below fixes one of them.
+
+## How it works inside
 
 ### 1. Split the data by time into chunks
 
@@ -218,7 +220,7 @@ flowchart TB
 - A sensor or IoT platform → **InfluxDB** or **TimescaleDB**.
 - Analytics over billions of events (like the [Ad Click Aggregator](../questions/ad-click-aggregator.mdx)) → **ClickHouse** or **Druid**.
 
-## When to use it in an interview
+## When to use it
 
 | Use a time series database for | Don't use it for |
 | --- | --- |
@@ -226,6 +228,17 @@ flowchart TB
 | **Sensor readings** from thousands of devices | Data that **changes in place**: user profiles, orders, balances |
 | **Stock prices** and charts over time | **Transactions**, like moving money |
 | **Per-minute counts** for dashboards | **Small volume.** A few hundred writes a second fit in a normal table with an index on time |
+
+## Alternatives
+
+Beyond the products above, you can skip a TSDB altogether:
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **A normal table, split by day** | PostgreSQL or MySQL with one partition per day and an index on time | Modest volume. Dropping a whole partition is as fast as dropping a chunk |
+| **Counters in Redis** | One key per minute, like `clicks:ad42:10:05`, with `INCR` and a TTL | You only need live per-minute counts for a short time |
+| **Files in object storage** | Parquet files in S3, read with Athena or Spark | Years of cold data, read rarely, at the lowest cost |
+| **Cassandra** | Rows keyed by series and time bucket, built for heavy writes | Very high write rates, and you are fine building rollups yourself |
 
 ## In the real world
 
@@ -249,10 +262,11 @@ Say the numbers, how points are written, how data shrinks with age, and how it i
 
 <Callout title="Remember this" type="success">
   - Time-series data is **append-only**, **time-ordered**, and **read by time range**. Each set of labels is one **series**.
-  - A normal table struggles with **write volume**, **huge indexes**, **range scans** and **deleting** old rows.
+  - **Why:** a normal table struggles with **write volume**, **huge indexes**, **range scans** and **deleting** old rows.
   - **Chunks by time:** writes hit only the newest chunk, queries skip old chunks, and old chunks never change.
   - **Columnar compression:** store gaps and changes, not full values. Gorilla: 16 bytes down to about **1.37 bytes** a point.
   - **Downsampling:** raw → 1-minute → 1-hour rollups. Keep **min, max, avg, count**, not just the average.
   - **Retention:** drop a whole chunk at once, which is instant.
   - Prometheus for **monitoring**, TimescaleDB if you are on **PostgreSQL**, InfluxDB for **sensors**, ClickHouse or Druid for **event analytics**.
+  - **Alternatives:** a normal table split by day (modest volume), Redis counters, Parquet files in S3, Cassandra.
 </Callout>

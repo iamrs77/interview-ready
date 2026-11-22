@@ -4,11 +4,21 @@ description: "Testing how the system behaves under heavy traffic, before real us
 icon: Dumbbell
 ---
 
-## The idea
+## What is it?
 
 **Load testing** means sending a lot of fake traffic to your system, on purpose, to see how it behaves. You want to learn where it slows down and where it breaks **before** real users do it for you on your busiest day.
 
 Think of a **new restaurant's practice night**. Before the grand opening, the owner invites 100 friends, all at once, and they all order. Maybe the kitchen copes. Maybe the grill can only cook 20 burgers at a time and orders pile up. Either way, it is far better to learn this with friends than on opening night with paying customers and a food critic.
+
+## Why do we need it?
+
+Capacity math on paper (see [Capacity Estimation](../hld-basics/capacity-estimation.mdx)) is only a guess. Many limits show up **only under real load**: a missing index, a connection pool of 10, a cache that is too small, auto-scaling that takes 5 minutes to add servers.
+
+Without a test, you learn these limits from real users, and usually at the worst moment: the sale day or the launch, when traffic and money are at their highest. A load test moves that lesson to a quiet day, on a copy of the system.
+
+## How it works inside
+
+### Virtual users and load generators
 
 The fake users are called **virtual users**. A tool runs them from one or more machines called **load generators**.
 
@@ -25,7 +35,7 @@ flowchart TB
 
 The test tool tells you what users felt (latency, errors). Your dashboards tell you **why** (which server was at 100% CPU). You need both.
 
-## Kinds of tests
+### Kinds of tests
 
 | Test | What you do | The question it answers |
 | --- | --- | --- |
@@ -36,7 +46,7 @@ The test tool tells you what users felt (latency, errors). Your dashboards tell 
 
 A load test checks you are **ready**. A stress test finds the **limit**. Both are useful.
 
-## What to measure
+### What to measure
 
 - **Throughput:** requests per second the system actually handled.
 - **Latency:** p50, p95 and p99, not the average. See [Latency Percentiles](./latency-percentiles.mdx).
@@ -45,7 +55,7 @@ A load test checks you are **ready**. A stress test finds the **limit**. Both ar
 
 Decide the **pass line** before you start. It is usually your SLO, like "p95 under 200 ms and errors under 0.1%". See [SLI, SLO and SLA](./sli-slo-sla.mdx).
 
-## Tools: k6 and JMeter
+### Tools: k6 and JMeter
 
 | Tool | Tests written in | Good to know |
 | --- | --- | --- |
@@ -105,6 +115,12 @@ http_reqs ........... 130000   155/s
 ✓ rate<0.001
 ```
 
+### Fixed users vs fixed arrival rate
+
+The script above uses a **fixed number of users**. Each user waits for its answer before it sends the next request. So when the system slows down, the users send **fewer** requests, and the test gets easier just when it should get harder.
+
+Real internet traffic doesn't wait: new users keep arriving at the same rate. To test that, use a **fixed arrival rate**, like "300 new requests per second, however slow the answers are". In k6, this is the `constant-arrival-rate` executor.
+
 ## Reading the results
 
 Here is an example stress test of an online shop. Traffic goes up step by step.
@@ -154,6 +170,27 @@ A load test is only useful if it looks like real traffic:
 - **Don't load-test other companies.** Replace the payment provider or email service with a fake one (a **mock**).
 - **Ramp up slowly**, so caches warm up and auto-scaling has time to react, unless a spike is exactly what you are testing.
 
+## When to use it
+
+- **Before a launch or a big sale** that you know is coming.
+- **After big changes** to the architecture, the database or the machine sizes.
+- **In CI, as a small regular test**, so a slow release fails the build (the k6 thresholds above do this).
+- **To find your real limit** for planning, like how many servers next year's peak needs.
+
+**Don't use it when:**
+
+- **It would hit production at peak hours**, or nobody was told. You can cause the outage you wanted to avoid.
+- **Traffic is tiny and steady**, like an internal tool with 20 users. The effort is not worth it.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Capacity estimation** | Math on paper from requests per second and what one server can handle | Early design, before anything is built. See [Capacity Estimation](../hld-basics/capacity-estimation.mdx) |
+| **Canary release** | Send a small share of **real** traffic to the new version and watch it | You trust real traffic more than fake traffic. See [Deployment Strategies](./deployment-strategies.mdx) |
+| **Traffic replay** | Record real production requests and send copies to a test system | You want the real mix of requests, without real users seeing the results |
+| **Chaos testing** | Break things on purpose (stop servers, add delay) and watch | You care more about failures than about heavy traffic. Netflix's Chaos Monkey is the famous example |
+
 ## In the real world
 
 **Pokémon GO got 50 times the traffic it planned for.** When the game launched in July 2016, Google Cloud, which ran its backend, wrote that player traffic reached **50 times** the launch target, and **10 times** the worst case they had planned for. The servers struggled for days. Planning and testing for only the "expected" load is not enough when a launch goes viral.
@@ -168,9 +205,12 @@ Load testing rarely comes up on its own. Mention it when you talk about **capaci
 
 <Callout title="Remember this" type="success">
   - **Load test:** expected peak traffic. **Stress test:** add traffic until it breaks. Also **spike** and **soak** tests.
+  - **Why:** many limits show up only **under load**. Find them on a quiet day, not on launch day.
   - Measure **throughput, p95/p99 latency, error rate** and **saturation** of each resource.
   - Look for **the knee**: latency starts to climb, throughput stops growing.
   - The first resource to fill up at the knee is your **bottleneck**.
   - Tools: **k6** (JavaScript), **JMeter** (visual editor), Gatling, Locust.
   - Make it **realistic**: production-sized data, many different IDs, mocked third parties.
+  - **Inside:** fixed users slow down when the system does. A **fixed arrival rate** is closer to real traffic.
+  - **Alternatives:** capacity math, canary releases, traffic replay, chaos testing.
 </Callout>

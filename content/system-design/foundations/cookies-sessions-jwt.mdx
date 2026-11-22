@@ -4,16 +4,29 @@ description: How a server remembers who you are, even though HTTP forgets every 
 icon: KeyRound
 ---
 
-## The idea
+## What is it?
 
-HTTP forgets you after every request (see [HTTP and HTTPS](./http-and-https.mdx)). So how does a website keep you logged in? There are two common ways:
+**Cookies, sessions and JWTs** are how a website keeps you logged in. There are two common ways:
 
 - **Session:** the server keeps your details and gives you a **ticket number**. Like a coat check: you hand over your coat and get token #27. Next time, you show #27, and they find your coat.
 - **JWT:** the server gives you a **signed card** with your details written on it. Like a stamped event wristband: the staff only check that the stamp is real. They don't need to look you up in a list.
 
 **Cookies** are the pocket where the browser keeps that ticket or card, and shows it automatically on every visit.
 
-## Cookies
+## Why do we need it?
+
+HTTP forgets you after every request (see [HTTP and HTTPS](./http-and-https.mdx)). So how does a website keep you logged in?
+
+Without help, you would send your email and password with **every single click**. That is:
+
+- **Slow.** Passwords are stored with a hash that is slow on purpose (like bcrypt), so checking one on every request costs a lot of CPU.
+- **Risky.** The password travels and gets handled far more often, so it has more chances to leak.
+
+So after **one** login, the server hands out something to show instead: a **session ID** or a **JWT**. And the browser needs a place to keep it and send it back on its own: a **cookie**.
+
+## How it works inside
+
+### Cookies
 
 A **cookie** is a small piece of data (up to about 4 KB) that a server asks the browser to keep.
 
@@ -39,13 +52,15 @@ Cookies have settings (flags) that keep them safe:
 | `SameSite` | Whether it is sent on requests that **another site** starts. `Strict`: never. `Lax`: only when the user clicks a link to the site (a `GET`), not on form `POST`s, images, iframes or `fetch`. `None`: always (must also be `Secure`). Helps against fake requests from other sites (CSRF) |
 | `Max-Age` / `Expires` | When the cookie runs out |
 
-## Sessions
+### Sessions
 
 1. You log in.
 2. The server creates a **session record**: "session `abc123` = user 7, logged in at 10:00".
 3. It stores the record in a fast **session store**, usually Redis.
 4. It sends you only the **session ID**, in a cookie.
 5. On every request, the server looks up the session ID to find out who you are.
+
+The session ID is a **long random value**, so nobody can guess another user's ID. The server makes a **new** ID at login, and gives each session an expiry time in the store.
 
 ```mermaid
 flowchart LR
@@ -61,7 +76,7 @@ Because sessions live in Redis and not inside one app server, **any** server can
 - **Good:** logging out is easy. Delete the session, and the user is logged out at once, on every server. To log out every device, delete all of the user's sessions.
 - **Bad:** every request needs a lookup in the session store.
 
-## JWT (JSON Web Token)
+### JWT (JSON Web Token)
 
 A JWT is a token made of three parts, joined by dots: **header.payload.signature**.
 
@@ -75,6 +90,7 @@ The middle part (the payload) is just JSON, encoded:
 { "userId": 7, "role": "user", "exp": 1800000000 }
 ```
 
+- The **signature** is made from the first two parts: `sign(header + "." + payload, privateKey)`.
 - The auth service **signs** the token with a **private key** that only it has. If anyone changes even one letter of the payload, the signature stops matching, and the token is rejected.
 - The token is **signed, not encrypted**. Anyone can read the payload. **Never put secrets in it.**
 - To check a JWT, a server checks the **signature** and the **expiry time** (`exp`). **No database lookup.**
@@ -110,8 +126,6 @@ sequenceDiagram
 | **Security** | Strong: the server controls every session and can end it at once | Risky if a token leaks: it works until it expires, so keep tokens short-lived |
 | **Best for** | Normal websites with one backend | Many services, mobile apps, "log in with" flows |
 
-**Simple rule:** a normal website → **sessions in a cookie**. Many services or mobile apps → **short JWTs + refresh tokens**.
-
 ## Keeping them safe
 
 - Always use **HTTPS**, and mark cookies `Secure`.
@@ -119,6 +133,27 @@ sequenceDiagram
 - Use `SameSite` cookies **plus** CSRF tokens, in layers, to block fake requests from other sites. See [CSRF and CORS](../reliability-security/csrf-cors.mdx).
 - Keep tokens **short-lived**, and replace refresh tokens each time they are used.
 - **Never** put passwords or secrets inside a JWT.
+
+## When to use which
+
+**Simple rule:** a normal website → **sessions in a cookie**. Many services or mobile apps → **short JWTs + refresh tokens**.
+
+**Don't use JWTs when:**
+
+- You must **log someone out at once**, or remove a permission at once (banking, admin tools). The old token keeps working until it expires.
+- It is a **simple website with one backend**. Sessions are less work and easier to make safe.
+
+**Don't use sessions when** many services in many places must each check the user. Every request then depends on reaching one shared session store.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Opaque access token** | A random string with no data inside. The service asks the auth server what it means | You want API tokens that can be cancelled at once |
+| **API key** | A long secret string given to a program, sent in a header | Server-to-server calls, APIs for developers |
+| **mTLS** (mutual TLS) | Both sides show a certificate, not only the server | Services inside your system proving who they are to each other |
+| **PASETO** | A token like a JWT, but with fewer, safer choices. There is no `alg` field to trick | You want signed tokens and fewer ways to get them wrong |
+| **Browser storage** (localStorage) | Storage in the browser that JavaScript can read | Avoid it for login tokens: any script on the page can steal them |
 
 ## In the real world
 
@@ -142,4 +177,7 @@ Say how users stay logged in, and why:
   - Sign with a **private key** (`RS256`), check with the **public key**, and check `exp`. In browsers, keep tokens in `HttpOnly` cookies.
   - Use **short access tokens + refresh tokens**.
   - Cookie flags: `HttpOnly`, `Secure`, `SameSite`.
+  - **Why:** HTTP forgets you, and sending the password on **every click** is slow and risky. Log in once, then show a **session ID** or a **JWT**.
+  - **Inside:** a session ID is a **long random** key into a store. A JWT is `header.payload.signature`, checked with a **public key**.
+  - **Alternatives:** opaque tokens, API keys, mTLS, PASETO.
 </Callout>

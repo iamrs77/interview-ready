@@ -4,13 +4,23 @@ description: What to do when far more people read data than write it.
 icon: Gauge
 ---
 
-## The problem
+## What is it?
+
+**Scaling reads** means serving far more reads than one database can answer, by keeping copies of the data in faster or closer places.
+
+Think of a notice board in a busy town. One person writes the notice, but thousands want to read it. Instead of everyone crowding around one board, you print copies and pin them up all over town.
+
+## Why do we need it?
 
 Most apps are **read-heavy**. On Instagram, one person posts a photo, and thousands of people view it. Reads can be 100 times more than writes, or even more.
 
-One database machine can only answer so many reads per second. When traffic grows, reads become the first problem.
+One database machine can only answer so many reads per second. When traffic grows, reads become the first problem (see [Scalability](./scalability.mdx)). The database CPU fills up, every query waits longer, and soon the writes slow down too, because they share the same machine.
 
-## The fixes, from simple to advanced
+## How it works inside
+
+Every fix does the same thing: it **answers the read before it reaches the primary database**, or makes the read cheaper when it does.
+
+### The fixes, from simple to advanced
 
 Try these in order. Don't jump to the hard ones first.
 
@@ -42,7 +52,7 @@ Try these in order. Don't jump to the hard ones first.
 </Step>
 </Steps>
 
-## What it looks like
+### What it looks like
 
 ```mermaid
 flowchart TB
@@ -56,11 +66,38 @@ flowchart TB
   Primary -.->|copies data| R2
 ```
 
-## Watch out
+### The path of one read
+
+1. Images and videos come from the **CDN**. They never reach your servers.
+2. For data, the app first asks **Redis**. A hit returns in under 1 ms.
+3. On a miss, the app reads from a **replica**, and saves the answer in Redis for next time.
+4. Only writes, and reads that must be fully fresh, go to the **primary**.
+
+### Watch out
 
 - **Replica lag:** a replica can be a little behind the primary. A user may save something and then not see it right away. **Fix:** read the user's own new data from the primary for a few seconds after they write.
 - **Stale cache:** cached data can be old. Use a TTL and delete keys when data changes.
 - **Hot keys:** one very popular item can overload one cache server. **Fix:** keep a copy of it in each app server's memory for a few seconds, or store several copies of the key. See [Cache Problems](../caching/cache-problems.mdx).
+
+## When to use it
+
+- **Reads are far more than writes**, like 10 to 1 or more: feeds, product pages, profiles, short links.
+- **The same items are read again and again**, like a viral post or a popular product.
+- **The database is busy mostly with reads**, and the slow queries are SELECTs.
+
+**Don't use it when:**
+
+- **The system is write-heavy**, like logging, metrics or chat messages. Caches and replicas don't help writes. See [Scaling Writes](./scaling-writes.mdx).
+- **Every read must be fully fresh**, like the seat count right before you book. Read those from the primary.
+- **Traffic is low.** One database with good indexes is enough. A cache adds stale data and one more part to run.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Sharding** | Split the data across many databases, each holding a part | The data is too big for one machine, or writes are heavy too. See [Partitioning and Sharding](../databases/partitioning-sharding.mdx) |
+| **A store built for the read** | Copy the data into a store made for one kind of read, like Elasticsearch for text search | The read needs a shape the main database is bad at. See [Search](../advanced-components/search.mdx) |
+| **CQRS** | Separate models, often separate databases, for writes and for reads | Reads and writes need very different shapes. See [CQRS](../distributed-systems/cqrs.mdx) |
 
 ## In the real world
 
@@ -76,7 +113,9 @@ Almost every question has a read-heavy part: a URL shortener, a news feed, the Y
 
 <Callout title="Remember this" type="success">
   - Most systems are **read-heavy**.
+  - **Why:** one database can only answer so many reads per second. Reads usually hit that limit first.
   - Fix in order: **index → cache → read replicas → CDN → precompute**.
   - Replicas can be a little **behind**. Read your own new writes from the primary.
   - Say the read-to-write ratio early. It tells you this pattern is needed.
+  - **Alternatives:** sharding, a store built for the read (like Elasticsearch), CQRS.
 </Callout>

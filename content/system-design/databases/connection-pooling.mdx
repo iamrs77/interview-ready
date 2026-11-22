@@ -4,7 +4,7 @@ description: "Reusing database connections instead of opening a new one for ever
 icon: Cable
 ---
 
-## The idea
+## What is it?
 
 Imagine a restaurant that **hires a new waiter** for every customer, trains them, and fires them when the customer leaves. Most of the time would go into hiring, not serving.
 
@@ -12,7 +12,7 @@ A real restaurant keeps a **team of ten waiters**. Each one serves whoever is ne
 
 A **connection pool** is that team of waiters. It keeps a few database connections **open all the time**. Each request **borrows** one, runs its queries, and **gives it back**. Nobody pays to open a new connection for every request.
 
-## Why opening a connection is slow
+## Why do we need it?
 
 A **connection** is an open line between your app and the database. Opening a new one takes several steps before your query even starts:
 
@@ -36,7 +36,11 @@ sequenceDiagram
 
 Often the setup takes **longer than the query itself**. And each open connection uses memory on the database server, even when idle. That is why databases limit them: PostgreSQL allows **100 connections by default** (`max_connections`).
 
-## How a pool works
+So without a pool, a busy app has two bad choices: pay this setup cost on **every request**, or keep so many connections open that the database **runs out**.
+
+## How it works inside
+
+### Borrow, use, give back
 
 ```mermaid
 flowchart TB
@@ -56,6 +60,10 @@ flowchart TB
 2. A request **borrows** a free connection, runs its queries, and **returns** it.
 3. If all connections are busy, the request **waits in line** for one, up to a time limit.
 4. The pool closes connections that sit idle too long, and replaces broken ones.
+
+Inside, the pool is two lists: the **idle connections** that are free right now, and a **queue of waiting requests**. When a connection comes back, it goes straight to the first request in the queue. If nobody is waiting, it joins the idle list. Many pools also check that a connection still works before handing it out, because the database or the network may have closed it.
+
+### In code
 
 Most database libraries have a pool built in. In Node.js, with the `pg` library:
 
@@ -123,6 +131,28 @@ PgBouncer has three modes. They differ in **when** a real connection goes back t
 
 Other tools: **Amazon RDS Proxy** (managed, for AWS databases), **Pgpool-II** for PostgreSQL, and **ProxySQL** for MySQL.
 
+## When to use it
+
+- **Any app server that talks to a SQL database.** Most libraries pool by default. Keep it on.
+- **Many app servers, or autoscaling.** Add a shared pooler like PgBouncer, so the total stays small.
+- **Serverless functions.** Put a managed proxy like RDS Proxy in front, because every copy of the function opens its own connections.
+
+**Don't use it when:**
+
+- **The app needs session features** (`SET`, `LISTEN`) and the shared pooler runs in transaction mode. Use session mode, or a direct connection, for that part.
+- **A job holds a connection for minutes,** like a big report or a migration. Give it its own connection outside the main pool, so it doesn't starve normal requests.
+- **You count on a pool inside each serverless function.** Each copy has its own small pool, so the total still explodes. Pool outside the functions.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Open and close per request** | A new connection for every request | Rare scripts or cron jobs, where the setup time does not matter |
+| **Raise `max_connections`** | Let the database accept more connections | A small bump. Each connection still costs memory, so it doesn't go far |
+| **HTTP data API** | Send queries over HTTP, with no long-lived connection (for example, the Amazon Aurora Data API) | Short-lived serverless functions |
+| **Queue the writes** | Put the work on a queue. A few workers, with a few connections, write it to the database | Spiky writes that don't need an instant answer. See [Message Queues](../messaging/message-queues-pub-sub.mdx) |
+| **A database you call over HTTP** | DynamoDB: each call is an HTTP request, so there is no database session to keep | Key-based access from serverless functions. See [Cassandra and DynamoDB](./cassandra-dynamodb.mdx) |
+
 ## In the real world
 
 **GitLab** runs PgBouncer in front of its PostgreSQL databases, and its documentation explains how to set it up for large self-hosted installs.
@@ -136,9 +166,11 @@ Mention it when you have many app servers talking to one SQL database, or when y
 > "Each app server keeps a small connection pool, and PgBouncer in transaction mode sits in front of Postgres. That way 50 app servers share a small, fixed number of real connections, and a traffic spike can't drown the database in new connections."
 
 <Callout title="Remember this" type="success">
-  - Opening a connection is **slow**: TCP, TLS, login, and a new process in PostgreSQL.
+  - **Why:** opening a connection is **slow**: TCP, TLS, login, and a new process in PostgreSQL. And each open one costs database memory.
   - A **pool** keeps connections open. Requests **borrow and return** them.
   - **Always return** connections, or the pool leaks and the app freezes.
   - **Small pools** usually beat big ones. Remember: servers × pool size = total connections.
   - **PgBouncer** in **transaction mode** lets many app servers share a few real connections.
+  - **Inside:** a list of **idle connections** and a **queue** of waiting requests.
+  - **Alternatives:** a new connection per request, an HTTP data API, a queue in front, or a database you call over HTTP.
 </Callout>

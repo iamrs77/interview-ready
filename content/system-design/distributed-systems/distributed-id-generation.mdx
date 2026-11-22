@@ -4,7 +4,7 @@ description: "Making unique IDs across many servers, without asking one central 
 icon: FingerprintPattern
 ---
 
-## The idea
+## What is it?
 
 Think of a **deli counter with one ticket machine**: 1, 2, 3, and so on. It works perfectly, but everyone must queue at that one machine. Now the shop opens five counters, each with **its own** ticket machine. Two customers can both get ticket 42.
 
@@ -14,7 +14,11 @@ There are three simple ways to fix that:
 - Give each machine its **own block** of numbers: machine A uses 1 to 1,000, machine B uses 1,001 to 2,000. (**Counter ranges**.)
 - Use **very long random numbers**, so two machines practically never pick the same one. (**UUIDs**.)
 
-## What a good ID needs
+## Why do we need it?
+
+Every new post, order or message needs an ID that **no other thing will ever get**. On one database that is easy: the database counts. But a big system has many app servers and many database pieces (**shards**), all creating things at the same moment. They must pick IDs **without** asking one central place every time, and two of them must never pick the same one.
+
+### What a good ID needs
 
 | Need | Why |
 | --- | --- |
@@ -24,7 +28,7 @@ There are three simple ways to fix that:
 | **Small** | 64 bits fits in a `BIGINT` column, and keeps indexes small |
 | **Hard to guess** (sometimes) | Others can't guess `/orders/1001` just because they saw `/orders/1000` |
 
-## Auto-increment, and its limits
+### Auto-increment, and its limits
 
 The simplest way: let the database count. `id BIGSERIAL PRIMARY KEY` in PostgreSQL gives 1, 2, 3, and so on. On **one** database, this is perfect.
 
@@ -36,7 +40,11 @@ Its limits show up as you grow:
 
 A common workaround: each database counts in steps with a different start. Database 1 gives 1, 3, 5. Database 2 gives 2, 4, 6. It works, but adding a third database later is painful.
 
-## UUIDs
+## How it works inside
+
+Each method below avoids "one shared counter for every ID" in a different way: pure randomness, a per-machine prefix, or a block of numbers.
+
+### UUIDs
 
 A **UUID** (universally unique identifier) is a 128-bit ID, written like `550e8400-e29b-41d4-a716-446655440000`. Any server, or even the user's phone, can make one with **no coordination at all**.
 
@@ -60,7 +68,7 @@ console.log(id); // b3e1c0a2-5f1e-4c8e-9a51-2f7d6c1e9b44
 
 Why random IDs slow down inserts: a database index is kept **sorted**, like a notebook in alphabetical order. A random ID has to be squeezed in somewhere in the middle, touching a different page each time. A time-sorted ID always goes **at the end**, like writing on the last page. That is why UUID v7 is usually better than v4 for primary keys.
 
-## Snowflake IDs
+### Snowflake IDs
 
 **Snowflake** is the method Twitter published in 2010. Each ID is one **64-bit number**, built from parts:
 
@@ -170,7 +178,7 @@ Things to watch:
 - **Only roughly sorted.** Two IDs made in the same millisecond on different servers are not in exact real order. For feeds, that is fine.
 - **JavaScript can't hold 64-bit numbers safely** (its normal numbers are exact only up to 2 to the power of 53). APIs send these IDs as **strings** in JSON.
 
-## Counter ranges
+### Counter ranges
 
 A small central service hands out **blocks** of numbers. Server A asks and gets 1 to 1,000. Server B asks and gets 1,001 to 2,000. Each server then counts on its own, with **no network calls**, until its block runs out.
 
@@ -194,7 +202,7 @@ The range service can be as simple as one database row, or a Redis key increased
 
 This is a great fit for short codes, like in the [URL Shortener](../questions/url-shortener.mdx).
 
-## Which one to pick
+## When to use which
 
 | Situation | Pick |
 | --- | --- |
@@ -202,6 +210,22 @@ This is a great fit for short codes, like in the [URL Shortener](../questions/ur
 | No coordination, size doesn't matter | UUID (v7 if it is a database key) |
 | 64-bit, sorted by time, huge scale | Snowflake |
 | Short, compact numbers (short links) | Counter ranges |
+
+**Don't use:**
+
+- **UUID v4 as the primary key** of a big table. Random IDs land all over the index and slow down inserts. Use v7.
+- **Sequential IDs** (auto-increment, counter ranges) in public URLs when IDs must be hard to guess.
+- **Counter ranges** when you need IDs sorted by time.
+- **Snowflake** when you can't keep machine IDs unique. Two servers with the same machine ID can make the same ID.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **ULID** | 128 bits: a 48-bit millisecond timestamp, then 80 random bits, written as 26 characters | Like UUID v7 (made anywhere, sorted by time), with a shorter text form |
+| **MongoDB ObjectId** | 12 bytes: time, a random value and a counter (see below) | You already use MongoDB. The driver makes them for you |
+| **Ticket server** | A small database whose only job is to hand out the next number | You want short, central numbers and can run two of them for safety (Flickr, below) |
+| **Hash of the content** | The ID is a hash of the data itself, like Git's commit IDs | The same data must always get the same ID, for example to spot duplicate files |
 
 ## In the real world
 
@@ -222,10 +246,12 @@ Bring it up whenever you need IDs at scale, especially for feeds or messages:
 > "Every post needs a unique ID, made on any of our app servers. I'll use Snowflake-style 64-bit IDs: 41 bits of time, 10 bits of machine ID and 12 bits of sequence. No coordination is needed, and the IDs are sorted by time, so 'newest first' is just sorting by ID."
 
 <Callout title="Remember this" type="success">
+  - **Why:** many servers create things at once, and one central counter is a **bottleneck** and a single point of failure.
   - **Auto-increment** is perfect on one database, but breaks with **sharding**.
   - **UUID:** 128 bits, no coordination. v4 is random; **v7 is sorted by time**.
   - **Snowflake:** 64 bits = **1 sign + 41 time + 10 machine + 12 sequence**.
   - Snowflake IDs are made locally, are **sorted by time**, and allow 4,096 per ms per server.
   - **Counter ranges:** each server takes a **block** of numbers. Great for short codes.
   - Send 64-bit IDs to JavaScript clients as **strings**.
+  - **Alternatives:** ULID, MongoDB ObjectId, a ticket server, a hash of the content.
 </Callout>

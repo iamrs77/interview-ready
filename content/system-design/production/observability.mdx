@@ -4,7 +4,7 @@ description: "How to see what your system is doing in production, using logs, me
 icon: Eye
 ---
 
-## The idea
+## What is it?
 
 Once your system runs in production, you can't attach a debugger or watch every request. **Observability** means the system gives off enough information that you can answer "what is happening, and why?" from the outside.
 
@@ -14,11 +14,23 @@ It comes in three kinds of data, often called the **three pillars**. Think of a 
 - **Logs** are the **trip diary**: "10:15, strange noise from the engine". Detailed notes about single events that tell you **what exactly happened**.
 - **Traces** are like **parcel tracking**: "picked up in Delhi, sorted in Mumbai, delivered in Pune". They follow **one request** through every service it visits and show **where the time went**.
 
-## Logs
+## Why do we need it?
+
+On your laptop, you can add a `console.log`, attach a debugger and run the request again. In production you can't:
+
+- There are **many servers**, and each request touches several of them.
+- Problems show up at 3 a.m., for **some** users only, and you can't make them happen again.
+- Without data, you hear about an outage **from your users**, then guess which of 20 services is to blame.
+
+Observability gives you that data **before** you need it. You can see a problem early, find the service that causes it, and learn the cause, without logging in to servers one by one.
+
+## How it works inside
+
+### Logs
 
 A **log** is a line of text the app writes when something happens: a request came in, a payment failed, a job finished.
 
-### Structured logging
+#### Structured logging
 
 Old-style logs are plain sentences:
 
@@ -50,7 +62,7 @@ Now you can ask exact questions, like "all errors from the payment service for u
 - **Never log** passwords, card numbers or tokens.
 - Send logs from all servers to **one central place** (like Elasticsearch, Grafana Loki or Splunk). With 200 servers, you can't log in to each one.
 
-## Metrics
+### Metrics
 
 A **metric** is a number measured over time: requests per second, error count, CPU use. Metrics are small and cheap to keep, so you keep them for months and draw them as graphs on **dashboards**.
 
@@ -60,7 +72,11 @@ A **metric** is a number measured over time: requests per second, error count, C
 | **Gauge** | A number that goes up and down | CPU %, memory used, queue length, open connections |
 | **Histogram** | How values are spread, counted in buckets | Request durations, so you can get p50, p95 and p99 |
 
-### The four golden signals
+#### How metrics are collected
+
+Each service keeps its counters in memory and shows them on an HTTP page, usually `/metrics`. **Prometheus** pulls (**scrapes**) that page on a timer, often every 15 seconds, and stores each number with its time. Many other tools work the other way: the service **pushes** its numbers to them.
+
+#### The four golden signals
 
 Google's SRE book says that if you can only watch four metrics for a service, watch these:
 
@@ -77,7 +93,7 @@ Latency should be watched as **percentiles**, not averages. See [Latency Percent
 
 **One trap: high cardinality.** Each metric can have **labels**, like `endpoint="/checkout"`. Every different label value creates a new series to store. A label like `userId` with millions of values creates millions of series and can break your metrics system. Put per-user details in **logs**, not metric labels.
 
-## Traces
+### Traces
 
 With many services, one user click can touch ten of them. When it is slow, which one is to blame? A **trace** answers that.
 
@@ -119,7 +135,7 @@ Each service reads the ID, records its spans under it, and passes it on. Later, 
 - **Head-based sampling** decides at the **start** of the request, for example "keep 1 in 100". It is cheap and simple, but at the start nobody knows yet which requests will be slow or fail.
 - **Tail-based sampling** decides at the **end**, once all spans of the trace have arrived. Now it can keep **all** slow or failed traces, plus 1% of normal ones. It costs more, because every span must be held for a short time until the choice is made. The OTel Collector (below) can do this.
 
-## How the three work together
+### How the three work together
 
 A typical problem hunt uses all three, in this order:
 
@@ -135,7 +151,7 @@ flowchart LR
 3. A **trace** of a slow request shows the "bank request" span takes 2.8 seconds.
 4. The **logs** for that trace ID show "connection timeout to bank API, retrying".
 
-## OpenTelemetry, in short
+### OpenTelemetry, in short
 
 Every tool used to need its own code in your app. **OpenTelemetry** (OTel) is one open standard for creating and sending logs, metrics and traces. You add its libraries once, and send the data to **any** tool you like. Changing tools later does not mean changing your code.
 
@@ -154,6 +170,27 @@ flowchart TB
 - **OTel libraries** exist for most languages. Many can record HTTP calls and database queries automatically.
 - The **Collector** is a service that receives the data, filters or samples it, and forwards it to the stores.
 
+## When to use it
+
+- **Every production service** needs at least **metrics with alerts** and **central logs**. Without them, users find your outages first.
+- **Traces** pay off once one request crosses **several services**, or a slow request has many steps.
+- **Structured logs** with a trace ID help as soon as you have more than one server.
+
+**Don't use it when:**
+
+- **Logging everything at DEBUG** in production. It costs a lot of storage and money. Turn DEBUG on for a short time when you need it.
+- **Alerting on every metric.** Too many alerts and people stop reading them. Alert on what users feel (errors, slow requests). See [SLI, SLO and SLA](./sli-slo-sla.mdx).
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Self-hosted open source** | Prometheus, Grafana, Loki and Jaeger, fed by OpenTelemetry | You want control and no license cost, and can run the servers yourself |
+| **Managed all-in-one service** | Datadog, New Relic, Grafana Cloud, Honeycomb: they store and show everything for you | You'd rather pay than run it. The bill grows with the amount of data you send |
+| **Your cloud's own tools** | AWS CloudWatch and X-Ray, Google Cloud Monitoring and Logging | You run on one cloud and want the simplest start |
+| **Error tracker** | Sentry: collects crashes with their stack traces | You mainly want to see exceptions in the app or the browser |
+| **Up/down checks only** | A pinger that calls your health URL every minute | A tiny site, where "is it up?" is all you need to know |
+
 ## In the real world
 
 **Tracing started at Google.** Google described its tracing system, **Dapper**, in a 2010 paper. It inspired open-source tools: Twitter built **Zipkin**, and Uber built **Jaeger**. Both are still widely used.
@@ -170,9 +207,11 @@ Observability is rarely the main topic, but it is a great "wrap-up" point, and t
 
 <Callout title="Remember this" type="success">
   - **Metrics** tell you **something is wrong**. **Traces** tell you **where**. **Logs** tell you **why**.
+  - **Why:** in production you can't debug live. Without this data, users find outages first, and you guess the cause.
   - Write **structured (JSON) logs** with a **trace ID**. Never log secrets.
   - Metric types: **counter** (only up), **gauge** (up and down), **histogram** (spread, for percentiles).
   - **Four golden signals:** latency, traffic, errors, saturation.
   - A **trace** = one request's journey. A **span** = one step. The ID travels in the `traceparent` header.
   - **OpenTelemetry** = one standard for all three, sent to any tool.
+  - **Alternatives:** self-hosted (Prometheus, Grafana), managed (Datadog), cloud tools (CloudWatch), Sentry for errors.
 </Callout>

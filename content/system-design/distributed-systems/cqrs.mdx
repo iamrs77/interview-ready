@@ -4,7 +4,7 @@ description: "Use one model to write data and another, shaped for the screen, to
 icon: Columns2
 ---
 
-## The idea
+## What is it?
 
 Think of a **restaurant**. The **kitchen** is organized for cooking: raw ingredients, stations, order tickets. The **menu** is organized for customers: dishes grouped by type, with pictures and prices. It is the same food, shown in two very different shapes. You would never hand customers the kitchen's ingredient list.
 
@@ -13,7 +13,7 @@ Think of a **restaurant**. The **kitchen** is organized for cooking: raw ingredi
 - A **command** changes data: "place order", "cancel order".
 - A **query** reads data: "show my orders", "search products".
 
-## Commands and queries
+### Commands and queries
 
 | | Command (write) | Query (read) |
 | --- | --- | --- |
@@ -22,15 +22,17 @@ Think of a **restaurant**. The **kitchen** is organized for cooking: raw ingredi
 | **Examples** | `PlaceOrder`, `CancelOrder` | `GetOrderHistory`, `SearchProducts` |
 | **Cares about** | Rules and correctness | Speed, and the right shape for the screen |
 
-## Why one model is not always enough
+## Why do we need it?
 
-Take an online shop. To keep writes correct, the data is stored in clean, separate tables: `orders`, `order_items`, `products`, `users`. (Splitting data like this is called **normalizing**.)
+Take an online shop. To keep writes correct, the data is stored in clean, separate tables: `orders`, `order_items`, `products`, `users`. (Splitting data like this is called **normalizing**. See [Normalization vs Denormalization](../databases/normalization.mdx).)
 
 But the "My orders" page needs data from all those tables at once: product names, pictures, totals, sorted by date. That means a big **join** across many tables on **every page view**, and reads happen far more often than writes. Search needs full-text matching, which SQL tables are not good at. A sales dashboard needs totals that are slow to calculate every time.
 
-The shape that is best for **writing** is often bad for **reading**.
+The shape that is best for **writing** is often bad for **reading**. With one model, you must pick one shape and live with its cost on the other side.
 
-## Separate read and write models
+## How it works inside
+
+### Separate read and write models
 
 ```mermaid
 flowchart TB
@@ -56,7 +58,7 @@ The read store can be anything that suits the query: Elasticsearch for search, R
 2. **Same database, separate read tables** or materialized views (saved query results the database can refresh).
 3. **Separate databases**, kept in sync by events.
 
-## Keeping them in sync
+### Keeping them in sync
 
 | Way | How it works |
 | --- | --- |
@@ -103,7 +105,11 @@ Because events can arrive twice, projectors should be **idempotent**. See [Idemp
 - Show the new order straight from the command's response, without reading it back.
 - For a few seconds after a write, read that user's data from the write side. This gives **read-your-writes**. See [Consistency Models](./consistency-models.mdx).
 
-## When it is worth it
+### When the projector stops
+
+The write side keeps working: commands still succeed. The events wait in Kafka (or in the database log, with CDC), and the read model simply gets **older**. When the projector comes back, it carries on from the last event it saved as done. It may see a few events again, which is fine because it is idempotent. Watch the **lag** (how far behind the read model is) and alert when it keeps growing.
+
+## When to use it
 
 | Worth it when... | Not worth it when... |
 | --- | --- |
@@ -112,6 +118,15 @@ Because events can arrive twice, projectors should be **idempotent**. See [Idemp
 | Reads need to grow separately from writes | The team is small. Two models means more code and more moving parts |
 
 Use CQRS for **one part** of a system that needs it, not for the whole app.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **One model with good indexes** | The same tables for reads and writes, with the right [indexes](../databases/indexes.mdx) | Simple CRUD, and reads are already fast enough |
+| **Denormalize a few fields** | Copy a field (like the product name) into the order row, so the read needs no join | Only one or two screens need a different shape |
+| **Read replicas** | Copies of the same database that serve reads. See [Replication](../databases/replication.mdx) | Reads are heavy, but they need the same shape as the writes |
+| **A cache** | Keep the results of hot queries in Redis. See [Redis](../caching/redis.mdx) | The same reads repeat, and slightly old data is fine |
 
 ## In the real world
 
@@ -129,9 +144,11 @@ Bring it up when reads and writes need very different shapes, like search, dashb
 
 <Callout title="Remember this" type="success">
   - **CQRS** = one model for **commands** (writes), another for **queries** (reads).
+  - **Why:** the shape best for **writing** (clean, normalized tables) is often bad for **reading** (big joins on every page view).
   - The read model is **ready-made** for the screen. No joins at read time.
   - Keep them in sync with **events** (outbox), **CDC**, or **event sourcing**.
   - The read side **lags**: eventual consistency. Show the user's own change from the response.
   - Projectors must be **idempotent**. Views can be **rebuilt** from events.
   - Not for simple CRUD. Use it only where reads and writes really differ.
+  - **Alternatives:** good indexes, a few denormalized fields, read replicas, a cache.
 </Callout>

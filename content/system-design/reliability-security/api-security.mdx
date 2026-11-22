@@ -4,11 +4,22 @@ description: "Common attacks on APIs, and how to stop them."
 icon: ShieldExclamationPoint
 ---
 
-## The idea
+## What is it?
 
 A bank teller checks every form before acting on it. Is the amount a real number? Does the account exist? Is this person allowed to take money from it? If someone writes "also give me the vault keys" at the bottom of the form, the teller ignores it.
 
 An API must act like that teller. **Never trust anything that comes from the client**: the body, the URL, the headers, the cookies. Anyone can send anything to your API with a tool like curl, skipping your app completely.
+
+## Why do we need it?
+
+- **An API is a public door.** Your app's screens are not the boundary. The API is. Anyone can call it directly, with any input, any ID and any number of times.
+- **Bots scan the internet all day** for open APIs, leaked keys and known bugs. You don't need to be famous to be attacked.
+- **APIs hand out data directly**, as neat JSON. One missing check can leak millions of records, as the stories below show.
+- **One bug is enough.** An attacker needs only one hole. Breaches cost money, fines and users' trust.
+
+## How it works inside
+
+### Layers of defense
 
 Good protection comes in **layers**, so one missed check is not the end:
 
@@ -22,7 +33,7 @@ flowchart TB
 
 A **WAF (web application firewall)** is a filter in front of your app that blocks requests that look like known attacks.
 
-## Checking every input
+### Checking every input
 
 Check every input **on the server**. Checks in the browser only make the app nicer to use. They don't protect anything.
 
@@ -59,7 +70,7 @@ const input = CreateOrder.parse(req.body);
 
 The same goes for what you send back. Don't return the whole user record, with its password hash and internal flags, and hope the app hides them. Choose the fields you return.
 
-## SQL injection
+### SQL injection
 
 **SQL injection** happens when user input is pasted into a SQL query as text, so the input can change the query itself.
 
@@ -85,7 +96,7 @@ const result = await db.query("SELECT * FROM users WHERE email = $1", [email]);
 
 **ORMs**, libraries that write the SQL for you, do this by default. Be careful with their "raw query" functions. The same idea applies to anything built by gluing strings together: shell commands, NoSQL queries and file paths.
 
-## XSS (cross-site scripting)
+### XSS (cross-site scripting)
 
 **XSS** happens when an attacker gets their own JavaScript to run in other people's browsers, on your site. For example, they post a comment with a `<script>` tag in it that sends the reader's session cookie to the attacker. Everyone who views the comment runs that script.
 
@@ -97,7 +108,7 @@ The fixes:
 
 For a related attack, where another website makes the user's browser call your API with the user's cookies, see [CSRF and CORS](./csrf-cors.mdx).
 
-## Rate limits and abuse
+### Rate limits and abuse
 
 Attackers don't only break in. They also overuse. Put limits on:
 
@@ -108,7 +119,7 @@ Attackers don't only break in. They also overuse. Put limits on:
 
 How to count and where to put the limits: [Rate Limiting](./rate-limiting.mdx).
 
-## Secrets and API keys
+### Secrets and API keys
 
 A **secret** is anything that grants access: database passwords, API keys for services like Stripe or AWS, the keys used to sign tokens.
 
@@ -147,6 +158,32 @@ When **you** give API keys to your customers:
 
 Numbers 1, 3 and 5 are all authorization mistakes: three of the top five come down to a missing "is this user allowed to do this?" check.
 
+## When to use it
+
+Every API needs the basics. What to stress depends on the API:
+
+- **Public APIs:** all the layers. WAF, gateway, rate limits, input checks, authorization on every object.
+- **Internal APIs between services:** still check who is calling (mTLS or service tokens) and check input. Don't trust a call just because it comes from inside.
+- **Partner APIs:** API keys with limited rights, quotas per partner, and logs of every call.
+- **APIs that fetch URLs or accept files:** guard against SSRF, and limit file size and type.
+
+**Don't use:**
+
+- **A blocklist, when an allowlist is possible.** Attackers find what you forgot to block.
+- **A WAF instead of fixing the code.** It blocks known patterns only. It is a shield, not a fix.
+- **API keys inside browser or mobile app code.** Anyone can read them there. Use a user login token instead.
+
+## Alternatives
+
+There is no substitute for securing an API. The real choice is **where** each protection lives:
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Keep it private** | The API is reachable only inside a private network, over a VPN, or from known IP addresses | Only your own services or a few partners call it. Still check input and identity |
+| **A managed API gateway** (AWS API Gateway, Kong, Apigee) | A ready-made gateway that handles TLS, tokens, API keys and rate limits | You'd rather not build those layers yourself. See [API Gateway](../hld-basics/api-gateway.mdx) |
+| **A managed WAF and bot protection** (Cloudflare, AWS WAF) | Filters at the edge for floods, known attacks and bots | The API is public and a target. Use it on top of safe code |
+| **Security testing** | Scanners, code checks and paid testers who try to break in | Before launch and regularly after, to find holes before attackers do |
+
 ## In the real world
 
 **Uber, 2016.** Attackers found cloud access keys in code that Uber engineers kept in a private GitHub repository. With those keys they downloaded data on about 57 million riders and drivers. Uber paid the attackers $100,000 to delete the data and didn't make the breach public for about a year.
@@ -163,9 +200,12 @@ Security usually gets one or two minutes. Go through the layers:
 
 <Callout title="Remember this" type="success">
   - **Never trust the client.** Check type, range, format and size on the server, with an allowlist.
+  - **Why:** the API is the real door. Anyone can call it directly, bots scan for holes all day, and one missing check can leak everything.
   - **SQL injection:** use parameterized queries. **XSS:** escape output, add CSP, use HttpOnly cookies.
   - Accept and return **only the fields you list**.
   - **Rate limit** logins, expensive calls and business flows. Cap page sizes.
   - **Secrets** go in a secrets manager, never in git. Give least privilege and rotate.
   - OWASP API risk number 1 is **BOLA**: always check the user may access this exact object.
+  - **Inside:** layers: WAF at the edge, gateway (TLS, tokens, rate limits), service (input checks, authorization, safe queries), database (least privilege).
+  - **Alternatives:** no substitute. Choose where each layer lives: private network, managed gateway, managed WAF, plus security testing.
 </Callout>

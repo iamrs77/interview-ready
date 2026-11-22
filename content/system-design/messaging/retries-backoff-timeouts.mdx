@@ -4,7 +4,7 @@ description: "How to retry failed calls without making things worse."
 icon: RefreshCw
 ---
 
-## The idea
+## What is it?
 
 You call a friend and they don't pick up.
 
@@ -14,11 +14,21 @@ You call a friend and they don't pick up.
 
 Now picture a shop that closes for 10 minutes. If 100 people all come back at **exactly** the same minute, the shop is packed again. It is much better if they come back at slightly **random** times. That randomness is called **jitter**.
 
-## Timeouts
+## Why do we need it?
+
+Every call over a network can fail in two ways: it gets an **error**, or it gets **no answer at all** (see [Why Distributed Systems Are Hard](../distributed-systems/why-distributed-is-hard.mdx)). Each tool fixes one problem:
+
+**Why every call needs a timeout:** without a timeout, a call to a stuck service can wait forever. Each waiting request holds a **thread** (one of the server's workers) and a connection. Soon they are all used up, and your service stops answering too, even for requests that don't need the stuck service. One slow service drags down everything that calls it. This chain reaction is called a **cascading failure**.
+
+**Why retry:** many failures are **short-lived**: a lost packet, a server restarting, a moment of overload. Trying again a moment later often works. Without retries, every tiny blip becomes an error the user sees.
+
+**Why backoff and jitter:** retries add load at the worst moment, when a service is already struggling. Retrying at once, and all at the same time, can knock it over again. Waiting longer each time, at random, gives it room to recover.
+
+## How it works inside
+
+### Timeouts
 
 A **timeout** is the longest time you will wait for an answer before you give up.
-
-**Why every call needs one:** without a timeout, a call to a stuck service can wait forever. Each waiting request holds a **thread** (one of the server's workers) and a connection. Soon they are all used up, and your service stops answering too, even for requests that don't need the stuck service. One slow service drags down everything that calls it. This chain reaction is called a **cascading failure**.
 
 There are two kinds:
 
@@ -36,11 +46,11 @@ const response = await fetch("https://payments.internal/charge", {
 });
 ```
 
+**A timeout doesn't stop the server.** When the timer runs out, the client stops waiting and closes its side. But the server doesn't know you gave up, and may still finish the work. So after a timeout, the work **may or may not have happened**. That is why a retried call must be safe to repeat.
+
 **Use one deadline for the whole request.** If the user's request has 2 seconds in total, and Service A has already used 1.5 seconds, then Service B gets only the 0.5 seconds left. There is no point in B working for 3 seconds on an answer nobody is waiting for. gRPC lets you pass a deadline along with each call for this.
 
-## Retries
-
-Many failures are **short-lived**: a lost packet, a server restarting, a moment of overload. Trying again a moment later often works.
+### Retries
 
 | Retry these | Don't retry these |
 | --- | --- |
@@ -66,7 +76,7 @@ If the database is struggling, one user action can turn into 3 × 3 × 3 = **27 
 
 5. **Use a retry budget.** Allow retries only while they are a small share of all requests, like 10%. When things are badly broken, retries stop instead of piling on.
 
-## Exponential backoff and jitter
+### Exponential backoff and jitter
 
 - **Backoff** means waiting between retries.
 - **Exponential** backoff **doubles** the wait each time: 100 ms, 200 ms, 400 ms, 800 ms...
@@ -138,7 +148,13 @@ The wait times with `base = 100` ms and `cap = 10` seconds:
 
 If the server sends a `Retry-After` header, wait **at least** that long.
 
-## When not to retry
+## When to use it
+
+- **Timeouts:** on **every** network call: databases, caches, HTTP and gRPC calls, other companies' APIs.
+- **Retries:** for calls that are **safe to repeat** and fail for short-lived reasons, at **one** layer.
+- **Backoff with jitter:** whenever you retry, and whenever many clients may reconnect at once, like phones after a server restart or queue consumers after an outage.
+
+**When not to retry:**
 
 - **Client errors** (`4xx`, except `408` and `429`). The same wrong request gives the same error.
 - **Not safe to repeat**, and there is no idempotency key.
@@ -146,6 +162,18 @@ If the server sends a `Retry-After` header, wait **at least** that long.
 - **The service keeps failing.** After many failures in a row, stop calling it for a while and fail fast. That is a [Circuit Breaker](../reliability-security/circuit-breaker.mdx).
 - **At every layer.** Pick one layer: the one **just above** the service that is failing (the Google SRE book's advice), or the queue consumer.
 - **Forever, in a queue consumer.** After a few failed tries, move the message to a [Dead-Letter Queue](./dead-letter-queues.mdx) so it can't block the others.
+
+## Alternatives
+
+Other ways to deal with a failing or slow call:
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Circuit breaker** | After many failures, stop calling the service for a while and fail fast | The service is down, not just blipping. See [Circuit Breaker](../reliability-security/circuit-breaker.mdx) |
+| **Hedged requests** | If the first call is slow, send a second copy to another server and use whichever answers first | Slow outliers hurt, and the call is safe to repeat, like a read |
+| **Queue + dead-letter queue** | Put the work in a queue. The consumer retries later, and gives up into a DLQ | The caller doesn't need the answer now. See [Dead-Letter Queues](./dead-letter-queues.mdx) |
+| **Fallback** | Return a cached, default or simpler answer instead of an error | A slightly worse answer beats no answer. See [Graceful Degradation](../reliability-security/graceful-degradation.mdx) |
+| **Load shedding** | The busy server rejects extra work early, with `429` or `503`, so it stays up | You own the server. See [Backpressure](../reliability-security/backpressure.mdx) and [Rate Limiting](../reliability-security/rate-limiting.mdx) |
 
 ## In the real world
 
@@ -163,9 +191,12 @@ When a design calls another service or a third party, say the timeout, the retri
 
 <Callout title="Remember this" type="success">
   - **Every** network call needs a **timeout**. A stuck call without one can take down the caller.
+  - **Why:** calls fail with an error or with **no answer**. Timeouts stop the waiting, retries fix short blips, backoff and jitter keep retries from making it worse.
+  - **Inside:** a timeout only stops the **client** waiting. The server may still finish the work, so retries must be **safe to repeat**.
   - Retry **timeouts, 5xx and 429**. Don't retry other **4xx**.
   - Only retry what is **safe to repeat**. Use an **idempotency key**.
   - **Exponential backoff:** 100 ms, 200, 400, 800... up to a **cap**.
   - **Jitter** = random waits, so clients don't retry in **waves**.
   - Retry at **one layer**, limit the tries, and use a **circuit breaker** when a service keeps failing.
+  - **Alternatives:** circuit breaker, hedged requests, a queue with a DLQ, a fallback answer, load shedding.
 </Callout>

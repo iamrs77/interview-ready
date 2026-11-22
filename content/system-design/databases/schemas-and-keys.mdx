@@ -4,7 +4,7 @@ description: "How to shape your data: tables, primary keys, foreign keys and rel
 icon: KeySquare
 ---
 
-## The idea
+## What is it?
 
 Think of the **contacts app** on your phone. Each contact is a **row**. Name, phone and email are the **columns**. The whole list is a **table**. The form you fill in for a new contact, with its fixed fields, is the **schema**: the shape every row must follow.
 
@@ -12,7 +12,21 @@ Now think of a **library**. Every book has a unique number on its spine. Every m
 
 That is how a database links data. Each row gets a unique ID (a **primary key**). Other rows point to it by storing that ID (a **foreign key**).
 
-## Tables, rows and columns
+## Why do we need it?
+
+A database with no schema and no keys accepts anything. Over time, that goes wrong in three ways:
+
+- **Bad data gets in.** An empty email, a price saved as text, a negative stock. Every app, script and service that writes to the table can make a mistake, and the next reader trips over it.
+- **You can't point to one row.** Two customers are both called "Asha Rao". Without a unique ID, an order can't say which one placed it.
+- **Links break.** A user is deleted, but their orders still point to them. These are called **orphan rows**: rows that point to something that no longer exists.
+
+Copying the whole user into every order, instead of pointing to it, causes its own bugs when the user changes. See [Normalization](./normalization.mdx).
+
+A schema and keys move these checks **into the database**. It checks every write, from every app, so one buggy code path can't break the data.
+
+## How it works inside
+
+### Tables, rows and columns
 
 Each column has a **type**, and can have **rules** (called **constraints**). The database refuses data that breaks the rules.
 
@@ -27,7 +41,7 @@ Common PostgreSQL types: `BIGINT` (whole numbers), `TEXT`, `BOOLEAN`, `NUMERIC` 
 
 **Store money as whole cents** (`INTEGER` or `BIGINT`), or as `NUMERIC`. Never as a floating-point number, because those can't store values like 0.10 exactly.
 
-## Primary keys
+### Primary keys
 
 A **primary key** is the column (or columns) that identifies one row. It must be:
 
@@ -49,7 +63,7 @@ Most tables use a made-up ID that has no meaning, called a **surrogate key**. Tw
 
 When many servers must create IDs without a central counter, see [Distributed ID Generation](../distributed-systems/distributed-id-generation.mdx).
 
-## Foreign keys
+### Foreign keys
 
 A **foreign key** is a column that points to the primary key of another table. `orders.user_id` points to `users.id`.
 
@@ -66,7 +80,7 @@ The database then protects the link:
 
 Foreign keys only work **inside one database**. Once data is split across [shards](./partitioning-sharding.mdx) or across microservices, the app must check the links itself.
 
-## One-to-one, one-to-many, many-to-many
+### One-to-one, one-to-many, many-to-many
 
 | Relationship | Shop example | How to store it |
 | --- | --- | --- |
@@ -85,6 +99,14 @@ erDiagram
 ```
 
 How to read the line ends: `||` means "exactly one", `o|` means "zero or one", `o{` means "zero or more", and `|{` means "one or more". So: a user places zero or more orders, and each order has one or more items.
+
+### How the database checks the rules
+
+- **Types, `NOT NULL` and `CHECK`** are checked on each row as it is written. One bad row fails the whole statement.
+- **Primary keys and `UNIQUE`** are backed by a **unique index** (a B-tree, see [Indexes](./indexes.mdx)). When a row is inserted, its key is added to that index, and the database checks the value is not already there. If it is, you get an error like `duplicate key value violates unique constraint`.
+- **Foreign keys, on insert:** the database looks up the `user_id` in the primary key index of `users`. In PostgreSQL, it also puts a light lock on that user row until the transaction ends, so nobody can delete the user halfway.
+- **Foreign keys, on delete:** the database must search `orders` for rows that still point to the user. Without an index on `orders.user_id`, that search reads the whole table.
+- **Auto-increment IDs** come from a counter (a **sequence** in PostgreSQL). A number taken by a transaction that later rolls back is never given out again, so **IDs can have gaps**. Never use them to count rows.
 
 ## Writing a simple schema for a design
 
@@ -148,6 +170,29 @@ Two things to notice:
 - `order_items` uses **two columns together** as its primary key. This is called a **composite key**. The same product can't appear twice in one order.
 - `order_items.price_cents` copies the price **at the moment of purchase**. If the product's price changes tomorrow, old orders must not change. See [Normalization](./normalization.mdx).
 
+## When to use it
+
+Use a strict schema, keys and constraints for:
+
+- **Core business data** in a SQL database: users, orders, payments, bookings.
+- **Rules that must never break:** unique emails, stock never below zero, every order has a user.
+- **Data that many apps or services write.** The database is the one place that checks them all.
+
+**Don't use it when:**
+
+- **Every item has different fields**, like product specs. One column per field would leave most columns empty.
+- **A foreign key would point across shards or services.** It can't work there (see Foreign keys above).
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Schema-less documents** (MongoDB, DynamoDB) | No fixed columns. The app decides the shape of each item | Items have very different fields, and you read each one as a whole. See [SQL vs NoSQL](./sql-vs-nosql.mdx) |
+| **A `JSONB` column** | Fixed columns for the common fields, plus one JSON column for the rest | Most fields are the same, but some vary per item |
+| **Natural key** | A real-world value as the primary key, like a country code (`IN`, `US`) | The value is truly unique and never changes |
+| **Time-sorted IDs** (UUID v7, Snowflake IDs) | IDs made on any server, but sorted by time | Many servers create IDs, and you want new rows to land at the end of the index. See [Distributed ID Generation](../distributed-systems/distributed-id-generation.mdx) |
+| **Checks in app code** | No foreign keys. The app checks the links, and a cleanup job finds broken ones | Data is split across shards or services |
+
 ## In the real world
 
 **Basecamp ran out of numbers.** In November 2018, Basecamp 3 went read-only for several hours. An ID column in one big table used a 32-bit integer, and it reached the largest value that type can hold: 2,147,483,647. New rows could not get an ID. This is why `BIGINT` is the safe default for IDs: it is 64-bit, with a largest value of about 9.2 billion billion (9.2 × 10¹⁸), so it never runs out in practice.
@@ -162,9 +207,12 @@ You don't need full SQL. After the API, write the main tables with their keys, a
 
 <Callout title="Remember this" type="success">
   - A **schema** is the fixed shape of your tables: columns, types and rules.
+  - **Why:** without them, bad data, look-alike rows and **broken links** get in. The database checks **every write**, from every app.
   - **Primary key:** unique, never empty, never changes. Use `BIGINT` or a UUID, not an email.
   - **Foreign key:** points to another table's primary key. The database protects the link.
   - **One-to-many:** foreign key on the "many" side. **Many-to-many:** a join table.
   - Store **money as whole cents**, never as a float.
   - Foreign keys don't work **across shards or services**. The app must check there.
+  - **Inside:** primary keys and `UNIQUE` use a **unique index**. A foreign key check looks up the parent row. IDs can have **gaps**.
+  - **Alternatives:** schema-less documents, a `JSONB` column, natural keys, time-sorted IDs (UUID v7), checks in app code.
 </Callout>

@@ -4,7 +4,7 @@ description: "One big app, or many small services? The good and bad sides of eac
 icon: Boxes
 ---
 
-## The idea
+## What is it?
 
 A **monolith** is one app that does everything. All the code for users, orders, payments and emails lives in one codebase. It is built together and deployed together, as one unit.
 
@@ -12,7 +12,18 @@ A **monolith** is one app that does everything. All the code for users, orders, 
 
 Think of a single restaurant kitchen versus a food court. A restaurant has one kitchen, one team and one menu. It is easy to run while it is small, because everything is in one room. A food court has many small stalls, each with its own cook, menu and opening hours. The pizza stall can change its menu without asking the noodle stall. But now someone has to run the shared seating and cleaning, and sort out who is in charge of what.
 
-## Monolith: one app, one deploy
+## Why do we need it?
+
+How you split the code decides **how fast teams can ship, how far a failure spreads, and what you can scale on its own**. Both shapes hurt when they don't fit:
+
+- **A monolith that grew too big** becomes slow to change. A hundred engineers share one codebase and one release, and one bad change can take everything down.
+- **Microservices built too early** bury a small team in network calls, broken transactions and many things to deploy and watch.
+
+Microservices mostly solve a **people problem**: many teams working without blocking each other. There is an old rule called **Conway's Law**: a system's design ends up looking like the way the company's teams talk to each other. So the real question is not which shape is better, but which one fits your team and your load **today**.
+
+## How it works inside
+
+### Monolith: one app, one deploy
 
 ```mermaid
 flowchart TB
@@ -40,7 +51,7 @@ A monolith can still scale horizontally: you run many copies of the **whole app*
 - **You scale everything together.** If only search is busy, you still have to copy the whole app.
 - **One tech stack.** It is hard to use a different language or database for one part.
 
-## Microservices: many small services
+### Microservices: many small services
 
 ```mermaid
 flowchart TB
@@ -73,6 +84,52 @@ Each service **owns its own data**. No other service reads its database directly
 
 How to split services and how they should talk is covered in [Microservices in Practice](../advanced-components/microservices-patterns.mdx).
 
+### One order, two ways
+
+A user places an order: save the order, reserve the stock, take the payment, send an email.
+
+**In a monolith:**
+
+1. The order code calls `inventory.reserve()` and `payments.charge()` as **normal function calls**, in the same process.
+2. Saving the order and reserving the stock go into **one database transaction**. If the payment fails, the code rolls the transaction back, and both are undone.
+3. The email is sent from the same app, or from a background job.
+
+**In microservices:**
+
+1. The order service saves the order in **its own** database.
+2. It calls the inventory service, then the payment service, **over the network** (HTTP or gRPC). Each call can be slow, time out, or fail.
+3. If the payment fails after the stock was reserved, there is no shared transaction to undo it. The order service must call inventory again to **release** the stock. This is the [Saga Pattern](../distributed-systems/saga-pattern.mdx).
+4. It puts an "order placed" event on a **queue**, and the email service sends the email when it can.
+
+Same feature, but every arrow that was a function call is now a network call that can fail.
+
+## When to use which
+
+| Pick a monolith when... | Pick microservices when... |
+| --- | --- |
+| The product is new and still changing | Many teams need to ship on their own |
+| The team is small | Parts have very different load, like search vs settings |
+| You don't yet know where the clean lines between parts are | Parts need different tech, or different reliability |
+| Building fast matters most | You already have good automation: deploys, monitoring, tracing |
+
+There is a middle way: the **modular monolith**. It is one app with one deploy, but the code inside is split into clear modules with strict rules about who may call whom. You get the simple life of a monolith, and you can still pull a module out into its own service later.
+
+Split services along team lines (see **Conway's Law** above).
+
+**Don't split into microservices when:**
+
+- **It is only because big companies do it.** Their problems (thousands of engineers) are not yours.
+- **The parts share most of their data.** If every request needs data from three services, they are really one service, cut apart by a network.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Modular monolith** | One app and one deploy, split inside into modules with strict rules | A small or mid-size team that wants clean lines without network calls. See above |
+| **A few larger services** | A handful of services split by big business areas, not dozens of tiny ones | You need some independence, without the cost of running many services |
+| **SOA** | A few large shared services that talk through a central bus (ESB) | Big companies whose older systems are already built this way. See below |
+| **Serverless functions** | Small functions the cloud runs for each request or event, like AWS Lambda | Spiky or rare work, event handlers, glue code. Many tiny pieces passing data can get costly (see Prime Video below) |
+
 ## Three-tier and SOA, in short
 
 **Three-tier architecture** is the classic way to split an app into **layers**:
@@ -95,19 +152,6 @@ Microservices are like a lighter version of SOA: smaller services, each owned by
 | **They talk through** | Function calls | A central bus (ESB) | HTTP, gRPC or simple queues |
 | **Data** | One database | Often shared | Each service has its own |
 | **Deploy** | Everything together | Per service, often planned together | Each service on its own |
-
-## When to pick each
-
-| Pick a monolith when... | Pick microservices when... |
-| --- | --- |
-| The product is new and still changing | Many teams need to ship on their own |
-| The team is small | Parts have very different load, like search vs settings |
-| You don't yet know where the clean lines between parts are | Parts need different tech, or different reliability |
-| Building fast matters most | You already have good automation: deploys, monitoring, tracing |
-
-There is a middle way: the **modular monolith**. It is one app with one deploy, but the code inside is split into clear modules with strict rules about who may call whom. You get the simple life of a monolith, and you can still pull a module out into its own service later.
-
-Microservices mostly solve a **people problem**: many teams working without blocking each other. There is an old rule called **Conway's Law**: a system's design ends up looking like the way the company's teams talk to each other. Split services along team lines.
 
 ## Moving from one to the other
 
@@ -169,7 +213,10 @@ Most interview designs show a few services, because that makes each part easy to
 <Callout title="Remember this" type="success">
   - **Monolith** = one app, one deploy. Simple and fast to build, but hard to change as it grows.
   - **Microservices** = many small services, each with its own data and deploy. Teams move freely, but the network makes everything harder.
+  - **Why:** the split decides how fast teams ship and how failures spread. Microservices mostly solve a **people problem** (Conway's Law).
+  - **Inside:** monolith = function calls and one transaction. Microservices = network calls, own databases, sagas and queues.
   - **Three-tier** = split by layer. **SOA** = a few large shared services and a central bus.
   - Start with a **modular monolith**. Split when **teams or load** really need it.
   - Move piece by piece with the **strangler pattern**, never with a big rewrite.
+  - **Alternatives:** modular monolith, a few larger services, SOA, serverless functions.
 </Callout>

@@ -4,7 +4,7 @@ description: "Limit how many requests a user can send, and the five common ways 
 icon: Timer
 ---
 
-## The idea
+## What is it?
 
 A popular ride at an amusement park takes **20 people every 5 minutes**. When the line is long, the staff don't squeeze 100 people onto the ride. They ask people to wait. Everyone who rides has a good ride, and the ride doesn't break.
 
@@ -12,13 +12,27 @@ A **rate limiter** does the same for an API. It counts how many requests each us
 
 This page is about **how to count**. The full design of a rate limiting system is its own interview question: [Design a Rate Limiter](../questions/rate-limiter.mdx).
 
-## Why rate limit
+## Why do we need it?
+
+Every server, database and paid service behind your API can handle only **so much work per second**. Without a limit, nothing stops one client from using all of it, by mistake or on purpose. Then everyone else gets slow pages or errors.
 
 - **Protect the system.** A buggy script or a sudden spike can't overload your servers and hurt everyone else.
 - **Stop abuse.** Slow down attackers guessing passwords, bots copying all your data, or spam accounts posting thousands of messages.
 - **Fairness.** One heavy user can't use up the capacity everyone shares.
 - **Control cost.** If each request costs you money, such as a paid SMS or AI service behind it, a limit caps the bill.
 - **Paid plans.** A free plan gets 100 requests an hour, a paid plan gets 10,000.
+
+## How it works inside
+
+### Each request, step by step
+
+1. **Build a key** from who is asking, and sometimes what they call: `rate:user42:login`.
+2. **Read the state** for that key: tokens left, or the count in this window. It lives in memory, or in a shared store like Redis.
+3. **Update it** with the algorithm (refill tokens, or add 1 to the count).
+4. **Decide.** Under the limit: pass the request on. Over: return `429`.
+5. **Expire old keys** with a TTL, so memory doesn't grow forever.
+
+Steps 2 and 3 must happen as **one atomic step**. If two servers both read "99 of 100" and both allow, the user gets 101. In Redis, `INCR` is atomic, and a small **Lua script** can read, check and update in one step.
 
 ### What to count by
 
@@ -219,6 +233,31 @@ The API gateway is the usual answer, often with a simple per-IP limit at the edg
 
 **Rate limiting is not backpressure.** A rate limit is a fixed rule set in advance for each user. [Backpressure](./backpressure.mdx) reacts to how busy the system is right now.
 
+## When to use it
+
+- **Every public API**, per user or per API key.
+- **Login, password reset and one-time codes:** low limits per user **and** per IP, to slow down guessing.
+- **Expensive endpoints:** search, file exports, anything that calls a paid SMS or AI service.
+- **Paid plans** with different limits per plan.
+- **Your own calls to a partner API** that limits you. Limit yourself before they reject you.
+
+**Don't use it when:**
+
+- **The overload comes from many normal users** at once. Per-user limits don't help. Add capacity, or shed load with [Backpressure](./backpressure.mdx).
+- **It is your only defense against a big flood (DDoS).** Huge floods must be stopped at the edge (CDN, firewall) before they reach your gateway.
+- **The work can wait.** Put it in a queue and let workers take it at their own pace.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Backpressure / load shedding** | Reject work based on how busy the system is **right now** | You need to protect the system from total overload, not police one user |
+| **Concurrency limit** | Cap how many requests a user has **running at the same time** | Some requests are slow and heavy. A count per minute doesn't capture their cost |
+| **Quotas** | A total per day or per month, often tied to billing | You sell usage ("10,000 calls a month") |
+| **A queue** | Accept everything and process it at a steady pace | The client doesn't need an answer right away |
+| **Bot checks** (CAPTCHA, a WAF) | Tell real people from scripts, block known bad traffic | The problem is abuse (scraping, password guessing), not volume |
+| **Autoscaling** | Add servers when load grows | The traffic is real and welcome. See [Scalability](../hld-basics/scalability.mdx) |
+
 ## In the real world
 
 **Stripe** wrote in 2017 about the rate limiters protecting its API. The main one is a **token bucket** for each user, kept in Redis. A second one limits how many requests a user can have **running at the same time**.
@@ -239,9 +278,12 @@ Rate limiting comes up in almost every design ("how do you protect the API?"), a
 
 <Callout title="Remember this" type="success">
   - Rate limiting protects against overload and abuse, and keeps things fair. Return **429** with `Retry-After`.
+  - **Why:** every system can do only so much work per second. Without a limit, one client can use all of it.
+  - **Inside:** build a key, read the state, update it, decide. Read and update in **one atomic step** (`INCR` or a Lua script).
   - **Token bucket:** tokens refill at a steady rate, bursts are fine up to the bucket size. The usual default.
   - **Leaky bucket:** a queue emptied at a fixed speed, so the output is smooth.
   - **Fixed window:** one counter per minute. Simple, but allows **2× bursts** at the window edges.
   - **Sliding window log** is exact but stores every request. **Sliding window counter** is a cheap, close estimate.
   - Put it in the **API gateway**, with counters in **Redis** shared by all servers.
+  - **Alternatives:** backpressure, concurrency limits, quotas, a queue, bot checks, autoscaling.
 </Callout>

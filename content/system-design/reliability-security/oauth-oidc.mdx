@@ -4,7 +4,7 @@ description: "\"Log in with Google\", explained simply."
 icon: LogIn
 ---
 
-## The idea
+## What is it?
 
 Some cars come with a **valet key**. You give it to the parking attendant. It starts the car and drives it, but it can't open the boot or the glove box. You never hand over your main key.
 
@@ -12,9 +12,9 @@ Some cars come with a **valet key**. You give it to the parking attendant. It st
 
 **OpenID Connect (OIDC)** is a thin layer on top of OAuth that adds **login**: it tells the app **who you are**. Together they power every "Log in with Google" button.
 
-## The problem OAuth solves
+## Why do we need it?
 
-Before OAuth, if an app wanted your contacts from your email account, it asked for your **email password** and logged in as you. This was a bad idea:
+**The problem OAuth solves.** Before OAuth, if an app wanted your contacts from your email account, it asked for your **email password** and logged in as you. This was a bad idea:
 
 - The app could do **anything**: read all your mail, send mail as you, even change your password.
 - The app **stored your password**. If the app got hacked, so did your email.
@@ -22,7 +22,9 @@ Before OAuth, if an app wanted your contacts from your email account, it asked f
 
 With OAuth, you log in **on Google's own page**. Google asks "SlotFinder wants to see your calendar. Allow?" Then it gives the app a **token** that can only do that. You can take it back any time in your Google account settings, without changing your password.
 
-## The four roles
+## How it works inside
+
+### The four roles
 
 | Role | What it is | In our example |
 | --- | --- | --- |
@@ -33,7 +35,7 @@ With OAuth, you log in **on Google's own page**. Google asks "SlotFinder wants t
 
 **Scopes** are the exact permissions the app asks for, like "read your calendar" or "see your email address". The user sees them on the **consent screen**, the "Allow?" page. A good app asks for as few as it can.
 
-## The authorization code flow, step by step
+### The authorization code flow, step by step
 
 This is the flow almost every web and mobile app uses. Example: you click **"Log in with Google"** on SlotFinder.
 
@@ -122,7 +124,7 @@ Someone who steals the code doesn't have the verifier, so the code is useless to
 | **Device code** | The device has no easy way to type | A smart TV shows a short code, and you enter it on your phone |
 | **Implicit** and **password** | Old flows | Don't use them anymore |
 
-## Access tokens and refresh tokens
+### Access tokens and refresh tokens
 
 | | Access token | Refresh token |
 | --- | --- | --- |
@@ -148,7 +150,7 @@ An access token can be a random string that the API looks up, or a **JWT** that 
 }
 ```
 
-## OpenID Connect: adding login
+### OpenID Connect: adding login
 
 OAuth answers "**what can this app access?**" It doesn't answer "**who is this user?**" An access token says "this token may read the calendar", and the app isn't meant to look inside it. Before OIDC, every company bolted login onto OAuth in its own way, and some of those ways were not safe.
 
@@ -191,6 +193,30 @@ The app must **check the signature** with Google's public keys, and check `iss`,
 
 OIDC also gives you **single sign-on (SSO)**: log in once, and get into many apps. At work, you log in to your company's identity provider, like Okta or Microsoft Entra ID, and then open email, chat and HR apps without logging in again.
 
+## When to use it
+
+- **"Log in with Google / Apple / Microsoft"** in your app: OIDC.
+- **Your app needs a user's data on another service**: their calendar, their GitHub repos, their Google Drive files. OAuth.
+- **Single sign-on at work**: one company login for many apps.
+- **Your own API is used by other companies' apps.** You become the authorization server, so users can grant those apps limited access.
+- **A service calls an API as itself**: the client credentials flow.
+
+**Don't use it when:**
+
+- **As login on its own (plain OAuth).** An access token says what the app may access, not who the user is. For login, use OIDC and its **ID token**.
+- **You plan to build your own authorization server from scratch.** It is easy to get wrong. Use a product (Auth0, Okta, Cognito, Keycloak) or a well-known library.
+- **It is a simple first-party app with its own accounts.** A normal login with a session cookie can be enough.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Your own login + sessions** | Username and password checked by your app, then a session cookie | Only your own app, with your own users. See [Cookies, Sessions and JWT](../foundations/cookies-sessions-jwt.mdx) |
+| **API keys** | One long secret per app, sent with every request | A developer calls an API with their own account. No user is giving consent |
+| **SAML** | An older single sign-on standard, built on XML | Company SSO with older business apps that only speak SAML |
+| **Passkeys** | Login with a key stored on your device, unlocked by a fingerprint or PIN | You want login without passwords that can't be phished. Often used together with OIDC |
+| **Sharing the password** | The app logs in as you, with your password | Never. This is the problem OAuth was made to solve |
+
 ## In the real world
 
 **Everywhere.** "Sign in with Google", "Sign in with Apple" and "Sign in with Microsoft" are all built on OAuth 2.0 and OpenID Connect. OAuth 2.0 became a standard in 2012, and OpenID Connect in 2014.
@@ -206,8 +232,10 @@ Don't design your own login system unless you are asked to. Say:
 <Callout title="Remember this" type="success">
   - **OAuth 2.0** = limited access to your data that you can take back, without sharing your password. A valet key.
   - **OIDC** = OAuth + login. It adds the **ID token**, a JWT that says who you are.
+  - **Why:** before OAuth, apps asked for your password and could do anything as you. A token gives **limited** access you can **take back**.
   - **Authorization code flow:** go to the provider, user clicks Allow, a code comes back, the server swaps the code for tokens.
   - Use **PKCE** for every app, and `state` to block CSRF.
   - **Access token:** short-lived, sent to the API. **Refresh token:** long-lived, kept safe, gets new access tokens.
   - Check the ID token's signature, `iss`, `aud` and `exp`. Identify the user by `sub`.
+  - **Alternatives:** your own login with sessions, API keys, SAML, passkeys. Never share the password.
 </Callout>

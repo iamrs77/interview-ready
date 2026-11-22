@@ -4,7 +4,7 @@ description: "Long flows across services, where each step commits on its own and
 icon: Workflow
 ---
 
-## The idea
+## What is it?
 
 Think of a **travel agent** booking your trip: a flight, then a hotel, then a rental car.
 
@@ -14,7 +14,17 @@ That is a **saga**: a long task split into steps. Each step is a normal, local t
 
 Unlike [two-phase commit](./distributed-transactions-2pc.mdx), nobody waits and nothing stays locked across services. The price: for a short time, the system is **in between** (flight booked, hotel not yet).
 
-## A trip-booking saga
+## Why do we need it?
+
+- **Each service has its own database.** One user action, like booking a trip, changes data in the flight, hotel, payment and car services. No single database transaction can cover all of them.
+- **Two-phase commit doesn't fit.** It holds locks across services while it waits, gets stuck if the coordinator dies, and an outside API (a payment provider, an airline) can't "prepare". See [Distributed Transactions and 2PC](./distributed-transactions-2pc.mdx).
+- **Doing nothing leaves a mess.** If the car step fails, the card is charged and the flight is booked for a trip that will never happen.
+
+A saga accepts that each step commits on its own, and makes sure every failure has a planned way back.
+
+## How it works inside
+
+### A trip-booking saga
 
 ```mermaid
 flowchart TB
@@ -34,7 +44,7 @@ flowchart TB
 | 3 | Payment | Charge the card | Refund the card |
 | 4 | Car | Rent a car | Cancel the car. Even the last step needs one: its reply can be lost |
 
-## Undo steps (compensating actions)
+### Undo steps (compensating actions)
 
 The official name for an undo step is a **compensating action**. A few rules make them work:
 
@@ -154,6 +164,28 @@ Two details matter here:
 - **The undo is added before its step.** Say `chargeCard` works, but its reply is lost and the call times out. If the refund were only added after a successful call, it would never run, and the customer would pay for a cancelled trip. So each undo is added first, and every undo must be **safe even if its step never happened**: "refund the payment for trip 42" does nothing if there is no payment. This holds for the **last** step too: if `rentCar` times out, the car may be rented, so `cancelCar` must be in the list.
 - **Each undo is retried until it works.** A plain `await step()` would stop at the first failing undo and leave the rest undone. Undo steps must succeed in the end, so they are retried, and they are idempotent, so retries are safe.
 
+## When to use it
+
+- **One user action changes data in several services:** checkout, booking a trip, moving money between two services.
+- **A step calls an outside API** that can't take part in a transaction, like a payment provider.
+- **The flow is long:** seconds, hours or days, like an order that waits for the warehouse.
+
+**Don't use it when:**
+
+- **All the data is in one database.** Use a normal transaction. It is simpler and fully safe.
+- **Users must never see the in-between state.** A saga has no isolation, so others can see "flight booked, hotel not yet".
+- **A middle step can't be undone, and can't be moved to the end.**
+- **You only need to save data and publish one event.** That is the [Outbox Pattern](./outbox-pattern.mdx), not a saga.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **One database transaction** | Keep the data in one database and use `BEGIN ... COMMIT` | The data can live in one service. Always the simplest |
+| **Two-phase commit** | One all-or-nothing commit across databases, with locks held during the vote | A few databases inside one system, with short transactions |
+| **Try-Confirm-Cancel (TCC)** | Each service first **holds** the resource (try), then confirms or releases it | You want "reserved, then confirmed" instead of "done, then undone", like holding a seat |
+| **Fix it later (reconciliation)** | Let steps run. A nightly job or a person finds and fixes the rare mismatch | Failures are rare and cheap to fix by hand |
+
 ## In the real world
 
 **The idea is from 1987.** The word "saga" comes from a 1987 paper by Hector Garcia-Molina and Kenneth Salem. It described long transactions split into steps, each with a compensating step. Microservices made the idea popular again.
@@ -170,10 +202,12 @@ Use a saga whenever one user action changes data in several services, like check
 
 <Callout title="Remember this" type="success">
   - A **saga** = a long flow split into local steps that each **commit right away**.
+  - **Why:** one action spans many services and databases. No single transaction covers them, and 2PC locks and blocks.
   - If a step fails, run **compensating actions** (undo steps) for earlier steps, in **reverse order**.
   - Undo is a **new action** (refund), not an eraser. It must be **idempotent** and retried until it works.
   - Add each undo **before** its step runs, even for the last step: a lost reply doesn't mean it failed.
   - Put steps that **can't be undone** (emails, shipping) **last**, and retry them until they work.
   - **Choreography** = services react to events. **Orchestration** = one conductor. Orchestration is easier to follow.
   - Tools: **Temporal**, AWS Step Functions, Conductor OSS (first built at Netflix).
+  - **Alternatives:** one database transaction, 2PC, Try-Confirm-Cancel, nightly reconciliation.
 </Callout>

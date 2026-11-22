@@ -4,15 +4,17 @@ description: "Store each fact once, or copy data to make reads faster?"
 icon: Shrink
 ---
 
-## The idea
+## What is it?
 
 Think of your **address book**. You write a friend's address in it **once**. On your list of people to send birthday cards to, you only write their name. When the friend moves, you fix **one** place. This is **normalization**: each fact is stored once, and everything else points to it.
 
 Now imagine you write the full address on every list: the birthday list, the wedding list, the holiday list. Reading a list is faster, because you don't have to look anything up. But when your friend moves, you must fix every list. Miss one, and a card goes to the old house. This is **denormalization**: you copy data to make reads faster, and you pay for it when the data changes.
 
-## Normalization: no repeated data
+## Why do we need it?
 
-Here is an orders table where everything is stored in one place:
+Both answer one question: **where should each fact live?** Get it wrong in either direction, and something hurts.
+
+**Store a fact many times, and changes go wrong.** Here is an orders table where everything is stored in one place:
 
 | order_id | user_email | user_name | product | product_price |
 | --- | --- | --- | --- | --- |
@@ -25,6 +27,14 @@ Asha's email and the shoe price are stored again and again. That causes three ki
 - **Update problem:** Asha changes her email. You must change it in every row. Miss one, and she has two emails.
 - **Insert problem:** You can't add a new product until someone orders it, because there is no row to put it in.
 - **Delete problem:** Delete order 2, and you lose the only record that socks cost 199.
+
+Normalization fixes this.
+
+**Split everything, and reads need joins.** Normalized data needs **joins** to read. Joins are fine most of the time. But on a very hot page, or with huge tables, or when the data lives on different [shards](./partitioning-sharding.mdx) where you can't join at all, they can be too slow. Denormalization fixes that.
+
+## How it works inside
+
+### Normalization: split into tables
 
 The fix is to **split the data into tables**, one per kind of thing, linked by IDs: `users`, `products`, `orders` and `order_items`. Each fact now lives in one place. (See [Schemas and Keys](./schemas-and-keys.mdx) for the tables.)
 
@@ -40,9 +50,19 @@ The rules for this have names. You rarely need more than the first three:
 
 The classic one-liner: every column must depend on **the key, the whole key, and nothing but the key**.
 
-## Denormalization: copy data for faster reads
+### What a join costs
 
-Normalized data needs **joins** to read. Joins are fine most of the time. But on a very hot page, or with huge tables, or when the data lives on different [shards](./partitioning-sharding.mdx) where you can't join at all, they can be too slow.
+To join two tables, the database must match rows from one with rows from the other. The query planner picks one of three ways (see [How a Query Runs](./how-a-query-runs.mdx)):
+
+| Join method | How it matches rows | Good when |
+| --- | --- | --- |
+| **Nested loop** | For each row on one side, look up matches on the other side, usually through an index | Few rows on one side |
+| **Hash join** | Build a hash table from the smaller side in memory, then check each row of the bigger side against it | Many rows, and an exact match (`=`) |
+| **Merge join** | Sort both sides by the join column, then walk them together | Both sides are already sorted, for example by an index |
+
+Each one costs page reads, memory and CPU on every query. On a page that loads thousands of times a second, that adds up. Denormalization does the join **once, when data is written**, so each read is a plain lookup.
+
+### Denormalization: copy data for faster reads
 
 So you **copy data to where it is read**:
 
@@ -63,9 +83,9 @@ COMMIT;
 
 Reading the count is now one tiny lookup.
 
-PostgreSQL also offers a middle path: a **materialized view**. It saves the result of a query as a table. You refresh it when you choose, with `REFRESH MATERIALIZED VIEW`. Good for dashboards that can be a few minutes old.
+PostgreSQL also offers a middle path: a **materialized view**. It saves the result of a query as a table. You refresh it when you choose, with `REFRESH MATERIALIZED VIEW`. Good for dashboards that can be a few minutes old. A refresh runs the whole query again and replaces the saved rows. A plain refresh blocks reads of the view while it runs. `REFRESH MATERIALIZED VIEW CONCURRENTLY` lets reads go on, but the view needs a unique index.
 
-## The cost: keeping copies in sync
+### The cost: keeping copies in sync
 
 Every copy is a promise to update it. There are three common ways:
 
@@ -88,7 +108,7 @@ To get change events out of the database safely, see [Change Data Capture](../di
 
 **Not every copy needs syncing.** `order_items.price_cents` copies the product price on purpose. It is a **snapshot** of the price on the day of the order. It must **never** change when the product price changes later.
 
-## When to use each
+## When to use which
 
 | Normalize when... | Denormalize when... |
 | --- | --- |
@@ -98,6 +118,17 @@ To get change events out of the database safely, see [Change Data Capture](../di
 | You have one database | Data is split across shards or services |
 
 **Start normalized. Denormalize one specific read** when you know it is too slow, and decide how you will keep the copy in sync.
+
+## Alternatives
+
+Before you copy data, check whether one of these fixes the slow read:
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **A better index** | An index on the join or filter column | The join is slow only because it scans a table. See [Indexes](./indexes.mdx) |
+| **Cache** | Keep the joined result in Redis, with a TTL | The read can be a little stale, and the tables can stay normalized. See [Redis](../caching/redis.mdx) |
+| **Read replicas** | Copies of the whole database that serve reads | The joins are fine, but there are too many reads for one machine. See [Replication](./replication.mdx) |
+| **Separate read model (CQRS)** | A second store, shaped for reads, updated from events | Reads and writes need very different shapes. See [CQRS](../distributed-systems/cqrs.mdx) |
 
 ## In the real world
 
@@ -114,8 +145,11 @@ Mention it when a read is hot and needs data from several places:
 <Callout title="Remember this" type="success">
   - **Normalization:** each fact stored once. No update, insert or delete bugs.
   - **Denormalization:** copy data where it is read, for faster reads.
+  - **Why:** repeated facts go wrong when they change. Fully split data needs **joins** on every read, which can be too slow on hot pages.
+  - **Inside:** a join is a nested loop, hash join or merge join, paid on **every read**. A copy pays that cost **once, on write**.
   - Every copy must be **kept in sync**: same transaction, events, or batch jobs.
   - The original is the **source of truth**. Copies can always be rebuilt.
   - **Start normalized**, then denormalize the specific reads that are too slow.
   - A price saved on an order is a **snapshot**, not a copy to sync.
+  - **Alternatives:** a better index, a cache, read replicas, a separate read model (CQRS).
 </Callout>

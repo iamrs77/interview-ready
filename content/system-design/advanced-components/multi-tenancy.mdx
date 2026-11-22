@@ -4,7 +4,7 @@ description: "One system serving many customer companies, while keeping each one
 icon: Building
 ---
 
-## The idea
+## What is it?
 
 Think of an **apartment building**. Many families live there. They share the walls, the water pipes and the lift, which keeps rent low. But each family has its **own locked flat**, and no one can walk into another family's home. If one neighbor plays loud music at night, though, everyone hears it.
 
@@ -12,7 +12,7 @@ The other choice is for every family to have its **own house**. Very private, no
 
 A **multi-tenant** system is the apartment building. One running system, with the same code and the same servers, serves **many customer companies**. Each customer is a **tenant**. They share the machines, but each must only ever see **their own data**.
 
-## What a tenant is
+### What a tenant is
 
 A **tenant** is one customer **organization** using your product, with all of its users.
 
@@ -24,7 +24,19 @@ This is normal for **SaaS** products (Software as a Service: software you rent o
 
 The one rule that must never break: **tenant A must never see tenant B's data.**
 
-## Three ways to store tenant data
+## Why do we need it?
+
+The simple way to serve many companies is to give each one its **own copy** of the whole system. With a few customers that works. With thousands, it falls apart:
+
+- **Cost.** Each copy needs its own servers and database, and most of them sit almost idle. A small customer paying a few dollars a month can't cover that.
+- **Work.** Every release must be deployed thousands of times. Every copy must be watched, backed up and upgraded.
+- **Slow sign-up.** A new customer must wait while a whole new copy is set up.
+
+Sharing one system fixes all three: **one deployment**, machines that stay busy, and sign-up in seconds. The price is two new problems that the rest of this page solves: **keeping each tenant's data apart**, and stopping one tenant from **slowing down** the others.
+
+## How it works inside
+
+### Three ways to store tenant data
 
 | | Shared tables | Schema per tenant | Database per tenant |
 | --- | --- | --- | --- |
@@ -50,7 +62,9 @@ flowchart TB
   App -->|"BigBank only"| Own[("BigBank's own database")]:::db
 ```
 
-## Keeping data apart
+**How a request finds its tenant.** The user logs in, and their token carries the tenant ID. On each request, the app reads the tenant ID from the token, looks up in the catalog (usually cached) where that tenant's data lives, and runs its queries there, filtered by that tenant.
+
+### Keeping data apart
 
 The worst bug in a multi-tenant system is showing one company's invoices to another company. Layers of protection:
 
@@ -85,7 +99,7 @@ The app must connect as a normal database user. Superusers and (by default) the 
 
 **5. Test it.** Write tests that log in as tenant A and try to read tenant B's data.
 
-## Noisy neighbors
+### Noisy neighbors
 
 A **noisy neighbor** is a tenant that uses so much of the shared system that everyone else slows down. One customer imports 50 million rows, or their app has a traffic spike, and every other tenant's pages get slow.
 
@@ -98,6 +112,26 @@ Fixes:
 - **Keep pools separate.** Separate worker pools or connection pools for big tenants, so a problem stays in one place. See [Bulkhead Pattern](../reliability-security/bulkhead.mdx).
 
 **Shard by tenant.** When the shared database grows too big, split it by `tenant_id`. Then all of one tenant's data sits on one shard, and most queries touch only one machine.
+
+## When to use it
+
+- **B2B SaaS**: a product sold to many companies, schools or shops, like a CRM, team chat or online store builder.
+- **Many small customers**, where a separate copy for each would cost more than they pay.
+- You want **one codebase and one deployment** for everyone.
+
+**Don't use it when:**
+
+- The law or a contract demands **fully separate systems** for a customer (some banks, governments, health data).
+- A few huge customers each need **their own version** or their own release schedule.
+- There is only **one organization** using the product, like an internal tool. There are no tenants to separate.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Single-tenant** | A full copy of the system for each customer, usually set up by a script | A few large customers with strict rules or special needs |
+| **On-premises install** | The customer runs your software in their own data center | The customer can't send its data to your cloud at all |
+| **Cells** | Many identical copies of the whole system, each serving a group of tenants | Very large SaaS. A failure stays inside one cell, and you grow by adding cells |
 
 ## In the real world
 
@@ -116,9 +150,11 @@ Bring this up in any **B2B** question (a product sold to companies), like a CRM,
 > "This is a B2B product, so I'll use a shared database with a `tenant_id` on every table, taken from the login token, and Row-Level Security as a safety net. Each tenant has its own rate limits, and our biggest customers can move to their own database."
 
 <Callout title="Remember this" type="success">
+  - **Why:** a separate copy per customer costs too much and is too much work. Sharing gives **one deployment** and busy machines.
   - **Tenant** = one customer organization. **Multi-tenant** = one system serves all of them.
   - Three models: **shared tables** (`tenant_id`, cheapest), **schema per tenant**, **database per tenant** (safest, costliest). Most systems **mix** them.
   - Take the tenant ID from the **login token**, never from the request.
   - Protect in layers: shared query filter, **Row-Level Security**, tenant ID in **cache keys and file paths**.
   - **Noisy neighbors:** per-tenant rate limits, fair queues, move big tenants to their **own shard**.
+  - **Alternatives:** single-tenant (few big customers), on-premises install, cells (many copies, each for a group of tenants).
 </Callout>

@@ -4,7 +4,7 @@ description: "Sending big lists one page at a time, and changing an API without 
 icon: Files
 ---
 
-## The idea
+## What is it?
 
 **Pagination** is like reading a long book. You never read all 900 pages in one go. There are two ways to pick up where you stopped:
 
@@ -13,13 +13,17 @@ icon: Files
 
 **Versioning** is about promises. Once other apps use your API, they depend on its exact shape. Old mobile apps stay on people's phones for years. If you rename one field, those apps break. Versioning lets you change the API while the old shape keeps working.
 
-## Why paginate at all
+## Why do we need it?
 
-Never send a huge list in one response. 1 million orders in one reply is slow to build, uses a lot of memory on the server, and wastes the user's mobile data.
+**Why paginate.** Never send a huge list in one response. 1 million orders in one reply is slow to build, uses a lot of memory on the server, and wastes the user's mobile data.
 
 Instead, return **one page** (often 20 to 100 items) plus a way to get the next one. Always set a **maximum page size**, so a client can't ask for 1 million items with `limit=1000000`.
 
-## Offset pagination
+**Why version.** You can't make every client update at the same moment. Old app versions stay on phones for years, and other companies change their code on their own schedule, not yours. Without versions, every breaking change crashes someone's app. With versions, old clients keep the old shape while new clients get the new one.
+
+## How it works inside
+
+### Offset pagination
 
 The client says how many items to **skip** (the **offset**) and how many to return (the **limit**):
 
@@ -57,7 +61,7 @@ LIMIT 20 OFFSET 40;   -- skip 40 rows, return the next 20
 
 If a post is deleted instead, you **skip** one without knowing. For a fast-moving feed, this happens all the time.
 
-## Cursor pagination
+### Cursor pagination
 
 Instead of "skip 40", the client says **"give me 20 items after this one"**. The server sends back a **cursor**: a marker that points at the last item you got. You send it back to get the next page.
 
@@ -106,20 +110,7 @@ sequenceDiagram
   Note over A: has_more is false: stop
 ```
 
-## Offset vs cursor
-
-| | Offset | Cursor |
-| --- | --- | --- |
-| **Request** | `?offset=40&limit=20` | `?cursor=abc&limit=20` |
-| **Deep pages** | Slow: skipped rows are still read | Fast at any depth |
-| **New or deleted items** | Duplicates and skipped items | Stable |
-| **Jump to page 37** | Yes | No, only next (and sometimes previous) |
-| **Total count** | Easy to show | Usually not shown |
-| **Best for** | Small admin tables with page numbers | Feeds, infinite scroll, big lists, public APIs |
-
-**Default to cursor** for anything big or fast-changing.
-
-## API versioning
+### API versioning
 
 When you must make a change that would break old clients, you release a **new version** and keep the old one running for a while.
 
@@ -167,6 +158,32 @@ Two habits keep this working:
 
 Adding a new value to a list of options (like a new order status `"on_hold"`) is a gray area. It can break clients that only expect the old values, so announce it first.
 
+## When to use which
+
+**Offset or cursor?**
+
+| | Offset | Cursor |
+| --- | --- | --- |
+| **Request** | `?offset=40&limit=20` | `?cursor=abc&limit=20` |
+| **Deep pages** | Slow: skipped rows are still read | Fast at any depth |
+| **New or deleted items** | Duplicates and skipped items | Stable |
+| **Jump to page 37** | Yes | No, only next (and sometimes previous) |
+| **Total count** | Easy to show | Usually not shown |
+| **Best for** | Small admin tables with page numbers | Feeds, infinite scroll, big lists, public APIs |
+
+**Default to cursor** for anything big or fast-changing.
+
+**A new version or not?** Make a new version only for a breaking change you can't avoid. For everything else, add optional fields to the current version (the safe changes above).
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Bulk export** | A background job writes the whole list to a file in S3 and returns a download link | The client really needs everything, like a CSV of all orders |
+| **"Changes since" sync** | The client asks only for items changed after a time or a sync token | A mobile app keeps a local copy up to date |
+| **Never break, only add** | One version forever. Add fields, mark old ones as deprecated, remove them only when unused | You control most clients, or you use GraphQL. See [gRPC and GraphQL](../foundations/grpc-and-graphql.mdx) |
+| **Version in the media type** | `Accept: application/vnd.myapp.v2+json` | You want URLs that never change. Less common |
+
 ## In the real world
 
 **Stripe uses date-based versions.** Each Stripe account is pinned to the API version from when it started. A request can ask for another version with the `Stripe-Version` header. Inside, Stripe keeps old versions working by running each response through small "version change" steps that turn the newest shape back into the older one.
@@ -182,10 +199,12 @@ When you write your API in the interview, add pagination to every list endpoint,
 > "`GET /feed` uses cursor pagination: it takes `cursor` and `limit` and returns `next_cursor`. Offset would get slow on deep pages and show duplicates as new posts arrive. All endpoints live under `/v1`, and I'll only add optional fields, so old app versions keep working."
 
 <Callout title="Remember this" type="success">
+  - **Why:** huge lists are slow and waste memory and data. Old clients can't all update at once, so breaking changes need versions.
   - Always paginate lists, and cap the page size.
   - **Offset** (`LIMIT 20 OFFSET 40`): simple, can jump to a page, but **slow when deep** and shows **duplicates** when data changes.
   - **Cursor**: "after this item". `WHERE (created_at, id) < (...)` with an index. **Fast and stable.** Default for feeds.
   - Make the cursor **opaque** and add the **ID as a tie-breaker**.
   - Version in the **URL** (`/v1/`) or a **header**. Keep old versions running until traffic is gone.
   - **Adding optional things is safe. Removing, renaming or changing types breaks clients.**
+  - **Alternatives:** a bulk export file, "changes since" sync, never break and only add, version in the media type.
 </Callout>

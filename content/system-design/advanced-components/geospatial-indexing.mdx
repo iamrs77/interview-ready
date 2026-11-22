@@ -4,7 +4,7 @@ description: "Finding things near a location fast, like the drivers closest to a
 icon: MapPinned
 ---
 
-## The idea
+## What is it?
 
 Think of a **paper city map** with a grid on it. Squares are named like "B4" or "C5". If you are standing in square B4 and want a café nearby, you don't search the whole city. You look in B4, and maybe in the squares right around it.
 
@@ -12,7 +12,7 @@ A **geospatial index** does the same for computers. It splits the map into named
 
 The example on this page: a rider opens a ride app and asks, **"which drivers are within 2 km of me?"**
 
-## Why normal indexes don't work
+## Why do we need it?
 
 A location is two numbers: **latitude** (how far north or south) and **longitude** (how far east or west). The first idea is to store them as two columns and search a box around the rider:
 
@@ -26,7 +26,9 @@ A normal index (a **B-tree**, see [Indexes](../databases/indexes.mdx)) sorts by 
 
 What we really want is only the small square where the two strips cross. A normal index can't jump straight there. We need an index that understands **"close in both directions at once"**.
 
-## Geohash: turn a location into a short string
+## How it works inside
+
+### Geohash: turn a location into a short string
 
 A **geohash** turns a latitude and longitude into a short string, like `tdr1v9`. It works like this:
 
@@ -55,7 +57,7 @@ SELECT id FROM drivers WHERE geohash LIKE 'tdr1v9%';
 
 Unlike `LIKE '%pizza%'`, this pattern starts with fixed text, so the index can jump straight to it. Geohash turned a 2D problem into a 1D string, which every database already knows how to index.
 
-### The edge problem, and the 3×3 fix
+#### The edge problem, and the 3×3 fix
 
 A rider standing at the **edge** of their cell can have a driver 50 m away who is in the **next** cell, with a different geohash. So we never search just one cell. We search the rider's cell **plus the 8 cells around it**.
 
@@ -73,25 +75,7 @@ Notice that a neighbor can look quite different (`tdr1v` vs `tdr4j`). That is wh
 
 Together, these 9 cells cover about 15 km × 15 km, much more than a 2 km circle. So after the lookup, we **check the real distance** to each driver and drop anyone farther than 2 km.
 
-## Example: finding nearby drivers
-
-1. Every driver's app sends its location **every few seconds**.
-2. The **Location Service** stores it, keyed by geohash. Redis is a good fit, because locations change all the time and only the latest one matters.
-3. When a rider asks for a car, the **Matching Service** looks up the rider's 5-character cell and the 8 cells around it. Each cell is about 4.9 km, so the whole 2 km circle is inside.
-4. It computes the **real distance** to each driver found, drops anyone farther than 2 km, sorts the rest, and offers the ride to the closest ones.
-5. If it finds too few drivers, it **widens** the search by using a shorter geohash (bigger cells).
-
-```mermaid
-flowchart TB
-  Driver["Driver app"]:::client -->|"location every few seconds"| LB["Load Balancer"]:::lb
-  Rider["Rider app"]:::client -->|"find drivers near me"| LB
-  LB --> LS["Location Service"]:::service
-  LB --> MS["Matching Service"]:::service
-  LS -->|"update driver position"| R[("Redis GEO<br/>driver locations by geohash")]:::cache
-  MS -->|"search 9 cells, keep within 2 km"| R
-```
-
-## Quadtrees
+### Quadtrees
 
 Geohash cells all have the **same size** at each length. That is a problem when the map is uneven: one cell in the city center may hold 5,000 drivers, while a cell in the countryside holds none.
 
@@ -121,6 +105,24 @@ flowchart TB
 | **Where it lives** | A string column in any database, or Redis | Usually a tree kept in memory by a service |
 | **Updates** | Easy: compute a new string | Harder: squares may need to split or merge |
 | **Good for** | Things that move a lot, like drivers | Places that rarely move, with very uneven density, like restaurants |
+
+## Example: finding nearby drivers
+
+1. Every driver's app sends its location **every few seconds**.
+2. The **Location Service** stores it, keyed by geohash. Redis is a good fit, because locations change all the time and only the latest one matters.
+3. When a rider asks for a car, the **Matching Service** looks up the rider's 5-character cell and the 8 cells around it. Each cell is about 4.9 km, so the whole 2 km circle is inside.
+4. It computes the **real distance** to each driver found, drops anyone farther than 2 km, sorts the rest, and offers the ride to the closest ones.
+5. If it finds too few drivers, it **widens** the search by using a shorter geohash (bigger cells).
+
+```mermaid
+flowchart TB
+  Driver["Driver app"]:::client -->|"location every few seconds"| LB["Load Balancer"]:::lb
+  Rider["Rider app"]:::client -->|"find drivers near me"| LB
+  LB --> LS["Location Service"]:::service
+  LB --> MS["Matching Service"]:::service
+  LS -->|"update driver position"| R[("Redis GEO<br/>driver locations by geohash")]:::cache
+  MS -->|"search 9 cells, keep within 2 km"| R
+```
 
 ## Tools
 
@@ -156,6 +158,27 @@ WHERE ST_DWithin(
 
 **Simple rule:** fast-moving things like drivers → **Redis GEO**. Places that rarely move, with other filters like "open now" and "rating above 4" → **PostGIS** or **Elasticsearch**.
 
+## When to use it
+
+- **"Near me" searches**: drivers near a rider, restaurants near a user, people nearby in a dating app.
+- **Nearest K**: the 10 closest couriers to a store.
+- **Grouping by area**: count riders and drivers per cell to set surge prices.
+
+**Don't use it when:**
+
+- You only filter by a **named area** (city, zip code). A plain column with a normal index is enough.
+- There are only a **few thousand points**. Compute the distance to each one in memory.
+- You need **travel time**, not straight-line distance. A river or a one-way street changes everything. Use the index to find candidates, then a routing service for the real time.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Two columns and a box** | `lat` and `lng` columns with a normal index, searched with a box | Small tables, where a slower query is fine |
+| **A named-area column** | Store the city or zip code, and filter on it | "Restaurants in Bengaluru" is good enough, no real distance needed |
+| **Scan in memory** | Keep every point in a list and compute each distance | A few thousand points |
+| **H3 or S2 cells** | Libraries that give every cell an ID, like geohash, with hexagons (H3) or cells on a sphere (S2) | Analytics and pricing by area, where cells of a more even shape and size help |
+
 ## In the real world
 
 **Uber built H3.** Uber created **H3**, a grid that covers the Earth with **hexagons** instead of squares, and made it open source in 2018. With hexagons, all 6 neighbors are the same distance from the center, which makes "nearby" math simpler. Uber uses it to split cities into areas for things like pricing and analysis.
@@ -171,10 +194,11 @@ Bring this up in any "near me" question: ride hailing, food delivery, "restauran
 > "Drivers send their location every few seconds. I'll keep them in Redis GEO, which indexes by geohash. To find drivers within 2 km, I use 5-character cells, which are bigger than the radius. I search the rider's cell and the 8 cells around it, drop anyone farther than 2 km, and sort the rest by real distance. If there are too few, I widen the search."
 
 <Callout title="Remember this" type="success">
-  - A normal index sorts one value. A location has **two**, so it can't find "near me" fast.
+  - **Why:** a normal index sorts one value. A location has **two**, so it can't find "near me" fast.
   - **Geohash** turns a location into a string. **Longer = smaller square. Same prefix = same square.**
   - Pick a cell **at least as big as the search radius** (5 characters for 2 km). Search **your cell + its 8 neighbors**, then filter and sort by real distance.
   - **Quadtree** splits crowded squares into 4. Good for **uneven density**.
   - Tools: **Redis GEO** for moving drivers, **PostGIS** or **Elasticsearch** for places.
   - Uber uses hexagons (**H3**). Google uses **S2** cells.
+  - **Alternatives:** two columns and a box (small tables), a city or zip column, a scan in memory (few points), H3 or S2.
 </Callout>

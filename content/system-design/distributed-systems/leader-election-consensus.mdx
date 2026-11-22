@@ -4,7 +4,7 @@ description: "How servers agree on one leader, and on the same data, even when s
 icon: Crown
 ---
 
-## The idea
+## What is it?
 
 Think of a class picking a **class monitor**. The teacher can't watch everything, so one student makes the small decisions: who takes attendance, who collects the homework. With one monitor, nobody argues about who decides.
 
@@ -15,7 +15,7 @@ Servers do the same thing:
 - **Leader election** = a group of servers picks one leader to make decisions.
 - **Consensus** = a group of servers agrees on the same value (who the leader is, or the order of writes), even when some servers crash or messages are lost.
 
-## Why we need a leader
+## Why do we need it?
 
 Many jobs are much simpler with one decision-maker:
 
@@ -25,7 +25,11 @@ Many jobs are much simpler with one decision-maker:
 
 The hard part is not having a leader. It is **replacing** the leader when it dies: automatically, quickly, and with **exactly one** new leader.
 
-## Quorums and majority votes
+Simple rules don't work. "The server with the lowest ID is the leader" breaks when the network splits: each side thinks the others are dead, and picks its own leader. A **slow** server looks exactly like a **dead** one (see [Why Distributed Systems Are Hard](./why-distributed-is-hard.mdx)). Consensus gives a safe answer even then.
+
+## How it works inside
+
+### Quorums and majority votes
 
 A **quorum** is the minimum number of votes needed to make a decision. It is usually a **majority**: more than half.
 
@@ -41,7 +45,7 @@ Why a majority? **Any two majorities of the same group always share at least one
 
 Look at 3 and 4: both can lose only one server. That is why these groups almost always have an **odd** number of servers, usually **3 or 5**.
 
-## Raft, in simple words
+### Raft, in simple words
 
 **Raft** is a consensus algorithm, built to be easy to understand. Each server is in one of three roles:
 
@@ -53,7 +57,7 @@ Look at 3 and 4: both can lose only one server. That is why these groups almost 
 
 **Terms.** Time is split into numbered **terms**: term 1, term 2, term 3, and so on. Each term has **at most one leader**, like "the monitor for term 5". A higher term always wins. If a leader sees a message with a higher term than its own, it knows it is out of date and steps down.
 
-### How an election works
+### How a Raft election works
 
 1. The leader sends heartbeats to the followers many times a second.
 2. A follower that hears nothing for a while (a **random** wait, a few hundred milliseconds) decides the leader is gone.
@@ -84,7 +88,7 @@ sequenceDiagram
   B->>C: Heartbeat, term 2
 ```
 
-### How writes work
+### How Raft writes work
 
 1. A client sends a write to the leader.
 2. The leader adds it to its **log** (its list of changes) and sends it to the followers.
@@ -135,6 +139,27 @@ Leader election with them is simple: every candidate tries to **create the same 
 
 Some databases have Raft built in, like CockroachDB, so each piece of data is kept on several servers that agree on every write.
 
+## When to use it
+
+- **Only one copy of a job may be active:** a scheduler, a controller, a relay. The others wait as backups.
+- **Database failover:** pick exactly one new primary when the old one dies.
+- **Small, critical data that all servers must agree on:** cluster settings, who owns which work, service discovery, locks.
+
+**Don't use it when:**
+
+- **Any server can do any request.** Stateless servers behind a [load balancer](../hld-basics/load-balancing.mdx) need no leader.
+- **The data is big or written very often.** Every write waits for a majority, and these tools are built for small metadata, not your main data.
+- **Your database already handles failover** for you. Don't add a second system that also picks a primary.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Managed failover** | The cloud picks the new database primary for you, like Amazon RDS Multi-AZ | You only need a primary database, not your own leader |
+| **A lease row in the database** | One row says who is leader and until when. Servers renew it with a conditional update | You already have a reliable database and don't want to run etcd. Still needs fencing |
+| **Leaderless replication** | No leader at all. Clients write to several copies and read from several, like Cassandra. See [Consistency Models](./consistency-models.mdx) | Writes must keep working when any one node dies, and you can handle conflicts |
+| **Manual failover** | One fixed primary. A person promotes a replica when it dies | Small systems, where minutes of downtime are acceptable |
+
 ## In the real world
 
 **Kubernetes runs on etcd.** Kubernetes keeps all its cluster data (what should run, and where) in etcd, which uses Raft. Production clusters usually run 3 or 5 etcd servers. Kubernetes' own scheduler and controller manager also use leader election, so only one copy of each is active at a time, while the others wait as backups.
@@ -151,9 +176,11 @@ Don't design a consensus algorithm. Say which tool does it, and why a majority p
 
 <Callout title="Remember this" type="success">
   - **Leader election:** servers pick one leader. **Consensus:** servers agree on the same data.
+  - **Why:** one decision-maker keeps things simple, but it must be **replaced** safely. A slow server looks dead, so simple rules create two leaders.
   - A **majority** (quorum) is needed. Two majorities always overlap, so there is **one leader**.
   - Use **3 or 5** servers. 3 can lose 1, 5 can lose 2.
   - **Raft:** leader, followers, numbered **terms**, heartbeats, majority votes.
   - **Split brain** = two leaders. Prevent it with majorities, terms and fencing.
   - In practice, use **etcd** or **ZooKeeper**. Don't build your own.
+  - **Alternatives:** managed database failover, a lease row in the database, leaderless replication, manual failover.
 </Callout>

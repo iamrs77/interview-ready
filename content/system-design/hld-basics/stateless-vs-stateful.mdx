@@ -4,7 +4,7 @@ description: "Why servers that remember nothing are much easier to scale."
 icon: Repeat
 ---
 
-## The idea
+## What is it?
 
 **State** is anything a server remembers between two requests: who is logged in, what is in the shopping cart, how much of a file has been uploaded.
 
@@ -15,7 +15,7 @@ Think of two coffee shops:
 
 The first barista is a **stateful** server: the knowledge lives inside it. The second is **stateless**: the barista remembers nothing, and the knowledge lives in a shared place.
 
-## What "state" is
+Common kinds of state:
 
 | State | Example |
 | --- | --- |
@@ -27,7 +27,9 @@ The first barista is a **stateful** server: the knowledge lives inside it. The s
 
 HTTP itself forgets everything after each request (see [HTTP and HTTPS](../foundations/http-and-https.mdx)). Apps add memory on top, usually with cookies and sessions (see [Cookies, Sessions and JWT](../foundations/cookies-sessions-jwt.mdx)). The question is **where** that memory lives.
 
-## Stateful servers: the problem
+## Why do we need it?
+
+If each server keeps state in its own memory, things break as soon as you run **more than one server**.
 
 Say each server keeps login sessions in its own memory. A [load balancer](./load-balancing.mdx) spreads requests across two servers:
 
@@ -52,9 +54,21 @@ The user just logged in, and the next request says "please log in". Problems:
 - **Scaling down and deploying are hard.** You can't simply remove a server, because its users would lose their state.
 - **Uneven load.** One server can end up with many heavy users.
 
-## Stateless servers: why they scale easily
+## How it works inside
 
 A **stateless** server keeps nothing in its own memory between requests. Each request either carries what is needed (like a login token), or the server reads it from a shared store.
+
+### A stateless request, step by step
+
+1. The request arrives with a **session ID** in a cookie, or a **token**.
+2. The server looks up the session in Redis, or checks the token's signature.
+3. It loads the data it needs from the cache or database, and does the work.
+4. Anything that must be kept is written back to the shared store.
+5. It sends the answer and **forgets** the request.
+
+So the next request can go to any server.
+
+### Why stateless servers scale easily
 
 - **Any server can handle any request.** The load balancer picks freely.
 - **Adding a server is easy.** Start it, add it to the load balancer, done.
@@ -63,7 +77,7 @@ A **stateless** server keeps nothing in its own memory between requests. Each re
 
 This is what makes [horizontal scaling](./scalability.mdx) work.
 
-## Where to keep state instead
+### Where to keep state instead
 
 Move the state **out** of the app servers, into places built to keep it:
 
@@ -93,7 +107,13 @@ With a **JWT** (JSON Web Token), the client carries a signed note that says "I a
 
 The state did not disappear. It moved to places built to hold it. Data that must never be lost goes in the **database**, which keeps copies and backups. **Redis** holds state you can afford to lose now and then: if Redis loses the sessions, users just log in again. See [Redis](../caching/redis.mdx).
 
-## Stateful servers: where they are needed
+## When to use which
+
+**Stateless** is the default for web servers, API servers and workers. Make them stateless unless there is a strong reason not to.
+
+**Stateful** is right only for the parts whose job is to hold state, or that must keep it in memory for speed.
+
+### Stateful servers: where they are needed
 
 Some parts **must** remember things:
 
@@ -108,6 +128,20 @@ How to handle them:
 - Keep a **map of who is where**, for example in Redis: "user 42 → chat server 7".
 - **Route by key**, so the same user, room or document always reaches the same server (see [Consistent Hashing](../databases/consistent-hashing.mdx)).
 - **Plan for crashes.** Save state often, so a new server can take over.
+
+**Don't keep state in a server's memory when:**
+
+- **It is normal web traffic** (logins, carts, forms). Move it to Redis or the database.
+- **Losing it would hurt users.** Memory is gone on a crash or a deploy.
+- **You need auto-scaling.** Servers that hold state can't be removed freely.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Sticky sessions** | The load balancer sends each user to the same server, which keeps state in memory | An old app you can't change yet, or live connections. See below |
+| **Session replication** | Each server copies its sessions to the other servers (some Java app servers, like Tomcat, can do this) | A few servers and no shared store. Copying gets costly as servers grow |
+| **State in the client** | The client carries the state in a signed token or cookie, like a JWT | Small state that rarely changes. A token is hard to cancel before it expires |
 
 ## Sticky sessions
 
@@ -147,8 +181,11 @@ For chat or other live features, add: "The WebSocket servers are stateful, so I 
 
 <Callout title="Remember this" type="success">
   - **State** = what a server remembers between requests.
+  - **Why:** state in one server's memory breaks with more than one server: wrong server, lost on a crash, hard to scale.
   - **Stateless** servers: any server can answer any request. Easy to add, remove and replace.
   - Move state to **Redis** (sessions), the **database** (permanent data), **S3** (files), or a **token** the client carries.
   - Some parts must be stateful: **databases, caches, live connections, game servers**.
+  - **Inside:** each request brings a session ID or token. The server looks it up, does the work, saves changes, and forgets.
   - **Sticky sessions** keep a user on one server. A quick fix, but uneven load and lost sessions on a crash.
+  - **Alternatives:** sticky sessions, session replication, state in a client token.
 </Callout>

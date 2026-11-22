@@ -4,21 +4,21 @@ description: "Keep parts of the system separate, so one failure can't sink the w
 icon: Ship
 ---
 
-## The idea
+## What is it?
 
 The inside of a ship is split into separate rooms by strong walls called **bulkheads**. If the ship hits a rock and water comes into one room, the walls keep the water there. That room floods, but the rest of the ship stays dry and it keeps floating.
 
 The **bulkhead pattern** does the same with your system's resources: threads, connections, servers. You split them into **separate pools**, so a problem in one part can only use up its own pool. Everything else keeps working.
 
-## Where the name comes from
+### Where the name comes from
 
 The Titanic is the famous lesson. It had watertight rooms, but the walls between them didn't go all the way up. As the front rooms filled, the ship tipped forward, and water spilled over the top of each wall into the next room.
 
 The same is true in software. A bulkhead only works if the parts are **really** separate. Two "separate" thread pools that still share one database connection pool are not separate.
 
-## The problem: one shared pool
+## Why do we need it?
 
-An **Order Service** calls three other services. It handles those calls with one shared **thread pool**: a fixed group of worker threads, here 100, that each run one call at a time.
+**One slow dependency can use up a shared pool.** An **Order Service** calls three other services. It handles those calls with one shared **thread pool**: a fixed group of worker threads, here 100, that each run one call at a time.
 
 ```mermaid
 flowchart TB
@@ -30,7 +30,9 @@ flowchart TB
 
 Recommendations gets slow. Each call to it holds a thread for many seconds. One by one, all 100 threads end up stuck waiting on it. Now calls to Payments and Inventory can't get a thread either. The whole Order Service is down because of a feature nobody needs to place an order.
 
-## Separate pools of threads or connections
+## How it works inside
+
+### Separate pools of threads or connections
 
 Give each service you call **its own pool**:
 
@@ -73,7 +75,16 @@ resilience4j.bulkhead:
 
 The same idea works for **database connections** (see [Connection Pooling](../databases/connection-pooling.mdx)). Give user requests one connection pool, and slow reports a separate small one. Then a huge report can't take every connection and freeze the website.
 
-## Bulkheads at every size
+### What happens on each call
+
+1. **Take a slot.** The call asks its pool for a free thread or a free permit.
+2. **None free?** Wait a very short time (often zero). Still none: **reject** the call right away and use the fallback.
+3. **Run the call** on the slot.
+4. **Give the slot back**, always, even when the call fails (in a `finally` block). A slot that is never returned is lost for good, and the pool slowly shrinks to nothing.
+
+A thread pool bulkhead usually has a small, **bounded** queue in front of its threads. Calls wait there briefly, and when the queue is full, new calls are rejected. An unbounded queue would just move the pile-up somewhere else (see [Backpressure](./backpressure.mdx)).
+
+### Bulkheads at every size
 
 | Size | Example |
 | --- | --- |
@@ -104,6 +115,29 @@ flowchart TB
 
 In a system shared by many companies, this also stops one very busy customer (a **noisy neighbor**) from slowing everyone else down (see [Multi-Tenancy](../advanced-components/multi-tenancy.mdx)).
 
+## When to use it
+
+- **One service calls several others** of different importance. Keep the important calls (payments) safe from the optional ones (recommendations).
+- **Slow background work shares resources with user requests:** reports, exports, batch jobs.
+- **Many customers share one system.** Separate pools or cells stop a noisy neighbor.
+- **A critical path** like login or checkout must keep working no matter what else breaks.
+
+**Don't use it when:**
+
+- **Every request needs the same one dependency.** Splitting the pool doesn't help if all calls fail without it.
+- **The resources are already small.** Splitting 10 connections into five pools of 2 rejects calls on a normal day.
+- **You can't size and watch the pools.** Badly sized pools cause rejections that look like outages.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Circuit breaker** | Stop calling a dependency after too many failures | The dependency is clearly down. Best used together with a bulkhead. See [Circuit Breaker](./circuit-breaker.mdx) |
+| **Short timeouts** | Give up on each call quickly, so threads are freed sooner | Slowness is mild. Cheap, but a very slow service can still fill the pool |
+| **Rate limiting per client** | Cap how many requests each user or customer can send | The danger is one client sending too much. See [Rate Limiting](./rate-limiting.mdx) |
+| **Autoscaling** | Add more servers when load goes up | The problem is real extra traffic, not one stuck dependency. A stuck dependency fills any number of threads |
+| **Non-blocking I/O** | An event loop waits on many calls without one thread each (Node.js, Netty) | Threads are the bottleneck. You still need a cap on calls in flight, or memory and connections pile up |
+
 ## Bulkhead vs circuit breaker
 
 | | Bulkhead | Circuit breaker |
@@ -132,8 +166,11 @@ Mention it when one service calls several others, or when slow background work c
 
 <Callout title="Remember this" type="success">
   - Named after the walls in a ship that stop one leak from sinking it.
+  - **Why:** with one shared pool, one slow dependency holds every thread, and the whole service goes down.
   - Give each dependency its **own pool** of threads or connections.
   - When a pool is full, **fail fast** and use a fallback. Don't wait.
+  - **Inside:** take a slot, reject if none is free, run the call, **always give the slot back**.
   - It works at every size: threads, connection pools, queues, server groups, **cells**.
   - Pair it with a **circuit breaker**: the bulkhead limits the damage, the breaker stops the calls.
+  - **Alternatives:** circuit breaker, short timeouts, rate limiting per client, autoscaling, non-blocking I/O.
 </Callout>

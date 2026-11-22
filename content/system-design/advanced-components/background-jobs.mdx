@@ -4,7 +4,7 @@ description: "Work that runs later or on a schedule, not while the user waits."
 icon: CalendarClock
 ---
 
-## The idea
+## What is it?
 
 Think of a **restaurant**. The waiter takes your order, says "it will be ready soon", and goes to the next table. He doesn't stand in the kitchen cooking while you wait at the counter. The order slip goes on a rail, and the **cooks** pick slips up one by one.
 
@@ -12,20 +12,21 @@ That is a **background job**. The request handler (the waiter) only **writes dow
 
 Some work also runs **on a schedule**, like an alarm clock: "every night at 2 AM, make the sales report". That is a **scheduled job**.
 
-## What belongs in the background
+## Why do we need it?
 
-**The rule:** if the user doesn't need the result to see the next screen, do it later.
+Without background jobs, slow work runs **inside the request**, while the user waits:
 
-- Sending emails, SMS and push notifications
-- Resizing images, encoding videos
-- Making PDF invoices and reports
-- Exporting a user's data
-- Calling slow outside services
-- Cleaning up old data
+- **Slow answers.** Resizing a photo or making a PDF takes seconds. The user stares at a spinner.
+- **Someone else's failure becomes yours.** If the email provider is down, the "place order" request fails, even though the order itself was fine.
+- **No second try.** If the work fails halfway, nothing runs it again.
+- **Spikes hit everything at once.** 10,000 sign-ups in a minute means 10,000 emails sent right now, by the same servers that must answer users.
 
 Doing this work later gives you **fast responses**, **retries** when something fails, a **buffer** for traffic spikes, and workers you can **scale on their own**.
+More on this choice in [Sync vs Async Communication](../messaging/sync-vs-async.mdx).
 
-## Job queues and workers
+## How it works inside
+
+### Job queues and workers
 
 ```mermaid
 flowchart TB
@@ -67,7 +68,7 @@ The sweeper can also queue a job twice. That is fine, because every job is idemp
 
 **Common tools:** Sidekiq (Ruby), Celery (Python) and BullMQ (Node.js), which usually keep jobs in Redis. AWS SQS with your own workers. **Temporal** for long jobs with many steps. More on queues in [Message Queues and Pub/Sub](../messaging/message-queues-pub-sub.mdx).
 
-## Cron and scheduled jobs
+### Cron and scheduled jobs
 
 **Cron** is a classic Unix tool that runs commands on a schedule. A schedule has 5 fields: minute, hour, day of month, month, day of week. A `*` means "every".
 
@@ -103,7 +104,7 @@ The inner `FOR UPDATE SKIP LOCKED` locks the rows it picks and **skips rows anot
 
 A bare `SELECT … FOR UPDATE SKIP LOCKED` is not enough on its own. Outside a transaction, its locks are released as soon as it returns, and the rows are still `pending`, so a second poller can pick the same job. The `started_at` time lets a cleanup job find jobs stuck in `running` after a worker crash and set them back to `pending`. The full design is in [Design a Job Scheduler](../questions/job-scheduler.mdx).
 
-## Tracking job status
+### Tracking job status
 
 Some jobs are started by a user who wants to know when they finish, like "Export my data", which takes 5 minutes. The API should **not** wait 5 minutes. Instead:
 
@@ -144,7 +145,7 @@ stateDiagram-v2
   failed --> dead: too many tries
 ```
 
-## Retries and failed jobs
+### Retries and failed jobs
 
 Jobs fail: the email provider is down, the network times out. Rules that keep this under control:
 
@@ -154,6 +155,33 @@ Jobs fail: the email provider is down, the network times out. Rules that keep th
 - **Set a time limit.** A job stuck for an hour should be stopped and retried.
 - **Make every job idempotent**, because retries and crashes mean some jobs run twice.
 - **Watch the queue.** Alert on **queue length**, the **age of the oldest job**, and the **failure rate**. A growing queue means workers can't keep up.
+
+## When to use it
+
+**The rule:** if the user doesn't need the result to see the next screen, do it later.
+
+- Sending emails, SMS and push notifications
+- Resizing images, encoding videos
+- Making PDF invoices and reports
+- Exporting a user's data
+- Calling slow outside services
+- Cleaning up old data
+
+**Don't use it when:**
+
+- The user **needs the result** to go on: a payment approval, a login check.
+- The work is **fast** (a few milliseconds). A queue only adds parts and delay.
+- The job is a **long chain of steps** with waits and undo steps. Use a workflow engine instead of chaining jobs by hand.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Do it in the request** | Run the work before answering | Fast work, or the user needs the result |
+| **Fire and forget in the process** | Start the work in the same server after answering, with no queue | Losing it doesn't matter, like a metric. It is lost on a crash or deploy |
+| **Workflow engine** | Temporal or AWS Step Functions save each step, retry, and can wait for days | Many steps, waits and undo steps. See [Multi-step Processes](../distributed-systems/multi-step-processes.mdx) |
+| **Airflow** | Runs data jobs in order, each one waiting for the ones before it | Nightly data pipelines with steps that depend on each other |
+| **Serverless functions** | AWS Lambda runs your code when an event arrives, with no workers to manage | Small, spiky jobs, like one thumbnail per upload |
 
 ## In the real world
 
@@ -172,6 +200,7 @@ Whenever something slow happens after a user action, say "background job":
 > "Placing the order returns right away. Sending the receipt email and making the invoice PDF go on a job queue. Workers retry with backoff, every job is idempotent, and after 5 failures a job moves to a dead-letter queue."
 
 <Callout title="Remember this" type="success">
+  - **Why:** slow work inside a request makes users wait, fails when another service fails, and never retries.
   - If the user doesn't need it **now**, put it on a **job queue** and let **workers** do it.
   - Jobs carry **IDs**, not whole objects. A crashed worker's job comes back, so jobs must be **idempotent**.
   - A crash between saving the data and queuing the job loses the job. Use an **outbox**, or a **sweeper** that re-queues old `pending` rows.
@@ -179,4 +208,5 @@ Whenever something slow happens after a user action, say "background job":
   - Many "run at" jobs: rows with `run_at`, claimed with `UPDATE … SKIP LOCKED … RETURNING`.
   - Long jobs: return **`202 Accepted` + job ID**, and let the client check the status.
   - **Retry with backoff**, cap the tries, then send to a **dead-letter queue**.
+  - **Alternatives:** do it in the request (fast work), fire and forget (unimportant), a workflow engine (many steps), Airflow, serverless functions.
 </Callout>

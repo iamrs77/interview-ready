@@ -4,7 +4,7 @@ description: "Two ways of thinking about data: strict and safe, or flexible and 
 icon: Atom
 ---
 
-## The idea
+## What is it?
 
 There are two big ways of thinking about how a database should behave.
 
@@ -15,7 +15,19 @@ Think of a shop with many branches:
 
 ACID puts **correct data** first. BASE puts **always answering** first. (The names are a little chemistry joke: acids and bases are opposites.)
 
-## ACID, a quick recap
+## Why do we need it?
+
+On **one machine**, ACID is cheap: one database, one log, one set of locks. The trouble starts when the data no longer fits on one machine, or users are spread over many regions:
+
+- **Every write needs the machines to coordinate.** To keep every ACID promise, they must wait for each other and lock across the network. Each write gets slower.
+- **A network break stops a strict system.** It must refuse requests rather than risk wrong data. See the [CAP Theorem](./cap-theorem.mdx).
+- **Much data doesn't need that cost.** A like count that is off by one for a second hurts nobody.
+
+BASE is the answer for that data: give up the strict promises, and get speed, scale and uptime. ACID stays for data where a mistake costs money. Knowing both lets you choose **per piece of data**.
+
+## How it works inside
+
+### ACID, a quick recap
 
 ACID is the set of promises a **transaction** gives. A transaction is a group of steps that are treated as one. See [Transactions and ACID](../databases/transactions-acid.mdx) for more.
 
@@ -39,7 +51,13 @@ sequenceDiagram
   DB-->>A: Both saved, or neither
 ```
 
-## BASE
+### How ACID keeps its promises
+
+- **Atomicity and durability: a write-ahead log (WAL).** Before changing the data files, the database writes the change to a **log on disk**. On `COMMIT`, it makes sure the log is safely on disk, and only then says "saved". After a crash, it reads the log: committed transactions are redone, unfinished ones are undone.
+- **Isolation: locks or MVCC.** A **lock** makes a second transaction wait. **MVCC** (multi-version) keeps old versions of rows, so a reader sees a steady snapshot while a writer works. See [Isolation Levels](../databases/isolation-levels.mdx) and [Locks and Deadlocks](../databases/locking.mdx).
+- **Consistency: checks on every write.** Rules like `NOT NULL`, `UNIQUE`, foreign keys and `CHECK (balance >= 0)` are checked. A transaction that breaks one is rolled back.
+
+### BASE
 
 | Letter | Name | In simple words |
 | --- | --- | --- |
@@ -60,6 +78,13 @@ sequenceDiagram
 
 The user gets a fast answer. Node B shows the old count for a moment. Nobody is harmed, because it's a like count. See [Consistency Models](./consistency-models.mdx) for the levels between these two.
 
+### How BASE keeps answering
+
+- The write goes to **one copy** (or a few), which answers right away.
+- The change is copied to the other copies **in the background**.
+- If two copies took different writes for the same data, they settle it later, often with **last write wins** (the newest timestamp), or the app merges them.
+- **Background repair** fixes copies that missed writes. Cassandra, for example, keeps the writes a down node missed and replays them when it comes back (**hinted handoff**), and fixes old copies it notices during reads (**read repair**).
+
 ## Side by side
 
 | | ACID | BASE |
@@ -68,9 +93,10 @@ The user gets a fast answer. Node B shows the old count for a moment. Nobody is 
 | **Right after a write** | Everyone sees the new value, when reads go to the primary | Some readers see the old value for a while |
 | **When the network breaks** | Usually refuses requests rather than give old data (CAP's **C**, not ACID's C) | Keeps answering (CAP's **A**) |
 
-**ACID says nothing about copies.** The ACID column describes the usual setup: an SQL database with **one primary**, where reads go to the primary. A PostgreSQL read replica can still return old data.
 | **Growing bigger** | Harder to spread across many machines | Built to spread across many machines |
 | **Typical use** | Payments, orders, bookings, stock | Likes, feeds, logs, sessions, metrics |
+
+**ACID says nothing about copies.** The ACID column describes the usual setup: an SQL database with **one primary**, where reads go to the primary. A PostgreSQL read replica can still return old data.
 
 ## Which databases follow which
 
@@ -85,7 +111,7 @@ The user gets a fast answer. Node B shows the old count for a moment. Nobody is 
 
 Today the line is blurry. Many databases let you choose **per operation**. In an interview, what matters is that you choose on purpose.
 
-## When to use each
+## When to use which
 
 ```mermaid
 flowchart TB
@@ -97,6 +123,17 @@ flowchart TB
 ```
 
 **Mixing is normal.** One app often uses both: orders and payments in PostgreSQL, likes and activity feeds in Cassandra. See [SQL vs NoSQL](../databases/sql-vs-nosql.mdx) for picking a database.
+
+## Alternatives
+
+Beyond picking ACID or BASE for a whole database:
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **NewSQL** (Spanner, CockroachDB) | SQL and ACID, spread over many machines with consensus | You need ACID **and** more data or regions than one machine can hold. Writes are slower |
+| **Tunable consistency** | Choose strict or relaxed **per request**, like Cassandra's `QUORUM` or DynamoDB's strong reads | Most data can be BASE, but a few reads must be up to date |
+| **Saga** | A chain of local transactions, with undo steps if one fails. See [Saga Pattern](./saga-pattern.mdx) | One business action spans many services, so no single transaction can cover it |
+| **Two-phase commit** | One all-or-nothing commit across two or more databases. See [Distributed Transactions and 2PC](./distributed-transactions-2pc.mdx) | You truly need ACID across databases, and can accept the blocking |
 
 ## In the real world
 
@@ -117,9 +154,12 @@ When you pick a database, say which data needs ACID and which can be BASE:
 <Callout title="Remember this" type="success">
   - **ACID** = correct first: all-or-nothing, rules kept, saved for good.
   - **BASE** = available first: always answers, copies agree **eventually**.
+  - **Why:** across many machines, every ACID promise costs coordination on each write, and a stop during network breaks. Much data doesn't need that.
+  - **Inside:** ACID = **write-ahead log** + locks or **MVCC** + rule checks. BASE = answer from one copy, copy **in the background**, repair later.
   - When the network breaks, a single-primary SQL setup usually picks CAP's **C**. BASE picks **A**. (ACID itself says nothing about copies.)
   - ACID's C (rules kept) is **not** CAP's C (newest data for every reader).
   - **Money, orders, bookings, stock → ACID.** Likes, feeds, logs → BASE.
   - Most databases now offer **both**, per operation. Choose on purpose.
   - Start with ACID unless scale forces you away from it.
+  - **Alternatives:** NewSQL, tunable consistency, sagas, 2PC.
 </Callout>

@@ -4,13 +4,21 @@ description: The language browsers and servers speak, and how HTTPS keeps it pri
 icon: ShieldCheck
 ---
 
-## The idea
+## What is it?
 
 **HTTP** is the language browsers and servers use to talk. The browser sends a **request**, and the server sends back a **response**. It is like ordering at a food counter: you say what you want, and you get your food with a receipt.
 
 **HTTPS** is HTTP inside a **locked box**. Only your browser and the server can open it. Nobody in the middle, like the café Wi-Fi owner or your internet company, can read or change what is inside.
 
-## A request and a response
+## Why do we need it?
+
+**Why HTTP.** TCP only moves bytes from one computer to another (see [TCP vs UDP](./tcp-vs-udp.mdx)). It says nothing about what the bytes mean. Both sides need shared rules: "what do I want", "did it work", "what format is this". HTTP is that shared standard, so **any browser can talk to any server**, and the proxies, caches and CDNs in between understand the messages too.
+
+**Why HTTPS.** Without HTTPS, data travels as plain text. On café Wi-Fi, anyone on the same network could read your password as it goes by. With HTTPS, they only see scrambled data.
+
+## How it works inside
+
+### A request and a response
 
 Here is what a real request looks like:
 
@@ -39,15 +47,13 @@ Cache-Control: max-age=60
 
 Methods, status codes and headers: see [HTTP Methods, Status Codes and Headers](./http-methods-status-codes-headers.mdx).
 
-## HTTP is stateless
+### HTTP is stateless
 
 The server **forgets you after every request**. It is like a counter where a different person serves you each time. To be recognised, you must show your membership card every time.
 
 That is why the browser sends a **cookie** or a **token** with every single request (see [Cookies, Sessions and JWT](./cookies-sessions-jwt.mdx)).
 
-## HTTPS: HTTP + TLS
-
-Without HTTPS, data travels as plain text. On café Wi-Fi, anyone on the same network could read your password as it goes by. With HTTPS, they only see scrambled data.
+### HTTPS: HTTP + TLS
 
 HTTPS adds a layer called **TLS** (Transport Layer Security) **under** HTTP. HTTP writes the message, TLS locks it, and TCP carries it. TLS gives you three things:
 
@@ -55,7 +61,7 @@ HTTPS adds a layer called **TLS** (Transport Layer Security) **under** HTTP. HTT
 2. **No tampering:** nobody can change the data on the way.
 3. **The right server:** you are really talking to `bank.com`, not a fake site. This is checked with a **certificate**.
 
-## How TLS works, in simple words
+### How TLS works, in simple words
 
 Before any data is sent, the browser and server do a short **TLS handshake**:
 
@@ -77,9 +83,9 @@ sequenceDiagram
   S-->>B: Encrypted response
 ```
 
-This handshake costs **one more round trip**, on top of the TCP handshake. So a brand-new HTTPS connection waits about **two round trips** before any data moves. Another reason to **reuse connections**.
+This handshake costs **one more round trip**, on top of the TCP handshake. So a brand-new HTTPS connection waits about **two round trips** before any data moves. Another reason to **reuse connections**. (This is **TLS 1.3**, the current version. The older TLS 1.2 needed two round trips for its own handshake.)
 
-### Certificates
+#### Certificates
 
 - A **certificate** is the server's ID card. It says "this key belongs to `bank.com`".
 - It is signed by a **Certificate Authority (CA)**, a company that browsers trust, like Let's Encrypt or DigiCert.
@@ -117,6 +123,27 @@ Many companies now encrypt the traffic **inside** the private network too, espec
 | **HTTP/2** | 2015 | **Many requests at the same time** on one connection. Smaller headers. |
 | **HTTP/3** | 2022 | Runs on **QUIC (UDP)** instead of TCP. Faster setup, and one lost packet doesn't make everything else wait. Works better on phones moving between Wi-Fi and mobile data. |
 
+## When to use it
+
+- **HTTP** for almost every request and response: web pages, APIs, file downloads, calls between services.
+- **HTTPS** for everything on the internet. Always. Even a "boring" page: without it, someone in the middle can change the page and add ads or harmful code.
+
+**Don't use it when:**
+
+- The **server must push data** all the time, like chat or live scores. Plain request and response is a poor fit. Use [WebSockets or SSE](./polling-websockets-sse.mdx).
+- **Late data is useless**, like a video call or a game. HTTP waits for lost packets. Use UDP (see [TCP vs UDP](./tcp-vs-udp.mdx)).
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **WebSockets** | One connection that stays open, and both sides can send at any time | Chat, live updates. See [Polling, WebSockets and SSE](./polling-websockets-sse.mdx) |
+| **gRPC** | Fast binary calls between services. It runs on top of HTTP/2 | Service-to-service calls. See [gRPC and GraphQL](./grpc-and-graphql.mdx) |
+| **Your own protocol on TCP or UDP** | The app defines its own messages | Databases (PostgreSQL has its own protocol), games, calls |
+| **Message queue** | Messages wait in a queue until a worker is ready | Work that doesn't need an answer right now. See [Message Queues and Pub/Sub](../messaging/message-queues-pub-sub.mdx) |
+
+For HTTPS there is no real alternative on the public web. Without it, browsers mark the page "Not secure".
+
 ## In the real world
 
 **Firesheep (2010).** A free browser add-on called Firesheep let anyone on café Wi-Fi take over other people's Facebook and Twitter accounts with one click, because those sites didn't use HTTPS for everything. After the uproar, big sites moved to HTTPS for every page.
@@ -139,4 +166,7 @@ Assume HTTPS everywhere, and say where TLS ends:
   - A new HTTPS connection costs about **2 round trips**. Reuse connections.
   - **TLS usually ends at the load balancer.**
   - **HTTP/2:** many requests on one connection. **HTTP/3:** runs on QUIC (UDP).
+  - **Why:** TCP only moves bytes. HTTP gives them **shared meaning**. HTTPS stops people in the middle from **reading or changing** them.
+  - **Inside:** TLS handshake: swap key halves, **check the certificate**, build one secret key that is never sent.
+  - **Alternatives:** WebSockets, gRPC, your own protocol on TCP/UDP, a message queue.
 </Callout>

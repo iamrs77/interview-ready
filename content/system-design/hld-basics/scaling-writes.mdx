@@ -4,13 +4,9 @@ description: "What to do when writes come in faster than one database can handle
 icon: PenLine
 ---
 
-## The idea
+## What is it?
 
-Most apps read far more than they write (see [Scaling Reads](./scaling-reads.mdx)). But some are **write-heavy**: chat messages, likes, clicks, GPS updates from drivers, logs, sensor data.
-
-Reads are easier to scale: make copies of the data and read from any copy. Writes can't do that. In a database with one **primary** (the usual setup for PostgreSQL and MySQL), every write must go to the primary, the one copy that accepts changes, and then be copied to all the others. Adding read replicas doesn't help writes at all. It actually adds work, because each replica must copy every write.
-
-Some databases, like Cassandra, have no single primary: any node can take a write and pass it to the copies. Even there, **every copy still has to store every write**. What adds write capacity is splitting the data across more machines, as shown below.
+**Scaling writes** means handling more writes than one database primary can take: by making each write cheaper, smoothing out spikes, and splitting the writes across more machines.
 
 Think of a bank where one cashier writes every deposit into one big ledger book. Reading balances is easy: make photocopies of the book. But every deposit must go into the one real book. When the line gets too long, the bank has choices:
 
@@ -19,9 +15,23 @@ Think of a bank where one cashier writes every deposit into one big ledger book.
 - Split into two books, A to M and N to Z, each with its own cashier. (**Sharding**)
 - Use a kind of book that is faster to write in. (**A write-friendly database**)
 
-**But first, make each write cheaper.** Every index on a table must be updated on every write, so remove indexes you don't use (see [Indexes](../databases/indexes.mdx)). Don't write data that hasn't changed.
+## Why do we need it?
 
-## Batching and buffering writes
+Most apps read far more than they write (see [Scaling Reads](./scaling-reads.mdx)). But some are **write-heavy**: chat messages, likes, clicks, GPS updates from drivers, logs, sensor data.
+
+Reads are easier to scale: make copies of the data and read from any copy. Writes can't do that. In a database with one **primary** (the usual setup for PostgreSQL and MySQL), every write must go to the primary, the one copy that accepts changes, and then be copied to all the others. Adding read replicas doesn't help writes at all. It actually adds work, because each replica must copy every write.
+
+When the primary can't keep up, its CPU and disk max out, writes to the same rows wait on each other's locks, replicas fall further behind, and reads on the primary slow down too.
+
+Some databases, like Cassandra, have no single primary: any node can take a write and pass it to the copies. Even there, **every copy still has to store every write**. What adds write capacity is splitting the data across more machines, as shown below.
+
+## How it works inside
+
+### First, make each write cheaper
+
+Every index on a table must be updated on every write, so remove indexes you don't use (see [Indexes](../databases/indexes.mdx)). Don't write data that hasn't changed.
+
+### Batching and buffering writes
 
 Every write has a fixed cost: a network round trip, starting a transaction, and saving to disk. Writing 1,000 rows in one go is much cheaper than 1,000 separate writes.
 
@@ -41,7 +51,7 @@ INSERT INTO views (video_id, viewed_at) VALUES
 
 **The cost:** if the server crashes before saving, the buffered writes are lost, and the data is always a few seconds behind. That is fine for view counts and analytics. It is **not** fine for payments.
 
-## Queues to absorb sudden spikes
+### Queues to absorb sudden spikes
 
 Traffic comes in waves: a flash sale, a goal in a big match. A **queue** sits between the app and the database. The app puts each write in the queue and answers the user right away ("got it"). **Workers** take writes from the queue at a steady speed the database can handle.
 
@@ -68,7 +78,7 @@ Think of the order rail in a restaurant kitchen. Waiters clip orders onto the ra
 
 More in [Message Queues and Pub/Sub](../messaging/message-queues-pub-sub.mdx) and [Kafka](../messaging/kafka.mdx).
 
-## Sharding the write load
+### Sharding the write load
 
 Batching and queues help, but in the end one primary machine has a limit. **Sharding** splits the data across several databases, and each one has its own primary. Each shard takes only its share of the writes.
 
@@ -89,7 +99,7 @@ The big decision is the **shard key**: the field that decides which shard a row 
 
 Sharding has real costs: queries across shards are hard, and adding shards means moving data. Full details: [Partitioning and Sharding](../databases/partitioning-sharding.mdx) and [Consistent Hashing](../databases/consistent-hashing.mdx).
 
-## Picking a write-friendly database
+### Picking a write-friendly database
 
 Databases store data in different ways. Most SQL databases use a **B-tree**, which updates data in place on disk. That means jumping around the disk to find the right spot for every write.
 
@@ -104,6 +114,31 @@ Write-friendly databases often use an **LSM tree** (log-structured merge tree). 
 | In-memory | Redis | Very fast counters and short-lived data |
 
 Databases like Cassandra also **shard for you**: add a machine, and the data spreads out on its own. The price is fewer features: limited joins and transactions, and you must design your tables around your queries up front. See [Indexes: B-Trees and LSM Trees](../databases/indexes.mdx) and [SQL vs NoSQL](../databases/sql-vs-nosql.mdx).
+
+## When to use it
+
+Use these when your math shows **thousands of writes per second**, or when the primary's CPU or disk is near its limit. Pick the fix that matches the shape of the writes:
+
+| The writes look like... | Use |
+| --- | --- |
+| Short bursts (a flash sale, a goal in a match) | A **queue** |
+| Many tiny writes of the same kind (views, clicks, events) | **Batching** or **buffering** |
+| A steady stream bigger than one primary can take | **Sharding**, or a **write-friendly database** |
+| One row updated thousands of times a second | **Redis counters** or **sharded counters** (below) |
+
+**Don't use it when:**
+
+- **Writes are low**, like a few hundred per second. One primary with sensible indexes handles that.
+- **The user must know the write is saved right now**, like a payment. Don't buffer it in memory or hide it behind a queue without telling the user it is still pending.
+- **You haven't tried the cheap fixes yet.** Shard only after fewer indexes, batching and a bigger machine stop being enough.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **A bigger primary** | More CPU, memory and faster SSDs on the one primary | The simplest first step. It often buys a lot of time before sharding. See [Scalability](./scalability.mdx) |
+| **Distributed SQL** | SQL databases that shard and copy the data for you, like Google Spanner or CockroachDB | You need SQL and transactions, but more writes than one machine can take. See [SQL vs NoSQL](../databases/sql-vs-nosql.mdx) |
+| **Write less** | Keep only totals instead of every event, or keep a sample (say 1 in 100 events) | Analytics, where exact data for every event is not needed |
 
 ## Counting things at scale (likes, views)
 
@@ -162,10 +197,12 @@ Bring this up when your math shows thousands of writes per second, or when the d
 > "We get about 20,000 messages per second, with peaks near 60,000. That's too many for one SQL primary, so I'll store messages in Cassandra, partitioned by chat ID. Like counts go to Redis first and are saved to the database every few seconds."
 
 <Callout title="Remember this" type="success">
-  - Replicas and caches don't help writes: **every copy must store every write**. With one primary, all writes go through it.
+  - **Why:** replicas and caches don't help writes: **every copy must store every write**. With one primary, all writes go through it.
   - First make writes cheaper: fewer indexes, and **batch** many rows into one write.
   - A **queue** absorbs spikes. Workers write at a steady pace.
   - **Sharding** splits writes across many primaries. Pick a key that spreads writes evenly.
   - **Write-friendly databases** (Cassandra, LSM trees) handle huge write volumes.
+  - **Inside:** B-trees update in place, **LSM trees** add to the end of a log and merge later, so they write faster.
   - **Counters:** Redis plus a regular save, batching, or sharded counters. Never one hot row.
+  - **Alternatives:** a bigger primary, distributed SQL (Spanner, CockroachDB), or writing less.
 </Callout>

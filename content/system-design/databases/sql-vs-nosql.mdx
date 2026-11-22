@@ -4,7 +4,7 @@ description: "The two big families of databases, and how to pick the right one."
 icon: Database
 ---
 
-## The idea
+## What is it?
 
 A **database** is a program that stores your data safely and helps you find it again fast. There are two big families.
 
@@ -15,7 +15,21 @@ SQL databases are great at **asking any question** and keeping related data corr
 
 All examples on this page use an **online shop** with users, products and orders.
 
-## SQL databases: tables and relations
+## Why do we need it?
+
+Why are there two families, and not one database for everything? Because **no design is best at everything**:
+
+- **Asking any question** needs data in a fixed shape, joins, and transactions. All of that is easiest when **one machine** holds all the data.
+- **Huge scale** (more writes or more data than one machine can take) needs the data **split across many machines**. Joins and transactions across machines are slow and hard.
+- **Data with changing shapes**, like a catalog where every product has different fields, fights a fixed schema.
+
+For decades, SQL databases were the normal choice. In the 2000s, big web companies hit the limits of one machine. Google built **Bigtable** (paper in 2006) and Amazon built **Dynamo** (paper in 2007). Both gave up joins and most transactions so the data could spread over many machines. Their ideas grew into today's NoSQL databases.
+
+The choice matters because it is hard to undo. Moving a live system to another database is a big, slow project (see Discord below).
+
+## How it works inside
+
+### SQL databases: tables and relations
 
 Data lives in **tables**. A table has **columns** (fixed fields, each with a type, like number or text) and **rows** (one per item). The fixed shape of all the tables is called the **schema**.
 
@@ -43,9 +57,11 @@ What you get:
 - **Rules the database checks for you:** a price can't be empty, an order can't point to a user who doesn't exist. See [Schemas and Keys](./schemas-and-keys.mdx).
 - **Any question, any time:** you can ask new questions later, and add an [index](./indexes.mdx) to make them fast.
 
+**Under the hood:** rows are stored in small fixed-size **pages** on disk, and **indexes** (usually B-trees) point to them. For each query, a **query planner** picks the cheapest way to run it: which index to use, and in which order to join the tables (see [How a Query Runs](./how-a-query-runs.mdx)). Every change is first written to a **write-ahead log**, so a crash loses nothing. Usually **one primary** machine takes all the writes. You grow it with a bigger machine, read [replicas](./replication.mdx), and later [sharding](./partitioning-sharding.mdx).
+
 **Examples:** PostgreSQL, MySQL, SQL Server, Oracle, SQLite.
 
-## NoSQL: four main types
+### NoSQL: four main types
 
 | Type | Picture it as | You read data by... | Examples | Good for |
 | --- | --- | --- | --- | --- |
@@ -54,7 +70,7 @@ What you get:
 | **Wide-column** | A huge table split into groups by a key, sorted inside each group | Group key, then a range | Cassandra, ScyllaDB, HBase | Chat messages, events, sensor data |
 | **Graph** | Dots joined by lines | Following the lines | Neo4j, Amazon Neptune | Friends of friends, fraud rings |
 
-### Key-value
+#### Key-value
 
 The simplest kind. You store a value under a key, and get it back by that key.
 
@@ -64,7 +80,7 @@ Lookups by key are extremely fast. But you can't ask "which carts contain produc
 
 Some key-value stores do a little more. DynamoDB can also read a range of items that share one key, sorted by a second key, and lets you add extra indexes.
 
-### Document
+#### Document
 
 Each item is a **document**, usually JSON. Documents in the same collection can have different fields. That fits a product catalog, where shoes have sizes and a TV has a screen size:
 
@@ -80,15 +96,27 @@ Each item is a **document**, usually JSON. Documents in the same collection can 
 
 You usually read the **whole document** at once, so data that is used together is stored together.
 
-### Wide-column
+#### Wide-column
 
 Rows are grouped by a **partition key**, and sorted inside the group by a **clustering key**. For chat messages, the partition key is the chat ID and the messages are sorted by time. "Give me the last 50 messages in chat 9" then reads one group, from one place on disk.
 
 These databases are built for **huge numbers of writes**, spread over many machines. You must design tables around your queries up front.
 
-### Graph
+#### Graph
 
 Data is **nodes** (people, products) and **edges** (follows, bought). Questions with many hops, like "friends of my friends who bought this product", are natural here. In SQL they need many joins.
+
+### How NoSQL spreads data over many machines
+
+Key-value, document and wide-column databases are built around one rule: **every read and write names a key**. The key decides where the data lives:
+
+1. The database takes the item's **partition key** (often hashed into a number).
+2. That decides which machine (**node**) owns the item. See [Consistent Hashing](./consistent-hashing.mdx).
+3. The item is also copied to a few other nodes, so one dead node loses nothing.
+
+A read by key goes straight to the node that owns it. So you scale by adding nodes: each one holds a smaller share. This is also **why joins are hard**: the rows you would join may sit on different machines. So NoSQL designs copy data into the shape each query needs instead (see [Normalization](./normalization.mdx)).
+
+Many write-heavy NoSQL databases, like Cassandra, store data in an **LSM tree**, which turns every write into a cheap append. See [Indexes](./indexes.mdx).
 
 ## Good and bad sides
 
@@ -102,7 +130,7 @@ Data is **nodes** (people, products) and **edges** (follows, bought). Questions 
 
 The line is blurry today. PostgreSQL can store and search JSON with its `JSONB` type. MongoDB and DynamoDB support transactions across several items. So **pick by access pattern**, not by label. An **access pattern** is how the app reads and writes the data: by which key, how often, and how much at once.
 
-## How to pick a database in an interview
+## When to use which
 
 ```mermaid
 flowchart TB
@@ -116,6 +144,12 @@ flowchart TB
 
 **Start with PostgreSQL by default.** It is safe, flexible, and scales further than most people expect with [replicas](./replication.mdx) and [sharding](./partitioning-sharding.mdx). Move to NoSQL when you can name the reason: write volume one machine can't take, simple key lookups at huge scale, or very flexible data.
 
+**Don't pick NoSQL when:**
+
+- You need **joins** or new kinds of questions later (reports, admin search).
+- Several rows must change **together**, like money or stock.
+- You don't know the access patterns yet. NoSQL tables are designed around them.
+
 Big systems often use **several databases**, each for the job it does best. This is called **polyglot persistence**:
 
 ```mermaid
@@ -128,6 +162,19 @@ flowchart TB
 ```
 
 For search, see [Search](../advanced-components/search.mdx). For Redis, see [Redis](../caching/redis.mdx).
+
+## Alternatives
+
+Beyond plain SQL and the four NoSQL types:
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Distributed SQL** (Google Spanner, CockroachDB, YugabyteDB) | SQL with transactions, spread across many machines for you | You need SQL and transactions, at a scale one machine can't take |
+| **Search engine** (Elasticsearch, OpenSearch) | An inverted index, built for searching text | Search by words, with typos and ranking. See [Elasticsearch](../advanced-components/elasticsearch.mdx) |
+| **Time-series database** (InfluxDB, TimescaleDB) | Built for measurements with a timestamp | Metrics, sensor readings. See [Time-Series Databases](../advanced-components/time-series-databases.mdx) |
+| **Vector database** (Pinecone, pgvector) | Finds items with similar embeddings | AI search, "more like this". See [Vector Databases](../advanced-components/vector-databases.mdx) |
+| **Data warehouse** (BigQuery, Snowflake, Redshift) | Column storage for big analytic queries | Reports over billions of rows, not live app traffic |
+| **Object storage** (Amazon S3) | Stores files by key | Images, videos, backups. See [Storage Types](../advanced-components/storage-types.mdx) |
 
 ## In the real world
 
@@ -148,8 +195,11 @@ Avoid "NoSQL, because it scales" on its own. Interviewers will push back, becaus
 <Callout title="Remember this" type="success">
   - **SQL:** tables, fixed schema, joins, strong transactions. Ask any question.
   - **NoSQL types:** key-value, document, wide-column, graph. Each is great at one kind of access.
+  - **Why two families:** joins and transactions are easiest on **one machine**. NoSQL gives them up to **spread data across many**.
+  - **Inside:** SQL has pages, indexes, a query planner and **one primary**. NoSQL uses the **partition key** to pick the node, and copies each item to a few nodes.
   - NoSQL usually means **no joins**, so you design around your queries and copy data.
   - **Default to PostgreSQL.** Switch only with a clear reason.
   - Pick by **access pattern**, and say the reason out loud.
   - Big systems often use **several databases** for different jobs.
+  - **Alternatives:** distributed SQL (Spanner, CockroachDB), search engines, time-series and vector databases, data warehouses, object storage.
 </Callout>

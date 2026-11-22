@@ -4,7 +4,7 @@ description: "Process data in big chunks later, or one event at a time, right no
 icon: FastForward
 ---
 
-## The idea
+## What is it?
 
 Think about your **bank**. It sends you two kinds of messages:
 
@@ -13,7 +13,20 @@ Think about your **bank**. It sends you two kinds of messages:
 
 Both look at the same payments. The difference is **when** the work happens: all at once later, or bit by bit, right away.
 
-## Batch processing
+## Why do we need it?
+
+Apps create a flood of **raw events**: every click, view, payment and log line. Raw events alone are not useful. People need **answers**: "sales per day", "clicks per ad per minute", "is this payment fraud?".
+
+The simple way is to query the main database each time someone asks. That breaks at scale:
+
+- "Total sales by country this year" reads **billions of rows**. It is slow, and it **slows the database** for real users.
+- Some answers must exist **before** anyone asks. A fraud check must run during the payment. An alert must fire the moment errors jump.
+
+So we process the data **separately**, in jobs built for big volumes. There are two ways: in big chunks later (**batch**), or one event at a time as it arrives (**stream**).
+
+## How it works inside
+
+### Batch processing
 
 Batch processing **collects data for a while** (an hour, a day), then **processes all of it in one big job**.
 
@@ -33,7 +46,7 @@ flowchart TB
   WH --> Dash["Morning report"]:::client
 ```
 
-### How a batch job splits the work
+#### How a batch job splits the work
 
 The classic model is **MapReduce**. Say you want to count how often each word appears in a billion web pages:
 
@@ -43,7 +56,7 @@ The classic model is **MapReduce**. Say you want to count how often each word ap
 
 Many machines work at the same time, each on a small piece. Modern tools like Spark use the same idea, but are much faster.
 
-## Stream processing
+### Stream processing
 
 Stream processing handles **each event as it arrives**, within seconds or less.
 
@@ -64,31 +77,9 @@ flowchart TB
   R --> Dash["Live dashboard"]:::client
 ```
 
-## Side by side
+**How it survives a crash.** The job keeps its **state** (like the count so far for each ad) in memory or on local disk. Every few seconds, Flink saves a **checkpoint**: a snapshot of all state, plus the Kafka offset it had read up to, written to durable storage like S3. After a crash, it loads the last checkpoint and reads Kafka again from that offset. So each event counts **exactly once** in the state. (Writing results out exactly once also needs an idempotent or transactional sink. See [Idempotency](../messaging/idempotency.mdx).)
 
-| | Batch | Stream |
-| --- | --- | --- |
-| **Input** | A fixed chunk with an end | Never-ending events |
-| **When it runs** | On a schedule (every hour, every night) | All the time |
-| **Delay** | Hours, sometimes a day | Milliseconds to seconds |
-| **Hard parts** | Big data volume | State, late events, crashes |
-| **Fixing a bug** | Easy: run the job again | Harder: replay old events |
-| **Examples** | Reports, bills, ML training | Fraud checks, live counts, alerts |
-
-**How to choose:** ask **"how fresh must the answer be?"** If tomorrow morning is fine, use batch. It is simpler and cheaper. If the answer is useless in an hour (fraud, surge pricing), use stream.
-
-## Tools: Spark, Flink, Kafka Streams
-
-| Tool | Type | In one line |
-| --- | --- | --- |
-| **Hadoop MapReduce** | Batch | The first big open-source batch tool. Mostly replaced by Spark today |
-| **Apache Spark** | Batch, plus "micro-batch" streaming | Keeps data in memory between steps, so it is much faster than MapReduce. Its streaming mode runs tiny batches every second or so |
-| **Apache Flink** | Stream first (can do batch too) | Handles truly one event at a time. Strong at state, windows and exactly-once counting |
-| **Kafka Streams** | Stream | A Java library, not a separate cluster. It runs inside your own service, reading from and writing to Kafka |
-
-For interviews: **Spark for batch, Flink for streaming**, with Kafka in front. That covers most answers.
-
-## Windows: counting per minute, per hour
+### Windows: counting per minute, per hour
 
 A stream never ends, so "how many clicks?" has no final answer. You must ask **"how many clicks per minute?"**. A time bucket like this is called a **window**.
 
@@ -106,13 +97,42 @@ A small tumbling example. Clicks arrive at **10:00:20, 10:00:50, 10:01:10** and 
 | 10:01–10:02 | 1 |
 | 10:02–10:03 | 1 |
 
-### Late events
+#### Late events
 
 Each event carries the time it **happened** (called **event time**). It may reach the server much later (**processing time**). A phone in airplane mode can send its clicks hours late.
 
 So when can the job close the 10:00–10:01 window and publish "2 clicks"? Stream tools use a **watermark**: a marker that says "I believe all events up to 10:01 have now arrived". The job waits a little for stragglers, then closes the window. Events that come after that are either dropped or used to fix the result.
 
-## Using both together
+## Side by side
+
+| | Batch | Stream |
+| --- | --- | --- |
+| **Input** | A fixed chunk with an end | Never-ending events |
+| **When it runs** | On a schedule (every hour, every night) | All the time |
+| **Delay** | Hours, sometimes a day | Milliseconds to seconds |
+| **Hard parts** | Big data volume | State, late events, crashes |
+| **Fixing a bug** | Easy: run the job again | Harder: replay old events |
+| **Examples** | Reports, bills, ML training | Fraud checks, live counts, alerts |
+
+## Tools: Spark, Flink, Kafka Streams
+
+| Tool | Type | In one line |
+| --- | --- | --- |
+| **Hadoop MapReduce** | Batch | The first big open-source batch tool. Mostly replaced by Spark today |
+| **Apache Spark** | Batch, plus "micro-batch" streaming | Keeps data in memory between steps, so it is much faster than MapReduce. Its streaming mode runs tiny batches every second or so |
+| **Apache Flink** | Stream first (can do batch too) | Handles truly one event at a time. Strong at state, windows and exactly-once counting |
+| **Kafka Streams** | Stream | A Java library, not a separate cluster. It runs inside your own service, reading from and writing to Kafka |
+
+For interviews: **Spark for batch, Flink for streaming**, with Kafka in front. That covers most answers.
+
+## When to use which
+
+**How to choose:** ask **"how fresh must the answer be?"** If tomorrow morning is fine, use batch. It is simpler and cheaper. If the answer is useless in an hour (fraud, surge pricing), use stream.
+
+- **Pick batch** when a day's delay is fine, the numbers must be exact (bills, payroll), or the job needs all the data at once (training an ML model).
+- **Pick stream** when someone acts on the answer right away: blocking a payment, firing an alert, changing a price, updating a live dashboard.
+
+### Using both together
 
 Many systems run both, on the same events:
 
@@ -120,6 +140,15 @@ Many systems run both, on the same events:
 - **Batch** recounts everything later from the raw events, and the exact numbers replace the fast ones.
 
 This mix is called the **Lambda architecture**. Its cost is that you write the same logic twice. The **Kappa architecture** uses **only** streaming. To fix old results, you replay the old events from Kafka through the stream job again. The [Ad Click Aggregator](../questions/ad-click-aggregator.mdx) question is the classic place for this.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Query the database** | Run the `GROUP BY` on the main database or a read replica when someone asks | Small data and few people asking. See [Scaling Reads](../hld-basics/scaling-reads.mdx) |
+| **Count on write** | Update a counter in the same request: `INCR` in Redis, or `views = views + 1` | One simple number, like a like count |
+| **Materialized view** | The database stores a query's result and refreshes it when told to | The summary is one SQL query and can be a little old |
+| **OLAP database** | ClickHouse, BigQuery or Druid scan billions of rows fast, when asked | Ad hoc questions on huge data, without writing jobs. See [Time Series Databases](./time-series-databases.mdx) |
 
 ## In the real world
 
@@ -138,10 +167,13 @@ When a question needs **counts, totals or analytics**, say which kind you pick a
 > "For the live dashboard, a Flink job reads clicks from Kafka and counts them in one-minute tumbling windows. Every night, a Spark job recounts from the raw events in S3, so billing uses exact numbers."
 
 <Callout title="Remember this" type="success">
+  - **Why:** raw events pile up, and querying the main database for every answer is slow and too late for things like fraud.
   - **Batch** = big chunk, on a schedule, results later. Simple, cheap, easy to rerun. Tool: **Spark**.
   - **Stream** = each event right away. Fresh results, but harder. Tool: **Flink** (or Kafka Streams), reading from **Kafka**.
   - Choose by asking: **"How fresh must the answer be?"**
   - Streams are counted in **windows**: **tumbling** (no overlap), **sliding** (overlap), **session** (per visit).
   - **Event time** vs **processing time**. A **watermark** decides when to close a window.
   - Fast numbers from stream, exact numbers from batch = **Lambda**. Stream only, replay to fix = **Kappa**.
+  - **Inside:** batch splits work as **map, shuffle, reduce**. Stream jobs keep **state** and save **checkpoints** (state + Kafka offset) to recover from crashes.
+  - **Alternatives:** query the database (small data), count on write, a materialized view, an OLAP database like ClickHouse.
 </Callout>

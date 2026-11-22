@@ -4,7 +4,7 @@ description: "Telling the sender to slow down when you can't keep up."
 icon: WavesHorizontal
 ---
 
-## The idea
+## What is it?
 
 A restaurant kitchen can cook 20 meals an hour. On a Friday night, 40 groups walk in. A good host doesn't seat everyone and send 40 orders to the kitchen at once. The food would take hours and every table would be angry. Instead, the host says "there's a 30-minute wait", or "sorry, we're full tonight". The kitchen's limit **pushes back** all the way to the front door.
 
@@ -12,9 +12,9 @@ A restaurant kitchen can cook 20 meals an hour. On a Friday night, 40 groups wal
 
 Without backpressure, the fast sender keeps sending. The work piles up somewhere until something breaks.
 
-## Queues that grow forever
+## Why do we need it?
 
-A **producer** creates work. A **consumer** does the work. A queue sits between them to soak up short bursts (see [Message Queues and Pub/Sub](../messaging/message-queues-pub-sub.mdx)).
+**Queues that grow forever.** A **producer** creates work. A **consumer** does the work. A queue sits between them to soak up short bursts (see [Message Queues and Pub/Sub](../messaging/message-queues-pub-sub.mdx)).
 
 ```mermaid
 flowchart LR
@@ -37,9 +37,17 @@ Two things go wrong:
 
 An unlimited queue doesn't fix overload. It only **hides** it for a while, and then everything fails at once. So **every queue needs a size limit**, and a plan for what happens when it is full.
 
-## Ways to push back
+## How it works inside
 
-When the queue is full, or the service is too busy, there are three choices.
+### How the busy part knows it is busy
+
+It watches a simple number and compares it with a limit:
+
+- **Queue length.** The queue has a maximum size. Full means push back.
+- **Requests in flight.** A counter goes up when a request starts and down when it ends. Over the cap means push back.
+- **Waiting time.** How long the oldest item has waited. If it already waited longer than the client's timeout, the client has given up, and doing the work is a waste.
+
+When the number crosses the limit, the busy part pushes back in one of three ways.
 
 ### 1. Reject
 
@@ -120,6 +128,29 @@ In real code, use Node's `stream.pipeline()`, for example `await pipeline(source
 
 **A log shipper.** An agent on each server sends logs to a central log system. It keeps a buffer with a size limit. If the log system is down long enough to fill the buffer, the agent drops logs instead of using up all the memory on the server. Losing some debug logs is much better than crashing the app.
 
+## When to use it
+
+- **Every queue or buffer** between two parts that run at different speeds.
+- **APIs that can be overloaded** by a spike: reject early with `503` instead of timing out for everyone.
+- **Data pipelines and streams**: file copies, uploads, log and metric shipping.
+- **Workers that call a slower database or partner API.** Let them pull work only as fast as the slow part can take it.
+
+**Don't use it when:**
+
+- **The overload lasts.** Backpressure only buys time. Add consumers or capacity.
+- **Data must not be lost and the sender can't retry.** Don't drop or reject. Write it to a durable log with plenty of disk (like Kafka) and catch up later.
+- **Blocking would freeze something more important.** Don't make a user's request thread wait on a full internal queue. Reject fast instead.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **A durable buffer** | A queue on disk (Kafka, SQS) that can hold hours of work | Bursts are short, and late work is still useful |
+| **Add consumers (autoscaling)** | Start more workers when the queue grows | Traffic really went up and will stay up |
+| **Batching** | The consumer handles many items per trip, like one insert of 100 rows | The consumer is slow because of the cost per item, not the work itself |
+| **Rate limiting** | A fixed limit per user, set in advance | You need fairness between users. See [Rate Limiting](./rate-limiting.mdx) |
+| **Circuit breaker** | The caller stops calling a service that keeps failing | You are the caller, and the other side is down. See [Circuit Breaker](./circuit-breaker.mdx) |
+
 ## Rate limiting vs backpressure
 
 | | [Rate limiting](./rate-limiting.mdx) | Backpressure |
@@ -144,9 +175,12 @@ Whenever you add a queue to a design, say how big it can get and what happens wh
 
 <Callout title="Remember this" type="success">
   - **Backpressure** = the slow part tells the fast part to slow down.
+  - **Why:** if the sender is faster, work piles up. Delay grows, memory runs out, and everything fails at once.
+  - **Inside:** watch **queue length**, **requests in flight** or **waiting time** against a limit.
   - An **unlimited queue** only hides overload. The delay grows, then memory runs out.
   - **Every queue needs a limit**, and a plan for when it is full.
   - Three ways: **reject** (503 or 429), **slow down** the sender (blocking, pull, credits), or **drop** (only when losing data is OK).
   - Watch **queue length** and **consumer lag**.
   - Rate limiting is a fixed rule per user. Backpressure reacts to load right now.
+  - **Alternatives:** a durable buffer, more consumers, batching, rate limiting, circuit breaker.
 </Callout>

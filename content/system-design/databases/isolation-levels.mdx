@@ -4,7 +4,7 @@ description: "What happens when two transactions run at the same time, and how m
 icon: Rows3
 ---
 
-## The idea
+## What is it?
 
 Picture two bank clerks working on the **same account book** at the same time. Can one clerk see the other's half-finished pencil notes? Can the numbers change under one clerk while she is still adding them up?
 
@@ -12,7 +12,9 @@ That is **isolation**: how much transactions that run at the same time can see o
 
 Full isolation is like making the clerks **take turns**: perfectly safe, but slow. Real databases let you choose a level. Each level stops some problems and allows others, in exchange for speed.
 
-## The problems
+## Why do we need it?
+
+Many people use the app at the same time, so the database runs many transactions at once. When they touch the same data, five things can go wrong:
 
 | Problem | What happens | Example |
 | --- | --- | --- |
@@ -53,7 +55,11 @@ sequenceDiagram
   Note over DB: 2 sold, but only 1 existed
 ```
 
-## Read committed, repeatable read, serializable
+Isolation levels let you choose which of these the database stops for you, and which your app must handle.
+
+## How it works inside
+
+### Read committed, repeatable read, serializable
 
 The SQL standard defines four levels. Each one stops more problems:
 
@@ -71,31 +77,25 @@ The SQL standard only names the first three problems. The lost update and write 
 - **Repeatable read:** the whole **transaction** sees one **snapshot**, a photo of the data taken when it started. Re-reading a row always gives the same answer.
 - **Serializable:** the strongest. The result is the same as if the transactions had run **one at a time**. This stops lost updates and write skew too.
 
+### Snapshots: MVCC
+
 **How snapshots work:** databases like PostgreSQL and MySQL keep **old versions** of a row for a while when it changes. A reader simply reads the version that matches its snapshot. This is called **MVCC** (Multi-Version Concurrency Control). Its big win: **readers don't block writers, and writers don't block readers**.
+
+Step by step:
+
+1. Every row version is tagged with the ID of the transaction that **created** it, and later the one that **replaced or deleted** it.
+2. A **snapshot** is a note of which transactions had committed at one moment.
+3. A reader sees a row version only if its creator had committed by then, and its replacer had not.
+4. **Read committed** takes a new snapshot for **each statement**. **Repeatable read** keeps one snapshot for the **whole transaction**. That is the main difference between the two.
+5. Old versions that no snapshot can see any more are cleaned up later: by **VACUUM** in PostgreSQL, and by **purge** in MySQL (which keeps old versions in its undo log).
+
+### Serializable
 
 **How serializable works in PostgreSQL:** it lets transactions run side by side, but watches for patterns that could give a wrong result. If it finds one, it stops one of the transactions with a "could not serialize access" error. Your app must then **retry the whole transaction**.
 
-## Speed vs safety
+This method is called **Serializable Snapshot Isolation (SSI)**. Each transaction reads from a snapshot as usual, and the database also tracks what each one **read** and what each one **wrote**. The danger sign is a pattern like write skew: A read a row that B changed at the same time, and B read a row that A changed at the same time.
 
-| | Weaker levels | Stronger levels |
-| --- | --- | --- |
-| **Speed** | Faster. Many transactions run side by side | Slower. More waiting, or more failed transactions |
-| **Bugs** | More chances for lost updates and write skew | Fewer surprises |
-| **App work** | You must protect the risky spots yourself | You must retry failed transactions |
-
-A common, practical approach: **keep the default level**, and protect only the few risky spots:
-
-- Do the math **inside the database**: `UPDATE products SET stock = stock - 1 WHERE id = 42 AND stock >= 1`. This one statement can't lose an update.
-- **Lock the row** you are about to change with `SELECT ... FOR UPDATE`. See [Locks and Deadlocks](./locking.mdx).
-- Let the database enforce rules with `UNIQUE` and `CHECK` constraints.
-- Run the few critical transactions at a stronger level:
-
-```sql
-BEGIN ISOLATION LEVEL SERIALIZABLE;
--- check that the seat is free, then book it
-COMMIT;
--- if this fails with a serialization error, run the whole thing again
-```
+**MySQL does it with locks instead.** At serializable, plain reads inside a transaction take **shared locks**, so a writer must wait until the readers finish. Safer, but more waiting.
 
 ## Default levels in PostgreSQL and MySQL
 
@@ -118,6 +118,48 @@ Even the **same level name** works differently. Here is repeatable read in each:
 
 Take the lost update diagram above. On PostgreSQL at repeatable read, Shopper B's write fails, and the app retries with fresh data. On MySQL, B's write goes through, and the shop sells an item it doesn't have. So on MySQL, repeatable read alone doesn't protect a "read, then write" step. Use an atomic update or `SELECT ... FOR UPDATE`. For other ways the two databases differ, see [PostgreSQL vs MySQL](./postgresql-vs-mysql.mdx).
 
+## When to use which
+
+| Level | Use it for |
+| --- | --- |
+| **Read committed** | Most web apps. Protect the few risky spots yourself (below) |
+| **Repeatable read** | Reports and exports that read many tables and must see **one moment in time** |
+| **Serializable** | Rules that span several rows, like "at least one doctor on call" or "no double booking", when you can retry |
+| **Read uncommitted** | Almost never |
+
+### Speed vs safety
+
+| | Weaker levels | Stronger levels |
+| --- | --- | --- |
+| **Speed** | Faster. Many transactions run side by side | Slower. More waiting, or more failed transactions |
+| **Bugs** | More chances for lost updates and write skew | Fewer surprises |
+| **App work** | You must protect the risky spots yourself | You must retry failed transactions |
+
+A common, practical approach: **keep the default level**, and protect only the few risky spots:
+
+- Do the math **inside the database**: `UPDATE products SET stock = stock - 1 WHERE id = 42 AND stock >= 1`. This one statement can't lose an update.
+- **Lock the row** you are about to change with `SELECT ... FOR UPDATE`. See [Locks and Deadlocks](./locking.mdx).
+- Let the database enforce rules with `UNIQUE` and `CHECK` constraints.
+- Run the few critical transactions at a stronger level:
+
+```sql
+BEGIN ISOLATION LEVEL SERIALIZABLE;
+-- check that the seat is free, then book it
+COMMIT;
+-- if this fails with a serialization error, run the whole thing again
+```
+
+## Alternatives
+
+Beyond the levels and the fixes above:
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Optimistic locking** | A `version` column, checked when you save | Clashes are rare, or a person edits for a long time. See [Locks and Deadlocks](./locking.mdx) |
+| **Exclusion constraint** (PostgreSQL) | A rule like "no two bookings of the same room may overlap in time" | Write skew over time ranges: room bookings, shifts |
+| **One queue per hot item** | All changes to one item go through one queue, handled one at a time | One item gets a huge rush, like a flash sale. See [Dealing with Contention](../distributed-systems/dealing-with-contention.mdx) |
+| **Distributed lock** | A lock held in Redis or ZooKeeper, outside the database | The thing to protect is not a row in one database. See [Distributed Locking](../distributed-systems/distributed-locking.mdx) |
+
 ## In the real world
 
 **Shop apps had real bugs from weak isolation.** In 2017, researchers at Stanford published a paper called "ACIDRain". They tested popular open-source online shop apps and found many bugs caused by requests running at the same time. For example, by sending many requests at once, a shopper could spend the same gift card balance more than once.
@@ -132,10 +174,13 @@ Bring it up when two users can change the **same thing at the same time**: the l
 
 <Callout title="Remember this" type="success">
   - **Isolation** = how much transactions running at the same time see of each other.
+  - **Why:** many transactions run at once. Without rules, they read half-done work and **overwrite** each other.
   - Problems: **dirty read**, **non-repeatable read**, **phantom read**, **lost update**, **write skew**.
   - Levels: read uncommitted, **read committed**, **repeatable read**, **serializable**. Stronger is safer but slower.
   - **Defaults:** PostgreSQL = read committed. MySQL = repeatable read.
   - **Same name, different rules:** at repeatable read, PostgreSQL stops lost updates (with an error to retry). MySQL doesn't.
   - **MVCC** keeps old row versions, so readers and writers don't block each other.
+  - **Inside:** read committed takes a **snapshot per statement**, repeatable read **one per transaction**. PostgreSQL's serializable (**SSI**) watches for conflicts. MySQL's uses locks.
   - Keep the default, and protect hot spots with **atomic updates, row locks or serializable** plus retries.
+  - **Alternatives:** optimistic locking, exclusion constraints, one queue per hot item, distributed locks.
 </Callout>

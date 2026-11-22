@@ -4,7 +4,7 @@ description: Keep a copy of data in a fast place, so you can read it again much 
 icon: Zap
 ---
 
-## The idea
+## What is it?
 
 A **cache** is a small, fast storage that keeps a **copy** of data you use often. The next time you need that data, you read the copy instead of going back to the slow place where the real data lives.
 
@@ -12,7 +12,23 @@ Think of the **water bottle on your desk**. You don't walk to the kitchen every 
 
 In software, the "kitchen" is usually a **database** on disk, another service, or a server far away. The "bottle" is usually **memory (RAM)**, which is much faster to read.
 
-## Hit and miss
+## Why do we need it?
+
+Without a cache, every request goes all the way to the place where the real data lives. Three things hurt:
+
+- **The same work, again and again.** Most apps are **read-heavy**, and a few popular items (the home page, a famous profile, today's top products) get most of the reads. Each read repeats the same query.
+- **The slow place is slow.** A database reads from disk and does real work. Another company's API, or a server far away, adds network trips. The numbers are below.
+- **The slow place has a limit.** A database can answer only so many queries per second. Repeated reads use up that limit, and more database machines cost a lot.
+
+A cache answers the repeated reads from a fast copy. Users get faster answers, and the database only sees the **misses**.
+
+## How it works inside
+
+### A key-value lookup in memory
+
+Most caches are a big **hash table** in memory. You give a key, like `user:42`, and get the value back in one step, no matter how many entries there are. Two extra rules make it a cache: each entry can have a **time to live (TTL)**, after which it is gone, and when memory is full the cache **throws entries away** (eviction).
+
+### Hit and miss
 
 Every time you look in the cache, one of two things happens:
 
@@ -57,7 +73,7 @@ A small example. 100 requests come in. The cache answers in **1 ms**. The databa
 
 Two wins at once: requests are **10 times faster**, and the database does **20 times less work**. A good cache for popular data often has a hit ratio of 90% or more.
 
-## Why a cache is fast
+### Why a cache is fast
 
 The answer is simple: **memory is much faster than disk, and a nearby machine is much faster than a far one.**
 
@@ -99,7 +115,7 @@ The closer to the user a cache is, the faster it is, and the less work every lay
 
 There are even caches you don't see: the CPU has its own tiny caches, the operating system caches disk files in memory, and DNS answers are cached too (see [DNS](../foundations/dns.mdx)).
 
-## What is worth caching
+## When to use it
 
 Cache data that is:
 
@@ -108,7 +124,20 @@ Cache data that is:
 - **Slow or costly to get.** A big query, or a call to another company's API.
 - **Okay to be a little old.** A like count that is a few seconds behind is fine.
 
-Don't trust a cache for decisions that must always be exact, like a bank balance at the moment of payment, or booking the last seat on a flight. Those always check the database. A cache can still help **show** such data, with a very short TTL.
+**Don't use it when:**
+
+- **A decision must always be exact.** Don't trust a cache for decisions like a bank balance at the moment of payment, or booking the last seat on a flight. Those always check the database. A cache can still help **show** such data, with a very short TTL.
+- **Each item is read only once or twice,** or changes on almost every read. The hit ratio stays low, and the cache only adds a network hop.
+- **The database is already fast enough.** A cache adds old data, more servers and more code that can break.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Fix the query** | Add the right index, or rewrite the query. See [Indexes](../databases/indexes.mdx) | Reads are slow because of a missing index, not because they repeat |
+| **Read replicas** | Copies of the database that serve reads. See [Replication](../databases/replication.mdx) | Too many reads, but the data is too big or too varied to cache |
+| **Precompute the answer** | Build the result ahead of time: a summary table, or a feed built when a post is written | The same costly answer is needed often, and can be built in the background |
+| **Bigger database machine** | More CPU and RAM. The database then keeps more data in its own memory | Traffic is still small. The simplest fix |
 
 ## The hard parts
 
@@ -140,4 +169,7 @@ Don't just say "add a cache". Say **what** you cache, the **key**, and **how lon
   - Memory is about **1,000 times faster** than an SSD. Redis reads take **under 1 ms**.
   - Caches live in the **browser, CDN, app server and a shared cache** like Redis.
   - Cache data that is **read often, changed rarely, and slow to get**.
+  - **Why:** apps read the same data again and again, the database is slow, and it can only answer so many queries.
+  - **Inside:** a **hash table** in memory, with a **TTL** per entry and **eviction** when full.
+  - **Alternatives:** fix the query, read replicas, precompute the answer, a bigger database.
 </Callout>

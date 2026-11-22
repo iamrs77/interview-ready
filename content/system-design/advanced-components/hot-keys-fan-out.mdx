@@ -4,7 +4,7 @@ description: "When one item gets most of the traffic, like a celebrity's post, a
 icon: Flame
 ---
 
-## The idea
+## What is it?
 
 Picture a supermarket with **10 checkout counters**. A famous film star is working at counter 3 for one day. Everyone queues at counter 3. The other 9 counters stand empty. Opening more counters doesn't help, because nobody wants to use them.
 
@@ -12,7 +12,19 @@ That is a **hot key**. You spread your data across many machines to share the lo
 
 **Fan-out** is the other side of popularity. When someone with many followers posts, that one post must reach **millions of feeds**. Like a newspaper that has to be delivered to every subscriber's door.
 
-## Hot keys and hot partitions
+## Why do we need it?
+
+We split data across many machines so that each one carries a **fair share** of the load (see [Partitioning and Sharding](../databases/partitioning-sharding.mdx)). That plan assumes traffic is spread out. Real traffic is not:
+
+- **Popularity is very uneven.** A few posts, products or accounts get most of the views. One viral post can get more traffic than millions of normal posts together.
+- **Adding machines doesn't help.** Each key lives on **one** machine. Add ten more machines, and the hot key still sits on one of them.
+- **Popular people make writes explode.** One post from an account with 100 million followers can mean 100 million feed updates.
+
+If you don't plan for this, one machine is overloaded and slows down or fails. Everyone whose data sits on it suffers too, even though the system as a whole has plenty of spare capacity.
+
+## How it works inside
+
+### Hot keys and hot partitions
 
 Big databases and caches split data across machines by key (see [Partitioning and Sharding](../databases/partitioning-sharding.mdx)). Hashing spreads the **keys** evenly. But it does not spread the **traffic** evenly.
 
@@ -29,7 +41,7 @@ flowchart TB
 
 A **bad shard key** causes the same problem for writes. If you shard by **date**, every write today goes to the one shard that holds today. Pick keys that spread new writes out, like a user ID.
 
-## Spotting hot keys
+### Spotting hot keys
 
 You can't fix a hot key until you know which key it is. Ways to find it:
 
@@ -38,7 +50,7 @@ You can't fix a hot key until you know which key it is. Ways to find it:
 - **Use the database's own tools.** Redis can list its busiest keys with `redis-cli --hotkeys` (this needs an **LFU** eviction policy, like `allkeys-lfu`: when memory is full, Redis removes the least-often-used keys). DynamoDB's **CloudWatch Contributor Insights** shows the most used and most throttled keys. Google Bigtable's **Key Visualizer** draws a heat map of which keys get the traffic.
 - **Expect the obvious ones.** Some hot keys are easy to predict: the flash-sale product, the World Cup final page, an account with millions of followers. Prepare for them before the traffic arrives.
 
-## Fixes for hot keys
+### Fixes for hot keys
 
 **When the hot key is read a lot:**
 
@@ -95,11 +107,11 @@ async function countLikes() {
 
 The 10 sub-keys usually land on different machines, so the writes are shared. Reads get a little more costly, which is fine when writes are the problem.
 
-## Fan-out: one post, many feeds
+### Fan-out: one post, many feeds
 
 When a user posts, all their followers should see it in their **home feed**. There are two ways to do this.
 
-### Fan-out on write (push)
+#### Fan-out on write (push)
 
 **When the post is created**, copy its ID into the feed list of **every follower**, right away. Reading a feed is then one quick lookup of a ready-made list.
 
@@ -115,7 +127,7 @@ flowchart TB
   FW -->|"add post id"| F3[("Feed of follower 3")]:::cache
 ```
 
-### Fan-out on read (pull)
+#### Fan-out on read (pull)
 
 **Store the post once.** When a user opens their feed, look up who they follow, fetch everyone's latest posts, then merge and sort them.
 
@@ -129,7 +141,7 @@ flowchart TB
   FS -->|"3. merge and sort by time"| R
 ```
 
-### Side by side
+#### Side by side
 
 | | Fan-out on write (push) | Fan-out on read (pull) |
 | --- | --- | --- |
@@ -140,7 +152,7 @@ flowchart TB
 
 Most apps have far more reads than writes, so **push is usually the default**. But it has one big weakness.
 
-## The celebrity problem
+### The celebrity problem
 
 Imagine an account with **100 million followers**. With fan-out on write, one post means **100 million feed writes**. That takes a long time, keeps the workers busy for everyone else, and followers at the end of the line see the post late.
 
@@ -160,6 +172,30 @@ flowchart TB
 
 Celebrity posts are now read by millions of people. That makes them **hot keys**, so they get the read fixes from above: caching, copies and in-memory caches. See [Design a News Feed](../questions/news-feed.mdx) for the full design.
 
+## When to use which
+
+| Situation | Use |
+| --- | --- |
+| One key is **read** a lot | A cache, a short copy in each app server's memory, key copies. A CDN if it is public |
+| One key is **written** a lot | A split counter, or buffer and batch the writes |
+| A feed, most users have a normal number of followers | **Fan-out on write** (push) |
+| Some accounts have millions of followers | **Hybrid**: push for normal users, pull for celebrities |
+| Few people read feeds, or follow lists change a lot | **Fan-out on read** (pull) |
+
+**Don't use these fixes when:**
+
+- The key is **not actually hot**. Key copies and split counters make reads and updates harder. Use them only for keys you measured or can predict.
+- The followers are **inactive** (for push). Filling feeds for users who never come back wastes work. You can skip them, and build their feed on read when they return.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **A bigger machine for the hot shard** | Give just that node more CPU and memory | A short spike you can predict, like a sale. It buys time, it doesn't fix the cause |
+| **Limit or queue the hot item** | Let only so many requests per second reach it. The rest wait in a queue or get "try again" | Ticket drops and flash sales. See [Rate Limiting](../reliability-security/rate-limiting.mdx) and [Dealing with Contention](../distributed-systems/dealing-with-contention.mdx) |
+| **Let the service split it** | DynamoDB and Bigtable move or split busy partitions on their own | You already use them. One single item still can't go past one partition's limit |
+| **Precompute the answer** | Build the hot result once (the World Cup page, the top posts) and serve it as a file | The content is the same for everyone |
+
 ## In the real world
 
 **Twitter used the hybrid model.** In talks about how Twitter's timelines worked (around 2012 and 2013), Twitter engineers explained that each user's home timeline was kept as a list in **Redis**. A new tweet was pushed into the timelines of the author's followers. For accounts with a very large number of followers, the tweets were not pushed. They were merged into the timeline when it was read.
@@ -173,10 +209,12 @@ In any feed, social or "popular item" question, say the word **"hot key"** befor
 > "Most users get fan-out on write, so feeds load fast. Celebrities with millions of followers are not fanned out. Their posts are merged in when a feed is read, and cached heavily, because they are hot keys."
 
 <Callout title="Remember this" type="success">
+  - **Why:** sharding spreads **keys**, not **traffic**. One popular key lives on one machine, and adding machines doesn't move it.
   - **Hot key** = one key with far more traffic. **Hot partition** = the one machine holding it.
   - Spot them by comparing shards, counting requests per key, or the database's own tools (like `redis-cli --hotkeys`).
   - Read fixes: **cache, in-memory copy, key copies, CDN, combine identical requests**.
   - Write fixes: **split the counter** into sub-keys, **buffer and batch** writes.
   - **Fan-out on write** (push): fast reads, heavy posting. **Fan-out on read** (pull): cheap posting, slow reads.
   - **Celebrity problem:** pushing to millions of feeds is too slow. Use a **hybrid**: push for normal users, pull for celebrities.
+  - **Alternatives:** a bigger machine (buys time), limit or queue the hot item, let DynamoDB or Bigtable split it, precompute the answer.
 </Callout>

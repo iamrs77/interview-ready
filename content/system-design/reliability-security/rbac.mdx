@@ -4,13 +4,27 @@ description: "Give permissions to roles like admin or editor, not to each user."
 icon: Users
 ---
 
-## The idea
+## What is it?
 
 In an office building, doors open with badges. Nobody sets up every door for each of the 500 employees one by one. Instead there are a few badge **types**. A "Staff" badge opens the main doors. A "Finance" badge also opens the finance room. An "IT" badge also opens the server room. When Ravi joins the finance team, he gets a Finance badge. When he moves to IT, his badge type changes. No door has to be changed.
 
 **Role-Based Access Control (RBAC)** works the same way. You don't give permissions to each user. You give permissions to **roles**, and then give users roles.
 
-## Users, roles and permissions
+## Why do we need it?
+
+**Giving permissions to each user one by one doesn't scale.** With 10,000 users and 50 permissions, that is up to 500,000 yes/no settings. Mistakes are easy to make and hard to spot. People collect access as they change jobs, and nobody removes the old access. And no one can quickly answer "who can delete users?"
+
+Most people with the same job need the same access. RBAC groups that access once, under the job's name.
+
+Why this helps:
+
+- **Easy to manage.** You may have 10,000 users, but only 5 roles to think about.
+- **Easy to check.** "Who can delete users?" Look at one role.
+- **Easy to change.** A new employee gets the right access with one role. When someone leaves, remove their roles.
+
+## How it works inside
+
+### Users, roles and permissions
 
 - A **permission** is one action on one kind of thing, like `article:write`, `article:publish` or `user:delete`.
 - A **role** is a named set of permissions that matches a job, like `author`, `editor` or `admin`.
@@ -41,13 +55,14 @@ flowchart LR
 
 Can Ravi publish? Ravi has the `editor` role, and `editor` has `article:publish`. So yes. Can Asha? Her only role is `author`, which doesn't have it. So no.
 
-Why this helps:
+### What a permission check does
 
-- **Easy to manage.** You may have 10,000 users, but only 5 roles to think about.
-- **Easy to check.** "Who can delete users?" Look at one role.
-- **Easy to change.** A new employee gets the right access with one role. When someone leaves, remove their roles.
+1. **Find the user's roles**, in this team or project if roles are given per team.
+2. **Expand the hierarchy**: an admin also gets everything an editor has.
+3. **Collect the permissions** of all those roles into one set.
+4. **Allow only if the permission asked for is in the set.** This is **deny by default**: no matching permission means no.
 
-## An RBAC example
+### An RBAC example
 
 A news website:
 
@@ -100,6 +115,29 @@ Good habits:
 - **Least privilege.** Give each person the smallest role that lets them do their job.
 - **Watch for role explosion.** If every special case gets its own new role ("editor-sports-only", "editor-but-no-delete"), you end up with more roles than people. That is a sign you need attributes (below).
 - **Review regularly** who has admin, and remove access when people change jobs.
+
+## When to use it
+
+- **Users fall into clear job types**: viewer, editor, admin.
+- **Business apps with teams or workspaces**, where each person gets a role per workspace.
+- **Internal tools and company systems**, where access follows job titles.
+- **Cloud and infrastructure access**, like Kubernetes or AWS.
+
+**Don't use it when:**
+
+- **The rule depends on the specific item**, like "edit only your own drafts". Add ownership checks or ABAC.
+- **Access is shared item by item**, like Google Docs. Use relationship-based rules (ReBAC).
+- **Every user needs a different mix of access.** You'd end up with one role per person (role explosion).
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Ownership checks in code** | "Is this order yours?" A simple `if` in the service | Users mostly touch their own data. Usually added on top of RBAC |
+| **ACL (access control list)** | Each item keeps its own list of who may do what, like file permissions | Items are shared with a few people each |
+| **ABAC** | Rules on facts about the user, the item and the situation | Detailed rules, like "managers approve up to 1,000 dollars". See below |
+| **ReBAC** | Access comes from relationships: "shared with her team" | Sharing-heavy apps like Docs or Drive. See below |
+| **A policy engine** (Open Policy Agent) | Rules written in a separate policy language, asked by every service | Many services must follow the same rules, and you want them in one place |
 
 ## RBAC vs ABAC, in short
 
@@ -161,8 +199,11 @@ When the system has different kinds of users, name the roles and say how you che
 
 <Callout title="Remember this" type="success">
   - **Permissions go to roles, roles go to users.**
+  - **Why:** permissions per user don't scale. Thousands of users, but only a few jobs.
+  - **Inside:** find the user's roles, expand the hierarchy, collect the permissions, **deny by default**.
   - Check **permissions** in code, not role names.
   - Roles are often given **per team or project**, not for the whole app.
   - Give the **least privilege** needed, and watch for **role explosion**.
   - **ABAC** uses facts (owner, time, department) for detailed rules. Most apps mix RBAC with ownership checks.
+  - **Alternatives:** ownership checks, ACLs, ABAC, ReBAC, a policy engine.
 </Callout>

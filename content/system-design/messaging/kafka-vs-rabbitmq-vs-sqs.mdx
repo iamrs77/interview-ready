@@ -4,7 +4,7 @@ description: "Three popular messaging tools, and when to pick each one."
 icon: Columns3
 ---
 
-## The idea
+## What is it?
 
 Three ways to handle mail:
 
@@ -12,7 +12,21 @@ Three ways to handle mail:
 - **RabbitMQ** is a **post office sorting room**. Letters come in, staff read the labels, and sort each letter into the right mailboxes by rules. Once you collect your letter, it is gone from the box.
 - **Amazon SQS** is a **rented mailbox**. You don't run anything. You drop letters in, take letters out, and pay per letter. Simple, with few extras.
 
-## Kafka: a log you can replay
+## Why do we need it?
+
+Once you decide to pass messages through a broker (see [Message Queues and Pub/Sub](./message-queues-pub-sub.mdx)), you still have to pick **which** broker. These three are built on **different ideas**: a log you can replay, a smart router, and a simple managed queue.
+
+Picking the wrong one hurts later:
+
+- Pick **SQS**, and later a new team needs last month's events. They are already deleted.
+- Pick **Kafka** for a few emails a second, and you run a whole cluster for a job a simple queue could do.
+- Pick **RabbitMQ** for a huge stream that piles up, and it slows down, because it works best when queues stay short.
+
+So it pays to know how each one works inside, and what it is good and bad at.
+
+## How it works inside
+
+### Kafka: a log you can replay
 
 [Kafka](./kafka.mdx) keeps messages in a **log**. Consumers keep a bookmark (an **offset**) and read at their own pace.
 
@@ -23,7 +37,7 @@ Three ways to handle mail:
 - **Harder to run.** You must plan partitions, brokers and disks. Managed versions like **Amazon MSK** and **Confluent Cloud** run it for you.
 - **Weak at:** per-message tricks like delays, priorities, or retrying one message while the next ones move on. (As of 2026, Kafka 4.2's **share groups** add per-message acks and retries, but give up order.)
 
-## RabbitMQ: a smart message broker
+### RabbitMQ: a smart message broker
 
 **RabbitMQ** is a classic **message broker** (the system that stores and passes messages between services). Producers don't send straight to a queue. They send to an **exchange**: a router that decides which queues get the message, using rules called **bindings** and a label on each message called the **routing key**.
 
@@ -49,7 +63,7 @@ flowchart TB
 - **Weak at:** replay (messages are gone after the ack) and very long queues. It works best when queues stay short. Newer versions add **streams**, a Kafka-like log, for replay.
 - You run it yourself, or use a managed service like **Amazon MQ**.
 
-## SQS: a simple managed queue
+### SQS: a simple managed queue
 
 **Amazon SQS** (Simple Queue Service) is a queue that AWS runs for you. There are no servers to manage, it grows on its own, and you pay per request.
 
@@ -83,6 +97,12 @@ sequenceDiagram
 - SQS has **no pub/sub** by itself. Put an **SNS** topic in front to send one message to many queues (see [Message Queues and Pub/Sub](./message-queues-pub-sub.mdx)).
 - **Weak at:** replay (deleted means gone), and it only exists on AWS. Other clouds have their own versions, like Google Cloud Pub/Sub and Azure Service Bus.
 
+### How each one keeps messages safe
+
+- **Kafka:** each partition is copied to several brokers. Consumers **pull** and save their own offset.
+- **RabbitMQ:** **quorum queues** copy each message to several nodes, using the **Raft** algorithm to agree on it. The broker pushes messages, but only up to a **prefetch** limit: how many messages a consumer may hold without an ack.
+- **SQS:** AWS keeps copies of each message on several servers. Consumers pull, and can use **long polling**: wait up to 20 seconds for a message instead of asking again and again.
+
 ## Side by side
 
 | | Kafka | RabbitMQ | SQS |
@@ -97,7 +117,7 @@ sequenceDiagram
 | **Who runs it** | You, or MSK / Confluent Cloud | You, or Amazon MQ | AWS |
 | **Best for** | Event streams, replay, analytics | Task queues with routing and priorities | Simple background jobs on AWS |
 
-## How to choose
+## When to use which
 
 ```mermaid
 flowchart TB
@@ -111,6 +131,26 @@ flowchart TB
 ```
 
 Many companies use **more than one**: Kafka for the main event stream, and SQS or RabbitMQ for simple job queues like sending emails.
+
+**Don't pick:**
+
+- **Kafka** for a small job queue, or when jobs need delays and priorities.
+- **RabbitMQ** when you need to replay old messages (unless you use its streams), or when queues will grow very long.
+- **SQS** when you need replay, strict order at very high speed, or you are not on AWS.
+
+## Alternatives
+
+Other tools, beyond these three:
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Google Cloud Pub/Sub** | Google's managed pub/sub with push and pull | You are on Google Cloud |
+| **Azure Service Bus** | Azure's managed broker with queues and topics | You are on Azure |
+| **Amazon Kinesis Data Streams** | AWS's managed log, split into shards | On AWS, and you want a Kafka-like stream with nothing to run |
+| **Apache Pulsar** | A log and a queue in one system | You want both styles together |
+| **NATS** | A light, very fast messaging system. **JetStream** adds storage and replay | Simple, fast messaging between services, or small devices |
+| **Redis Streams** | A log inside Redis, with consumer groups and acks | You already run Redis and the volume is small |
+| **Database table as a queue** | Jobs are rows, taken with `SELECT ... FOR UPDATE SKIP LOCKED` | Low volume, and the job must be saved with your data in one transaction |
 
 ## In the real world
 
@@ -130,6 +170,8 @@ Pick one, and give the reason in one sentence:
   - **Kafka** = a log. Messages **stay**, many groups read, you can **replay**. Huge throughput, harder to run.
   - **RabbitMQ** = a smart broker. **Exchanges** route by rules. Deleted after **ack**. Priorities and routing.
   - **SQS** = a simple **managed** queue. **Visibility timeout**, Standard vs **FIFO**, add **SNS** for fan-out.
+  - **Why:** they are built on different ideas. The wrong pick means lost history, a cluster for nothing, or a slow broker.
   - Replay or many readers → **Kafka**. Smart routing → **RabbitMQ**. Simple jobs on AWS → **SQS**.
   - Using two of them together is normal.
+  - **Alternatives:** Google Cloud Pub/Sub, Azure Service Bus, Kinesis, Pulsar, NATS, Redis Streams, a database table.
 </Callout>

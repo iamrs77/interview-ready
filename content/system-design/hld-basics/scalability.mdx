@@ -4,7 +4,7 @@ description: "How a system keeps working well when users grow from 100 to 100 mi
 icon: TrendingUp
 ---
 
-## The idea
+## What is it?
 
 A system is **scalable** if it can handle more users, more data and more requests just by adding more resources, without being rebuilt.
 
@@ -15,11 +15,19 @@ Think of a small restaurant. On a quiet day, one cook is enough. Then the restau
 
 Both work for a while. But one cook, however fast, can only cook so much. A kitchen with many cooks can keep growing.
 
-## What scalability means
-
 Scalability is not the same as speed. A system can be fast for 100 users and fall over at 10,000. That system is fast, but not scalable.
 
 A simple test: **if traffic doubles, can I handle it by adding machines, or must I change the design?** If adding machines is enough, the system scales.
+
+## Why do we need it?
+
+**Every machine has a fixed limit**: so much CPU, memory, disk speed and network. While traffic stays under that limit, all is well. When traffic goes past it:
+
+1. Requests start to **wait in line**, so every request gets slower (see [Queueing Basics](./queueing-basics.mdx)).
+2. The line grows faster than it drains, so requests **time out** and users see errors.
+3. Finally the machine runs out of memory or connections and **falls over**, often right when the most users are watching.
+
+Traffic does not grow politely, either. A product launch or a viral post can bring 10x the users in an hour. Without a way to add capacity, success itself takes the system down.
 
 Growth comes in three shapes, and each one hurts a different part:
 
@@ -29,7 +37,11 @@ Growth comes in three shapes, and each one hurts a different part:
 | **Data** | Years of photos and messages | Database disk and slow queries |
 | **Users far away** | The app launches in new countries | Latency, because users are far from the servers |
 
-## Vertical scaling: a bigger machine
+## How it works inside
+
+There are only two ways to add capacity: make one machine bigger, or add more machines.
+
+### Vertical scaling: a bigger machine
 
 **Vertical scaling** (also called **scaling up**) means making one machine stronger: more CPU, more memory (RAM), a faster disk.
 
@@ -45,7 +57,7 @@ Growth comes in three shapes, and each one hurts a different part:
 - **It is still one machine.** If it dies, everything is down. This is a **single point of failure** (see [Availability and Reliability](./availability-reliability.mdx)).
 - An upgrade often needs a restart, so there is some downtime.
 
-## Horizontal scaling: more machines
+### Horizontal scaling: more machines
 
 **Horizontal scaling** (also called **scaling out**) means adding more machines and spreading the work across them. A [load balancer](./load-balancing.mdx) sits in front and sends each request to one of them.
 
@@ -76,7 +88,16 @@ flowchart TB
 - **Servers must not keep user data in their own memory.** Otherwise a user's next request may land on a machine that doesn't know them. See [Stateless vs Stateful Servers](./stateless-vs-stateful.mdx).
 - **Data is harder.** Adding app servers is easy. Spreading one database across many machines is hard (see [Scaling Writes](./scaling-writes.mdx)).
 
-## Side by side
+### How auto-scaling works
+
+1. You pick a **metric** and a **target**, for example "average CPU at 60%".
+2. The cloud watches the metric. If it stays above the target for a few minutes, it starts new machines from the **same image** (the same code and setup).
+3. Each new machine must pass its [health check](./health-checks-service-discovery.mdx) before the load balancer sends it traffic.
+4. When the metric stays low, it removes machines again, down to a minimum you set.
+
+A new machine takes a minute or more to boot and warm up. So auto-scaling handles slow growth well, but a sudden spike can arrive before the new machines are ready. For a known event (a sale, a launch), add machines ahead of time.
+
+## When to use which
 
 | | Vertical (scale up) | Horizontal (scale out) |
 | --- | --- | --- |
@@ -87,6 +108,24 @@ flowchart TB
 | **Best for** | Databases, young apps | Stateless app servers, big systems |
 
 In practice, you do both. You scale app servers **out**, and you scale the database **up** as far as it sensibly goes before you split it.
+
+**Don't scale out when:**
+
+- **One machine still has plenty of room.** More machines only add parts to run and watch.
+- **The slow part is a bad query or bad code.** Ten machines running a slow query are still slow. Fix it first (an [index](../databases/indexes.mdx), a cache).
+- **The part holds data that is hard to split**, like the main database. Scale it up and add read replicas first. Split it only when you must.
+
+## Alternatives
+
+Adding machines is not the only answer to more load. Often the cheaper fix is to make each request **do less work**:
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Optimize** | Add an index, fix a slow query, remove wasted work | One query or endpoint uses most of the time. See [Finding Bottlenecks](../production/finding-bottlenecks.mdx) |
+| **Cache** | Keep the answers to common reads in memory | The same data is read again and again. See [What Is Caching](../caching/what-is-caching.mdx) |
+| **Do it later** | Put slow work on a queue, and answer the user right away | The user doesn't need to wait for the work (emails, video processing). See [Message Queues](../messaging/message-queues-pub-sub.mdx) |
+| **CDN** | Serve static files from servers close to users | Most traffic is images, video or scripts. See [CDN](../caching/cdn.mdx) |
+| **Limit the load** | Reject or slow down extra requests | A few clients send far too much, or a spike would crash everything. See [Rate Limiting](../reliability-security/rate-limiting.mdx) |
 
 ## What usually breaks first as you grow
 
@@ -126,9 +165,11 @@ Every design should scale horizontally at the app layer. Say it early, then spen
 
 <Callout title="Remember this" type="success">
   - **Scalable** = handle more load by adding resources, without a redesign.
+  - **Why:** every machine has a limit. Past it, requests wait, time out, and the machine falls over.
   - **Vertical** = a bigger machine. Simple, but it has a ceiling and is a single point of failure.
   - **Horizontal** = more machines. Almost no ceiling and survives failures, but more complex.
   - Horizontal scaling needs **stateless** servers.
   - Usual order: **separate DB → more app servers → cache and replicas → shard → CDN and regions**.
   - The **database** is almost always the hard part.
+  - **Alternatives:** make each request cheaper first: optimize, cache, queue, CDN, rate limit.
 </Callout>

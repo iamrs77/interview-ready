@@ -4,7 +4,7 @@ description: "How to find the slow part of a system by measuring, and the usual 
 icon: ScanSearch
 ---
 
-## The idea
+## What is it?
 
 A **bottleneck** is the one part of a system that limits everything else. The name comes from a bottle: no matter how big the bottle is, water can only pour out as fast as the narrow neck allows.
 
@@ -12,7 +12,11 @@ Think of a **highway with one narrow bridge**. Cars drive fast on four lanes, th
 
 Systems work the same way. If the database is the slow part, adding more app servers does not help, and can make it worse (more servers sending queries to the same struggling database). So the first job is always to **find the bridge**, and only then fix it.
 
-## Measure first, then fix
+## Why do we need it?
+
+When a system gets slow, the natural move is to make **something** faster, or to add **more machines**. But a system is only as fast as its **slowest part**. Speeding up any other part wastes time and money, and the system stays just as slow.
+
+### Measure first, then fix
 
 Guessing is the classic mistake: "it must be the code", followed by a week of tuning code that was never the problem.
 
@@ -31,7 +35,13 @@ The request takes about 400 ms, and the database takes **300 ms** of it:
 - Make the app code **twice as fast**: you save 30 ms. The request still takes about 370 ms.
 - Fix the one slow query, from 300 ms down to 30 ms: you save **270 ms**. The request now takes about 130 ms.
 
-**Fix the biggest part first.** A good way to work:
+**Fix the biggest part first.**
+
+## How it works inside
+
+### Step by step
+
+A good way to work:
 
 <Steps>
 <Step>
@@ -61,7 +71,7 @@ The request takes about 400 ms, and the database takes **300 ms** of it:
 </Step>
 </Steps>
 
-## Where bottlenecks hide
+### Where bottlenecks hide
 
 | Resource | Signs | How to check | Common fixes |
 | --- | --- | --- | --- |
@@ -80,11 +90,13 @@ A handy checklist for each resource is the **USE method**:
 
 A resource that is busy **and** has a queue is your bottleneck.
 
-## Slow query logs and EXPLAIN
+Why a busy part hurts so much: as a resource gets close to 100% busy, requests start to **wait in a queue**, and the wait grows very fast near the top, not slowly. A disk at 95% can be many times slower than one at 70%. See [Queueing Basics](../hld-basics/queueing-basics.mdx).
+
+### Slow query logs and EXPLAIN
 
 The database is the most common bottleneck. Two tools find the bad queries.
 
-### 1. The slow query log
+#### 1. The slow query log
 
 Tell the database to write down every query slower than a limit:
 
@@ -99,7 +111,7 @@ long_query_time = 0.2
 
 In PostgreSQL, the `pg_stat_statements` extension also shows which queries take the most **total** time. A 5 ms query that runs a million times an hour can matter more than one slow report.
 
-### 2. EXPLAIN
+#### 2. EXPLAIN
 
 `EXPLAIN` shows the database's **plan** for a query: how it will find the rows. `EXPLAIN ANALYZE` actually runs the query and shows the real times.
 
@@ -167,6 +179,24 @@ const items = allItemsResult.rows;
 
 Each query may take only 2 ms, but 51 of them in a row is over 100 ms.
 
+## When to use it
+
+- An endpoint **misses its SLO**, or its p99 suddenly jumps. See [SLI, SLO and SLA](./sli-slo-sla.mdx).
+- **Before adding machines.** Check that the real limit is not one database or one slow call.
+- **After a load test**, to find out which part broke first. See [Load Testing](./load-testing.mdx).
+
+**Don't use it when:**
+
+- **Nothing is slow** and no target is at risk. Tuning fast code costs time and often makes it harder to read.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Scale first** | Add bigger or more machines without digging | The limit is clearly CPU on stateless app servers, and time matters more than money |
+| **Load testing** | Create traffic on purpose to see where it breaks | Before a launch, so you find the bottleneck before users do |
+| **Continuous profiling** | A light profiler runs in production all the time, like Grafana Pyroscope | You want to see the hot code at any moment, without trying to reproduce the problem |
+
 ## In the real world
 
 **Stack Overflow built MiniProfiler.** Stack Overflow's team built a small tool, **MiniProfiler**, that shows developers, in the corner of every page, how long the page took and how long **each SQL query** took. Slow queries and N+1 problems become visible during normal work, not weeks later. They released it as open source.
@@ -181,9 +211,11 @@ You won't run `EXPLAIN` in a system design interview, but you will be asked "thi
 
 <Callout title="Remember this" type="success">
   - A **bottleneck** is the narrow part that limits everything. Fixing anything else doesn't help.
+  - **Why:** a system is only as fast as its **slowest part**. Speeding up anything else wastes effort.
   - **Measure first:** metrics → trace → resource. Fix the **biggest** part. Change **one** thing. Measure again.
   - Look at **CPU, memory, disk, network, the database, and waiting on others**.
   - **USE method:** Utilization, Saturation, Errors.
   - Database: **slow query log** finds the queries, **EXPLAIN** shows why. `Seq Scan` on a big table = missing index.
   - Classic fixes: **index, fix N+1, fetch less, pool connections, cache**.
+  - **Alternatives:** scale first, load testing, continuous profiling.
 </Callout>

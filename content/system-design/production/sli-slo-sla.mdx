@@ -4,7 +4,7 @@ description: "How teams measure reliability, set goals for it, and promise it to
 icon: Target
 ---
 
-## The idea
+## What is it?
 
 "Is our system reliable enough?" is a vague question. SLI, SLO and SLA turn it into numbers.
 
@@ -16,7 +16,20 @@ Think of a **pizza shop** that delivers:
 
 Notice the order: the SLA (45 minutes) is **easier** than the SLO (30 minutes). The shop wants to see trouble coming, and fix it, **long before** it has to give away free pizza.
 
-## SLI: what you measure
+## Why do we need it?
+
+Without agreed numbers, "reliable" means something different to everyone:
+
+- **Product** wants new features out fast. **Operations** wants nothing to change. Neither can prove the other wrong.
+- Alerts fire on things users never notice, like high CPU, while a broken checkout stays quiet.
+- Nobody knows if last night's outage was "fine" or "terrible".
+- Customers don't know what they are paying for.
+
+SLIs, SLOs and SLAs give one shared, **measured** answer to "how reliable is reliable enough?", based on what **users** feel. The root idea, availability and the nines, is in [Availability and Reliability](../hld-basics/availability-reliability.mdx).
+
+## How it works inside
+
+### SLI: what you measure
 
 An SLI is almost always a **ratio of good events to all events**:
 
@@ -36,7 +49,7 @@ A few tips:
 - A `4xx` error is usually the **client's** mistake (see [HTTP Methods, Status Codes and Headers](../foundations/http-methods-status-codes-headers.mdx)), so most teams don't count it as a failure.
 - For latency, a "percent of requests under X ms" SLI is the same idea as a percentile. See [Latency Percentiles](./latency-percentiles.mdx).
 
-## SLO: your goal
+### SLO: your goal
 
 An SLO is an SLI plus a **target** and a **time window**:
 
@@ -58,7 +71,7 @@ More on the nines in [Availability and Reliability](../hld-basics/availability-r
 
 **Don't aim for 100%.** It is impossible, and chasing it costs a fortune. Users can't tell 99.99% from 100% anyway, because their own Wi-Fi and phone network fail more often than that. Each extra nine usually costs much more work and money than the one before, and slows down every release.
 
-## SLA: the promise to customers
+### SLA: the promise to customers
 
 An SLA is a **contract**. It says what the provider promises and **what happens if it breaks the promise**. Usually that is **service credits**: money off the customer's next bill.
 
@@ -80,7 +93,7 @@ flowchart TB
 
 Internal services usually have **SLOs but no SLA**. SLAs are for paying customers.
 
-## Error budgets
+### Error budgets
 
 If the SLO is 99.9%, then **0.1% of requests are allowed to fail**. That allowance is the **error budget**. It is not a failure to use it. It is room you are **allowed to spend**.
 
@@ -104,6 +117,25 @@ This ends the old fight between "ship fast" and "keep it stable". Both sides agr
 
 Teams also alert on how **fast** the budget is burning. If the whole month's budget would be gone in a day or two at the current error rate, that pages someone right away.
 
+**Burn rate** puts a number on that speed. A burn rate of **1** spends the budget in exactly 30 days. A burn rate of **14.4** spends 2% of it in one hour, and would empty it in about 2 days. Google's SRE Workbook suggests paging someone at that speed.
+
+Most teams use a **rolling** 30-day window: each day, the oldest day drops out and today comes in. So a bad day stops counting 30 days later.
+
+## When to use it
+
+- **Every service that users depend on** should have SLOs, including internal services.
+- **SLAs** only when paying customers need a promise in a contract.
+- **Error budgets** when the team must decide between shipping features and fixing reliability.
+
+**Don't use it when:**
+
+- **It is a prototype or side project** with no real users yet. The numbers would be pure overhead.
+- **You haven't measured the SLI yet.** Measure it for a few weeks first, or you may promise an SLA you can't keep.
+
+## Alternatives
+
+Before SLOs, teams usually watched **machine metrics** (CPU, memory, disk) and paged someone when one crossed a line, or showed an **uptime** number from a pinger that checked the site every minute. Both are still useful, but they miss what users feel: a server can have low CPU and still fail every checkout. SLOs measure from the user's side.
+
 ## In the real world
 
 **Google made SLOs and error budgets popular.** Google's book "Site Reliability Engineering" (2016) describes how its teams use SLOs and error budgets to decide when to ship and when to stop and fix things. The book also makes the point that 100% is the wrong reliability target for almost every system.
@@ -120,9 +152,11 @@ Giving different parts different targets shows you think about what really matte
 
 <Callout title="Remember this" type="success">
   - **SLI** = what you **measure**: good events / all events.
+  - **Why:** one shared, measured answer to "reliable enough?", based on what **users** feel.
   - **SLO** = your **goal**: SLI + target + time window, like 99.9% over 30 days.
   - **SLA** = the **contract** with customers, with a penalty. Looser than the SLO.
   - **Error budget** = 100% minus the SLO. Budget left: ship. Budget gone: fix reliability.
   - 99.9% over 30 days = about **43 minutes** of downtime. 99.99% = about **4.3 minutes**. 99.999% = about **26 seconds**.
   - **Never aim for 100%.**
+  - **Alternatives:** before SLOs, teams alerted on machine metrics (CPU, disk) and uptime pings. They miss what users feel.
 </Callout>

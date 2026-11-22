@@ -4,7 +4,7 @@ description: "A search engine that splits an index into shards across machines, 
 icon: TextSearch
 ---
 
-## The idea
+## What is it?
 
 Think of a big library with **five librarians**. Each one keeps the catalog for one part of the books. You give your question to the **head librarian**. She asks all five at once, each one sends back their best few books, and she hands you the best ten overall.
 
@@ -14,7 +14,17 @@ The basics (the inverted index, analyzers, ranking with BM25, and a first look a
 
 Everything here works the same in **OpenSearch**, the open-source copy of Elasticsearch that AWS started.
 
-## The inverted index, in one minute
+## Why do we need it?
+
+A normal database is built to find rows by exact values. It is weak at **searching text**: `LIKE '%pizza%'` reads every row, misses "Pizzas" and typos, and has no "best match first" (the full story is in [Search](./search.mdx)).
+
+You could build an inverted index yourself with a library like Lucene. But then you must also handle the data **growing past one machine**: split it, copy it so a dead server loses nothing, send each search to all the pieces, and merge the answers.
+
+Elasticsearch does all of that for you. It turns Lucene into a **search server** that runs on many machines, and you talk to it with JSON over HTTP.
+
+## How it works inside
+
+### The inverted index, in one minute
 
 For every word, the inverted index keeps a list of the documents that contain it: `pizza → docs 1, 2`. A search looks up each word and combines the lists, instead of reading every document. The full story is in [Search](./search.mdx).
 
@@ -23,7 +33,7 @@ Elasticsearch is built on **Apache Lucene**, a search library. Each shard is one
 - **The original JSON** of each document (called `_source`), so it can return it in results.
 - **Column data** for each field (called **doc values**), used for **sorting** and **counting**.
 
-## Mappings: text vs keyword
+### Mappings: text vs keyword
 
 A **mapping** is the schema of an index: the type of each field. The most important choice is how to store words:
 
@@ -60,7 +70,7 @@ Content-Type: application/json
 - **You can add new fields later, but not change a field's type.** To change it, you build a new index and copy everything in (see the alias trick below).
 - `geo_point` lets you search by distance: "pizza within 5 km". See [Geospatial Indexing](./geospatial-indexing.mdx).
 
-## Nodes, shards and replicas
+### Nodes, shards and replicas
 
 A **cluster** is a group of Elasticsearch servers, called **nodes**. An index is split into **primary shards**. Each primary has **replica** copies on other nodes.
 
@@ -87,7 +97,7 @@ flowchart TB
 - **Each document lives in one shard.** Elasticsearch picks it from the document ID, roughly `hash(id) % number of primary shards`.
 - **So the number of primary shards is hard to change.** Change it and every document would belong to a different shard. You choose it when you create the index. To change it later, you build a new index. (Kafka has the same problem with partitions, see [Kafka](../messaging/kafka.mdx).)
 
-## Writing a document: why search is "near real time"
+### Writing a document: why search is "near real time"
 
 A new document is not searchable at once. Here is what happens when you save one:
 
@@ -111,7 +121,7 @@ What follows from this:
 - **Need to see your own write in search?** Add `?refresh=wait_for` to the save. The call waits until the next refresh before it answers. Use it for rare cases, like "show my new listing in my search results".
 - **Loading millions of documents?** Use the `_bulk` API (many documents in one request), and refresh less often, like every 30 seconds, while it runs.
 
-## How a search runs: query, then fetch
+### How a search runs: query, then fetch
 
 A search on `restaurants` goes to **one copy of every shard** (the primary or a replica). It happens in two phases:
 
@@ -242,7 +252,7 @@ flowchart TB
 3. Point the alias at `restaurants_v2`. This switch happens in **one step**, so searches never fail.
 4. Delete `restaurants_v1`.
 
-## When to use it in an interview
+## When to use it
 
 | Use Elasticsearch for | Don't use it for |
 | --- | --- |
@@ -253,6 +263,16 @@ flowchart TB
 | **Searching logs** from thousands of servers (see [Logging and Metrics](../questions/logging-metrics.mdx)) | A small app. PostgreSQL's own full-text search may be enough |
 
 That last point is worth saying out loud. For a few million rows and simple search, PostgreSQL's full-text search (a `tsvector` column with a **GIN** index) avoids running a second system. Bring in Elasticsearch when you need better ranking, typo tolerance, facet counts, or more scale.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **OpenSearch** | The open-source fork AWS started in 2021. Works the same way | You want AWS's managed service, or a project run by a neutral foundation |
+| **PostgreSQL full-text search** | A `tsvector` column with a **GIN** index | A few million rows and simple search, with no second system to run |
+| **Apache Solr** | Another search server built on Lucene, with the same shards and replicas idea | Your team already runs it |
+| **Algolia, Meilisearch, Typesense** | Simpler search engines, or search run for you | Product or site search on small to medium data |
+| **Grafana Loki, ClickHouse** | Cheaper stores for logs. Loki indexes only labels, not the log text. ClickHouse is a column store | Huge log volumes, where cost matters more than ranking |
 
 ## In the real world
 
@@ -273,10 +293,12 @@ Say where the truth lives, how the copy is fed, and how a search runs:
 **Answer:** "Partly. It stores JSON documents, and I can read, update and delete them, so it has database features. But it's built for search and analytics. It has no transactions across documents and no joins, and new data shows up about a second late. So I don't use it as the main database. It holds a searchable copy, and the real data stays in PostgreSQL."
 
 <Callout title="Remember this" type="success">
+  - **Why:** a database is weak at text search, and one machine can't hold it all. Elasticsearch runs **Lucene on many machines** for you.
   - An index is split into **primary shards** (fixed when you create it) with **replicas** on other nodes.
   - **`text`** fields are analyzed for full-text search. **`keyword`** fields are exact, for filters, sorting and counts.
   - Search is **near real time**: a **refresh**, about once a second, makes new documents searchable. Get by ID is instant.
   - A search is **scatter-gather** in two phases: **query** (IDs and scores from every shard), then **fetch** (full documents for the winners). Deep pages are costly: use `search_after`.
   - Words go in **`must`** (scored). Everything else goes in **`filter`** (yes or no, cached).
   - It is **not the source of truth**. Feed it with **CDC or the outbox**, use the database ID as the document ID, and rebuild with an **alias** swap.
+  - **Alternatives:** OpenSearch (same thing), PostgreSQL full-text search (small apps), Solr, Algolia or Meilisearch, Loki or ClickHouse (logs).
 </Callout>

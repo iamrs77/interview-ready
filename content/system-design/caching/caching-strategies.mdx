@@ -4,7 +4,7 @@ description: "Cache-aside, read-through, write-through and write-behind: four wa
 icon: Route
 ---
 
-## The idea
+## What is it?
 
 Once you have a cache, you must decide two things:
 
@@ -15,7 +15,18 @@ Think of a **restaurant waiter** and the **kitchen**. Some waiters keep a few po
 
 All examples use an **online shop** with a `products` table and a Redis cache.
 
-## Cache-aside (lazy loading)
+## Why do we need it?
+
+A cache is a **second copy** of the data, so every read and every write has to deal with two places. Without a fixed rule, things go wrong:
+
+- **On a read miss,** someone must load the data and save a copy. If each part of the code does it its own way, keys get cached differently, or not at all.
+- **On a write,** change only the database and readers keep getting the old copy (see [Cache Invalidation and TTL](./cache-invalidation-ttl.mdx)). Change only the cache and a crash loses the change. Change both in the wrong order and the two copies disagree.
+
+A strategy is that fixed rule. It decides **how fresh** the data is, **how fast** writes are, and **what you lose** if the cache dies.
+
+## How it works inside
+
+### Cache-aside (lazy loading)
 
 The **app** talks to both the cache and the database. The cache is "on the side" and knows nothing about the database.
 
@@ -74,7 +85,7 @@ async function updatePrice(id, price) {
 
 **This is the default choice in interviews.**
 
-## Read-through
+### Read-through
 
 The app talks **only to the cache**. On a miss, **the cache itself** loads the data from the database.
 
@@ -95,7 +106,7 @@ It works like cache-aside, but the "check, then load" logic lives in the cache (
 
 **Good:** app code is simpler. **Bad:** you need a cache that knows how to talk to your database. Plain Redis does not do this by itself, so you usually get it from a library or a managed product.
 
-## Write-through
+### Write-through
 
 On every write, the data goes to the **cache and the database together**, before the app says "done".
 
@@ -114,7 +125,7 @@ sequenceDiagram
 
 **Bad:** every write is slower, because it waits for two writes. And the cache fills with data that may never be read. Write-through is often paired with read-through.
 
-## Write-behind (write-back)
+### Write-behind (write-back)
 
 The app writes **only to the cache** and gets "done" right away. The cache saves the changes to the database **later**, often in batches.
 
@@ -131,11 +142,13 @@ sequenceDiagram
   Cache->>DB: Add 2 views (one write)
 ```
 
+Inside, the cache marks each changed key as **dirty** (not yet saved). A background worker writes the dirty keys to the database every few seconds, or after a number of changes.
+
 **Good:** writes are very fast, and many small writes become one database write.
 
 **Bad:** if the cache crashes before it saves, **those writes are lost**. It is also more complex to build. Use it only for data where losing a few seconds of changes is okay, like view counts or likes, and never for payments or orders.
 
-## Side by side
+### Side by side
 
 | Strategy | Who fills the cache | Write path | Fresh data? | Main risk |
 | --- | --- | --- | --- | --- |
@@ -146,7 +159,7 @@ sequenceDiagram
 
 There is also **write-around**: writes go only to the database and skip the cache. The cache gets the data later, on a read miss. Cache-aside with "update the database, delete the key" is a kind of write-around.
 
-## Which one to pick
+## When to use which
 
 ```mermaid
 flowchart TB
@@ -158,6 +171,15 @@ flowchart TB
 ```
 
 Most real systems use **cache-aside + delete on write + a TTL**. How to keep that data fresh is in [Cache Invalidation and TTL](./cache-invalidation-ttl.mdx).
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Refresh-ahead** | The cache reloads popular keys **before** their TTL runs out | A few hot keys must never miss. See [Cache Problems](./cache-problems.mdx) |
+| **Update from the change log** | A worker reads the database's change log (CDC) and deletes the matching keys | Many services write the same data. See [Cache Invalidation and TTL](./cache-invalidation-ttl.mdx) |
+| **HTTP caching** | Browsers and CDNs keep whole responses, controlled by the `Cache-Control` header | The response is the same for many users. See [CDN](./cdn.mdx) |
+| **The database's own cache** | The database keeps hot pages in its memory (the PostgreSQL buffer cache, the InnoDB buffer pool) | The hot data fits in the database's memory, so a separate cache isn't needed yet |
 
 ## In the real world
 
@@ -181,4 +203,6 @@ If writes are huge and losing a few is fine, mention write-behind for counters.
   - **Write-through:** write to the cache and the database together. Always fresh, slower writes.
   - **Write-behind:** write to the cache now, the database later. Fast, but **can lose data**.
   - On a write, **update the database, then delete the key**. Don't update the cached value.
+  - **Why:** a cache is a second copy. You need a fixed rule for who fills it and what happens on a write.
+  - **Alternatives:** refresh-ahead, updates from the change log (CDC), HTTP caching, the database's own cache.
 </Callout>

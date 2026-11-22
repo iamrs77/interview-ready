@@ -4,7 +4,7 @@ description: "Why the average hides slow requests, and what to measure instead."
 icon: Percent
 ---
 
-## The idea
+## What is it?
 
 **Latency** is how long one request takes, from asking to getting the answer (see [Latency, Throughput and QPS](../hld-basics/latency-throughput-qps.mdx)). To know if a system is fast, you measure the latency of many requests. The question is how to sum them up in one number.
 
@@ -12,9 +12,9 @@ Think of a **pizza shop**. Last night, 9 pizzas arrived in about 25 minutes. One
 
 **Percentiles** fix this. Instead of one blended number, they tell you "how slow was it for the slowest 10% or 1% of requests?"
 
-## A worked example: 10 requests
+## Why do we need it?
 
-Ten requests came in. Their latencies, in milliseconds (ms), in the order they arrived:
+To see why the average is not enough, take a worked example. Ten requests came in. Their latencies, in milliseconds (ms), in the order they arrived:
 
 `32, 25, 900, 28, 22, 40, 25, 30, 20, 35`
 
@@ -37,6 +37,10 @@ xychart-beta
   y-axis "Latency (ms)" 0 --> 1000
   bar [20, 22, 25, 25, 28, 30, 32, 35, 40, 900]
 ```
+
+So you need a number that shows the **slow** requests too. Users remember those.
+
+## How it works inside
 
 ### Finding the percentiles
 
@@ -84,7 +88,15 @@ console.log(percentile(times, 99)); // 900
 
 (Monitoring tools use slightly different formulas, so their numbers can differ a little. The idea is the same.)
 
-## p50, p95 and p99 explained
+### How monitoring tools do it: histograms
+
+Sorting every request time works for 10 requests, not for millions per minute. So most tools keep a **histogram** instead: a few **buckets** with counters, like "under 10 ms", "under 25 ms", "under 50 ms", "under 100 ms". Each request adds 1 to its bucket. The raw times are thrown away.
+
+To get p99, the tool finds the bucket where the 99% mark falls, and **estimates** a value inside it. So the answer is only as exact as the buckets: if the 99% mark falls in "50 to 100 ms", the tool guesses a value in that range. Choose bucket limits close to the numbers you care about, like your SLO limit. Some tools use smarter summaries (like HdrHistogram or t-digest) to be more exact.
+
+Counters can be **added up**: the buckets from 50 servers add into one histogram. That is why histograms, not percentiles, are what you collect (see "Don't average percentiles" below).
+
+### p50, p95 and p99 explained
 
 | Percentile | Also called | How many requests are slower | What it tells you |
 | --- | --- | --- | --- |
@@ -130,7 +142,18 @@ With 100 servers, **most** user requests are slow, even though each server is fa
 
 **Fixes for the tail:** cache more, fix the slow cause (often garbage collection or a slow query), set **timeouts** (see [Retries, Backoff and Timeouts](../messaging/retries-backoff-timeouts.mdx)), call fewer servers, and **hedged requests**: if a server hasn't answered by the usual p95 time, send the same request to a second copy and use whichever answers first.
 
-## What to alert on
+## When to use it
+
+- **Latency targets** in requirements and SLOs: "p99 under 300 ms".
+- **Dashboards and alerts** for every endpoint users feel (below).
+- **Comparing before and after** a change, like a deploy or a load test.
+
+**Don't use it when:**
+
+- **There are only a few requests.** With 50 requests, p99 is just the slowest one, which is mostly noise.
+- **You do capacity math.** "How many requests are in flight at once?" uses the **average**: requests per second times the average time (this is **Little's Law**).
+
+### What to alert on
 
 - **Alert on p99 (or p95), not the average.** The average can look fine while 1 in 100 users waits seconds.
 - **Use a time window.** "p99 above 500 ms **for 5 minutes**", not "one slow request". Single slow requests always happen.
@@ -150,6 +173,16 @@ An example alert rule for Prometheus (a popular metrics tool), where the alert f
 
 Which percentile and which limit to pick is a business decision. That is what an **SLO** is: see [SLI, SLO and SLA](./sli-slo-sla.mdx).
 
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Average (mean)** | Total time divided by the number of requests | Capacity math and total cost. Never alone for user experience |
+| **Maximum** | The single slowest request | Finding one odd request to debug. Too noisy for alerts |
+| **Share under a limit** | "99.2% of requests took under 300 ms" | SLOs. It adds up across servers more easily than a percentile |
+| **Heatmap** | The histogram drawn over time, darker where more requests fall | You want to see the whole shape, like two groups (cache hits and misses) |
+| **Apdex score** | One score from 0 to 1. Requests under a target T count fully, under 4T count half, slower ones count zero | Some monitoring tools show it as a simple "happiness" number |
+
 ## In the real world
 
 **Amazon measures at p99.9.** Amazon's Dynamo paper (2007) explains that Amazon writes its internal performance targets at the **99.9th percentile**, not the average or median, so that almost every customer gets a good experience, not just the typical one.
@@ -166,9 +199,12 @@ If your design fans out to many servers, mention that the tail grows with fan-ou
 
 <Callout title="Remember this" type="success">
   - The **average lies**: one slow request pulls it up, and it describes nobody.
+  - **Why:** users remember the **slow** requests, and the average hides them.
   - **Sort, then pick:** p90 = the value 90% of the way down the sorted list.
+  - **Inside:** real tools count requests in **histogram buckets**, then estimate the percentile from them.
   - **p50** = typical. **p95** = 1 in 20 slower. **p99** = 1 in 100 slower, the **tail**.
   - **Fan-out** makes the tail worse: 100 servers at 1% slow each = **63%** of requests slow.
   - **Alert on p99 or p95 over a window**, per important endpoint, next to the error rate.
   - **Never average percentiles.** Combine histograms, then compute.
+  - **Alternatives:** average (for capacity math), max, share under a limit, heatmap, Apdex.
 </Callout>

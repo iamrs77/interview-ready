@@ -4,7 +4,7 @@ description: "Doing the same thing twice has the same effect as doing it once. T
 icon: RotateCcw
 ---
 
-## The idea
+## What is it?
 
 Think of the **button at a pedestrian crossing**. Press it once and the light will change. Press it ten more times out of impatience: the light still changes **once**. Pressing again does no extra harm.
 
@@ -12,18 +12,24 @@ That is **idempotency**: doing the same thing **once or many times has the same 
 
 Now think of paying in a shopping app. You tap "Pay". The app spins, the network drops, and you don't know if it worked. You tap again. If the payment system is **not** idempotent, you **pay twice**. If it is, the second tap is seen as the **same payment**, and you pay once.
 
+## Why do we need it?
+
 Networks fail all the time. Every retry, whether by the user, the app, a proxy or a message queue, is a chance to do something twice. Idempotency is what makes retries safe.
 
-## Where duplicates come from
+Where duplicates come from:
 
 - A user **double-clicks** a button.
 - The app **times out and retries**, but the first request actually worked. Only the reply was lost. (See [HTTP Methods, Status Codes and Headers](../foundations/http-methods-status-codes-headers.mdx).)
 - A **load balancer or proxy** retries a request on its own.
 - A **message queue** delivers a message again (see [Delivery Guarantees](./delivery-guarantees.mdx)).
 
-You can't stop all of these. So the **server** must make repeats harmless.
+You can't stop all of these. So the **server** must make repeats harmless. Retries themselves are covered in [Retries, Backoff and Timeouts](./retries-backoff-timeouts.mdx).
 
-## Idempotency keys
+## How it works inside
+
+There are three main ways: an **idempotency key** for API requests, the **event ID** for messages, and work that is **safe to repeat by design**.
+
+### Idempotency keys
 
 An **idempotency key** is a unique ID that the **client** creates for one **action**, like "pay for basket 42". The client sends it with the request, and sends the **same key** with every retry of that action.
 
@@ -73,7 +79,46 @@ flowchart TB
 - **Only one copy may win a race.** Two copies of a request can arrive at the same moment, and both see "key not found". So "save the key" must be **atomic**: one step that only one request can win. A **unique constraint** in the database does this. The second insert fails, so that request knows another one is already running.
 - **Pass the key down.** If your service calls a card provider, send your own idempotency key to the provider too, so a retry can't charge twice there either.
 
-### The code
+### Where to store the keys
+
+| Where | Good | Watch out |
+| --- | --- | --- |
+| **Same database as the data** | The key and your own database changes are saved in **one transaction**: both or neither | More rows in the main database. Delete old keys. An outside call, like a card charge, can never be in that transaction, so pass the key down |
+| **Redis** (`SET key value NX EX 86400`) | Very fast. Old keys expire by themselves | Not in the same transaction as your database. Redis can lose recent writes in a crash |
+| **Memory of one server** | Nothing | Lost on restart, and other servers can't see it. Don't do this |
+
+**How long to keep them?** Long enough to cover every retry. **24 hours** is common. Remove old keys with a TTL (an expiry time) or a nightly clean-up job.
+
+### Idempotent message consumers
+
+Messages work the same way. The message's own **event ID** is the key. Say the Order Service gets a `PaymentSucceeded` event for order 42. It saves the event ID **in the same transaction** as its work:
+
+```sql
+BEGIN;
+-- event_id is the primary key, so this fails if we handled the event before
+INSERT INTO processed_events (event_id) VALUES ('e-4d81b7');
+UPDATE orders SET status = 'PAID' WHERE id = 42;
+COMMIT;
+```
+
+If the insert fails with a duplicate key error, the transaction stops, nothing changes, and the consumer just acks the message.
+
+### Making the work safe by design
+
+Sometimes you don't need a key table at all, because the work itself is safe to repeat:
+
+- **Set, don't add.** `SET status = 'PAID'` is safe twice. `balance = balance + 10` is not.
+- **Only change from the expected state.** `UPDATE orders SET status = 'PAID' WHERE id = 42 AND status = 'PENDING'`. The second time, it changes 0 rows.
+- **Unique constraints.** A unique `order_id` on the payments table means the database refuses a second payment for the same order.
+- **Upsert.** "Insert, or update if it already exists" gives the same row however many times it runs.
+
+### Idempotent HTTP methods
+
+Some HTTP methods are idempotent by design: `GET`, `PUT` and `DELETE`. `POST` and `PATCH` are not. [HTTP Methods, Status Codes and Headers](../foundations/http-methods-status-codes-headers.mdx) explains why. Idempotency keys are for the methods that are **not** idempotent, mostly `POST`.
+
+One more trick: let the **client** choose the ID. `PUT /orders/5f1c2e8a` with a client-made ID creates the order the first time, and simply replaces it with the same data on a retry. No key table needed.
+
+## The code
 
 A table to hold the keys:
 
@@ -93,7 +138,7 @@ CREATE TABLE idempotency_keys (
 
 And the request handler, in four small pieces.
 
-#### Step 1: Claim the key
+### Step 1: Claim the key
 
 Save the key as `in_progress`. The primary key makes sure only one request wins.
 
@@ -112,7 +157,7 @@ async function claimKey(userId, key, body) {
 }
 ```
 
-#### Step 2: Check a key we have seen before
+### Step 2: Check a key we have seen before
 
 The key is already in the table, so never do the work again. Decide what to answer instead.
 
@@ -146,7 +191,7 @@ async function checkSeenKey(userId, key, body) {
 }
 ```
 
-#### Step 3: Do the work once
+### Step 3: Do the work once
 
 We own the key. Charge the card, then save the answer.
 
@@ -174,7 +219,7 @@ async function chargeOnce(userId, key, req, res) {
 }
 ```
 
-#### Step 4: Put it together
+### Step 4: Put it together
 
 The handler runs the three steps in order.
 
@@ -218,44 +263,29 @@ WHERE user_id = $1 AND idempotency_key = $2
 -- 1 row updated: we own it now, so run the work. 0 rows: it is still running, so answer 409.
 ```
 
-## Idempotent HTTP methods
+## When to use it
 
-Some HTTP methods are idempotent by design: `GET`, `PUT` and `DELETE`. `POST` and `PATCH` are not. [HTTP Methods, Status Codes and Headers](../foundations/http-methods-status-codes-headers.mdx) explains why. Idempotency keys are for the methods that are **not** idempotent, mostly `POST`.
+- **Any request that moves money or creates something**, like payments, orders and bookings, where the client may retry.
+- **Every message consumer.** Queues deliver at least once, so a message can come twice.
+- **Webhook receivers.** Senders like Stripe may send the same event more than once.
+- **Any call you put behind automatic retries.**
 
-One more trick: let the **client** choose the ID. `PUT /orders/5f1c2e8a` with a client-made ID creates the order the first time, and simply replaces it with the same data on a retry. No key table needed.
+**Don't use it when** (you don't need a key table):
 
-## Idempotent message consumers
+- The operation is **already safe to repeat**: a `GET`, a `PUT` with the full data, a plain "set the status".
+- Losing or doubling a message **does no harm**, like a metric or a "user is typing" signal.
 
-Messages work the same way. The message's own **event ID** is the key. Say the Order Service gets a `PaymentSucceeded` event for order 42. It saves the event ID **in the same transaction** as its work:
+## Alternatives
 
-```sql
-BEGIN;
--- event_id is the primary key, so this fails if we handled the event before
-INSERT INTO processed_events (event_id) VALUES ('e-4d81b7');
-UPDATE orders SET status = 'PAID' WHERE id = 42;
-COMMIT;
-```
+Other ways to stop a repeat from doing harm:
 
-If the insert fails with a duplicate key error, the transaction stops, nothing changes, and the consumer just acks the message.
-
-## Making the work safe by design
-
-Sometimes you don't need a key table at all, because the work itself is safe to repeat:
-
-- **Set, don't add.** `SET status = 'PAID'` is safe twice. `balance = balance + 10` is not.
-- **Only change from the expected state.** `UPDATE orders SET status = 'PAID' WHERE id = 42 AND status = 'PENDING'`. The second time, it changes 0 rows.
-- **Unique constraints.** A unique `order_id` on the payments table means the database refuses a second payment for the same order.
-- **Upsert.** "Insert, or update if it already exists" gives the same row however many times it runs.
-
-## Where to store the keys
-
-| Where | Good | Watch out |
+| Option | What it is | Pick it when |
 | --- | --- | --- |
-| **Same database as the data** | The key and your own database changes are saved in **one transaction**: both or neither | More rows in the main database. Delete old keys. An outside call, like a card charge, can never be in that transaction, so pass the key down |
-| **Redis** (`SET key value NX EX 86400`) | Very fast. Old keys expire by themselves | Not in the same transaction as your database. Redis can lose recent writes in a crash |
-| **Memory of one server** | Nothing | Lost on restart, and other servers can't see it. Don't do this |
-
-**How long to keep them?** Long enough to cover every retry. **24 hours** is common. Remove old keys with a TTL (an expiry time) or a nightly clean-up job.
+| **Don't retry** (at-most-once) | Send once, and accept that some messages get lost | Losing one is fine: metrics, live positions |
+| **Broker deduplication** | SQS FIFO drops repeats with the same deduplication ID (5 minutes). Kafka's idempotent producer drops repeated batches | The repeats come from the producer side, within a short window |
+| **Kafka transactions** | Read, write the result and save the offset in one step | All the data stays inside Kafka. See [Delivery Guarantees](./delivery-guarantees.mdx) |
+| **A lock** | Only one copy of the request can run at a time | Two copies arrive at the **same moment**. It does not stop a retry that comes later, so use it with a key, not instead of one. See [Distributed Locking](../distributed-systems/distributed-locking.mdx) |
+| **Reconciliation** | A job compares your records with the provider's and fixes double charges | Money. A safety net on top of keys |
 
 ## In the real world
 
@@ -273,9 +303,11 @@ Bring it up whenever money moves, or whenever you add retries or a queue:
 
 <Callout title="Remember this" type="success">
   - **Idempotent** = once or many times, **same effect**. It makes retries safe.
+  - **Why:** double-clicks, timeouts, proxies and queues all **repeat** requests. You can't stop them, so make repeats harmless.
   - The **client** makes one **idempotency key** per action. Every retry sends the same key.
   - The server saves key + answer. A repeat gets the **saved answer**, and the work is not done again.
   - Claim the key **atomically** (unique constraint), so two copies can't both win.
   - For messages, the **event ID** is the key. Save it in the **same transaction** as the work.
   - Store keys in the **same database** as the data. Keep them about **24 hours**.
+  - **Alternatives:** don't retry, broker deduplication, Kafka transactions, a lock (with a key, not instead), reconciliation.
 </Callout>

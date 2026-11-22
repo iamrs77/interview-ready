@@ -4,13 +4,13 @@ description: "How search engines like Elasticsearch find words in millions of do
 icon: Search
 ---
 
-## The idea
+## What is it?
 
 Think of the **index at the back of a book**. If you want every page that mentions "Paris", you don't read the whole book. You look up "Paris" in the index, and it says "pages 12, 87, 140".
 
 A search engine does the same thing for text. It keeps a list of **every word**, and for each word, **which documents contain it**. This list is called an **inverted index**.
 
-## Why the normal database is not enough
+## Why do we need it?
 
 Say you want every post that contains the word "pizza":
 
@@ -26,7 +26,11 @@ It also gets the answer wrong in other ways:
 - A typo like "piza" finds nothing.
 - There is no order. The best match is not shown first.
 
-## The inverted index
+A search engine fixes all three: it finds words without reading every row, it matches word forms and typos, and it puts the best match first.
+
+## How it works inside
+
+### The inverted index
 
 Take three tiny documents:
 
@@ -53,6 +57,8 @@ Now a search is just a few quick lookups:
 
 It is called **inverted** because it flips the normal direction. A normal list goes "document → its words". This one goes "word → its documents". The list of documents for one word is called a **posting list**.
 
+Each posting list is kept **sorted by document ID**. So finding the docs that have both words is one quick walk through two sorted lists. The index can also store the **position** of each word inside the document. That is how phrase search works: "love rome" as two words right next to each other.
+
 ```mermaid
 flowchart TB
   D["Doc 2<br/>Pizza in Rome!"] --> A["Analyzer<br/>lowercase, split,<br/>drop punctuation"]
@@ -60,7 +66,7 @@ flowchart TB
   T --> I[("Inverted index<br/>pizza: 1, 2<br/>rome: 2, 3")]
 ```
 
-## Analyzers: making words match
+### Analyzers: making words match
 
 The step that cleans up the text is called the **analyzer**. It runs when a document is saved, and again on the user's search text, so both sides look the same.
 
@@ -74,7 +80,7 @@ The step that cleans up the text is called the **analyzer**. It runs when a docu
 
 On top of that, **fuzzy search** allows small typos. "piza" is one letter away from "pizza", so it still matches.
 
-## Ranking: which result comes first
+### Ranking: which result comes first
 
 Finding matches is half the job. The other half is putting the **best match first**. The classic ideas:
 
@@ -150,6 +156,29 @@ flowchart TB
 
 This makes search **eventually consistent**: a new post shows up in search a second or two after it is saved. For search, that is almost always fine. See [Kafka](../messaging/kafka.mdx) for how the log part works.
 
+## When to use it
+
+- A **search box over text**: products, posts, restaurants, messages, help articles.
+- Users make **typos** or use other word forms, and the **best match must come first**.
+- Text search **plus filters**: "pizza", open now, rating above 4.
+- Searching huge amounts of **logs** by any word.
+
+**Don't use it when:**
+
+- You look things up by **ID or exact value**. A normal database index already does that.
+- The data is **small** (thousands of rows). Postgres full-text search is enough, with no second system to keep in sync.
+- You need it as the **source of truth**, or a write must show up in search **at once**. Search is a copy, about a second behind.
+- Users search by **meaning**, not words ("cheap places to eat" should find "budget restaurants"). Use vector search.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Postgres full-text search** | A `tsvector` column with a GIN index, built into Postgres | The data already lives in Postgres and search needs are simple |
+| **Prefix index or trie** | A normal index can often serve `LIKE 'piz%'` (the start of a word). A trie holds popular queries | Autocomplete. See [Search Autocomplete](../questions/search-autocomplete.mdx) |
+| **Algolia, Meilisearch, Typesense** | Search engines that are simpler to run, or run for you | Small to medium data, and you want typo-friendly search fast |
+| **Vector search** | Finds items with a similar meaning, using embeddings | Users describe what they want in their own words. See [Vector Databases](./vector-databases.mdx) |
+
 ## In the real world
 
 **Elasticsearch and OpenSearch.** In 2021 Elastic changed the license of Elasticsearch. In response, AWS started **OpenSearch**, an open-source copy (a **fork**) of Elasticsearch. In 2024 both changed again: Elastic added an open-source license (AGPLv3) as an option, so Elasticsearch is open source again, and OpenSearch moved to the **Linux Foundation**, a neutral non-profit. Both work the same way at the level you need for interviews.
@@ -165,10 +194,12 @@ Any time the question has a **search box** (products, posts, restaurants, messag
 > "Posts are stored in Postgres. For search, I'll stream changes through CDC and Kafka into Elasticsearch, which keeps an inverted index and ranks results with BM25. New posts may take a second to appear in search, and that's fine."
 
 <Callout title="Remember this" type="success">
-  - `LIKE '%word%'` reads every row. Search engines use an **inverted index**: **word → list of documents**.
+  - **Why:** `LIKE '%word%'` reads every row, misses "Pizzas" and typos, and has no ranking.
+  - Search engines use an **inverted index**: **word → list of documents**, each list sorted by doc ID.
   - The **analyzer** lowercases, splits into words, and cuts words to their root, on both documents and queries.
   - **Ranking:** frequent in this doc, rare overall, short field = better match. Elasticsearch uses **BM25**.
   - Elasticsearch splits an index into **shards** and asks all of them (**scatter-gather**).
   - Search is a **copy**. The database stays the source of truth.
   - Keep them in sync with **CDC + Kafka**. Search is a second or so behind.
+  - **Alternatives:** Postgres full-text search (small, simple), a trie (autocomplete), Algolia or Meilisearch, vector search (meaning).
 </Callout>

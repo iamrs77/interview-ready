@@ -4,7 +4,7 @@ description: "Many users want the same thing at the same moment, like the last s
 icon: Swords
 ---
 
-## The idea
+## What is it?
 
 Picture a bakery with **one croissant left** and two cashiers. Two customers ask for it at the same moment. Each cashier looks at the shelf, sees one croissant, and says "It's yours!" Both take the money. Now there are two paid customers and one croissant.
 
@@ -23,7 +23,7 @@ It shows up in many interview questions:
 | [Uber](../questions/uber.mdx) | The same driver for two riders |
 | [Payments](../questions/payment-system.mdx) | The same money in one account |
 
-## Why simple code breaks: the read-then-write race
+## Why do we need it?
 
 Here is the code most people write first:
 
@@ -71,6 +71,14 @@ The bug lives in the **gap** between Alice's read (step 1) and her write (step 5
 
 - **Tests don't catch it.** With one user, it always works. It breaks only under real load, when two requests land in the same few milliseconds.
 - **A transaction alone doesn't fix it.** At the default level of PostgreSQL (read committed) and MySQL (repeatable read), both transactions still read 1 and write 0. `SERIALIZABLE` makes the database cancel one of them, which the app then retries. That works, but costs speed. See [Isolation Levels](../databases/isolation-levels.mdx) and [Transactions and ACID](../databases/transactions-acid.mdx).
+
+## How it works inside
+
+Every tool below works the same way inside: **one referee** decides, and the check and the write happen as **one step** that nobody can cut into.
+
+- **The referee is usually the database.** An update takes a **row lock** on the row and holds it until `COMMIT`. A second update of the same row **waits**. At the default settings of PostgreSQL and MySQL, it then checks its `WHERE` again against the **new** value. That is why `WHERE stock >= 1` can't sell the last item twice.
+- **A unique index is a referee too.** The database checks it inside the insert, so two inserts of the same username can't both pass.
+- **When the database can't be the referee,** something else takes the job: one **queue worker** per item (tool 5) or a **lock service** (tool 6).
 
 ## The toolbox, from simplest to most complex
 
@@ -251,7 +259,7 @@ Take a lock on `room:301` in a shared place like Redis or etcd, with an **expiry
 
 Use it **last**. It adds another system, and a lock can expire while its holder is still working. If the data is in your own database, tools 1 to 4 are simpler and safer.
 
-## Which one when
+## When to use which
 
 | Situation | Use | Example |
 | --- | --- | --- |
@@ -276,6 +284,17 @@ flowchart TB
   Q4 -->|"Rare"| T2["Optimistic locking"]
   Q4 -->|"Common"| T3["Pessimistic locking"]
 ```
+
+## Alternatives
+
+Ways to avoid the fight, beyond the six tools:
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Serializable isolation** | Let the database find clashing transactions and cancel one. The app retries it. See [Isolation Levels](../databases/isolation-levels.mdx) | Many different rules, and clashes are rare |
+| **No winner needed** | Just add, never check: `likes = likes + 1`, or counters that merge | Nobody can "lose", like a like count |
+| **Overbook on purpose** | Sell a little more than you have, and make it up to the few who lose out | A rare double sale costs less than a strict check, like airline seats |
+| **Pre-registration and a draw** | People sign up first, and a random draw picks who may buy | Demand is far bigger than supply, like a huge concert |
 
 ## When one row gets really hot
 
@@ -318,10 +337,13 @@ Also say what the **loser** sees: a fast, clear "Sorry, just sold out", not a sp
 
 <Callout title="Remember this" type="success">
   - **Contention** = many users want the same thing at once. Goal: **exactly one winner**.
+  - **Why:** simple code passes every test with one user, but under real load two buyers get the last item. A plain transaction doesn't stop it.
+  - **Inside:** one **referee** (a row lock, a unique index, one queue worker) makes the check and the write **one step**.
   - **Read, check, then write** is a race. Two users can read the same value in the gap.
   - **First tool:** an **atomic conditional update** (`... WHERE stock >= 1`) or a **unique index**. Check the row count.
   - **Optimistic** (version column) when clashes are rare. **Pessimistic** (`FOR UPDATE`) when common and quick.
   - **Reservation with an expiry** when the user needs minutes. An expired hold counts as free.
   - **One very hot item:** a Redis counter or waiting room in front, split the stock, or a **queue** with one worker.
   - **Distributed locks** only when there is no single database to be the referee.
+  - **Alternatives:** serializable isolation, counters with no winner, overbooking, a pre-registration draw.
 </Callout>

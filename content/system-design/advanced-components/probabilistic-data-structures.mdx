@@ -4,13 +4,11 @@ description: "Small, fast data structures that give \"almost right\" answers usi
 icon: Sparkles
 ---
 
-## The idea
+## What is it?
 
 Think of a **bouncer at a big party** who has a fuzzy memory for faces. If he says "I have **never** seen you", he is always right. If he says "I **think** I've seen you", he is sometimes wrong. But he doesn't need a guest list with 10,000 names. He just remembers.
 
 **Probabilistic data structures** work the same way. They give answers that are **almost right**, and in return they use **tiny amounts of memory** and are very fast.
-
-Why accept "almost"? Because exact answers can be huge. Counting the unique visitors of a big site exactly means storing **every visitor ID** you have seen: gigabytes of memory. A HyperLogLog does it in **12 KB**, and is off by about 1%. For a view counter, nobody notices 1%.
 
 | Structure | Question it answers | Mistake it can make |
 | --- | --- | --- |
@@ -20,7 +18,21 @@ Why accept "almost"? Because exact answers can be huge. Counting the unique visi
 
 All three use **hash functions**. A hash function turns any input (like `"alice"`) into a number that looks random. The same input always gives the same number.
 
-## Bloom filter: have I seen this before?
+## Why do we need it?
+
+Exact answers can be huge. Counting the unique visitors of a big site exactly means storing **every visitor ID** you have seen: gigabytes of memory. A HyperLogLog does it in **12 KB**, and is off by about 1%. For a view counter, nobody notices 1%.
+
+The same problem shows up everywhere at scale:
+
+- A crawler that remembers **every URL** it has visited needs a set of billions of strings.
+- Counting **every hashtag** in a live stream needs one counter per hashtag, and there are millions.
+- Each of these grows with the data. Soon it doesn't fit in RAM, and going to disk or a database for every check is slow.
+
+Probabilistic data structures use a **small, fixed amount of memory**, no matter how much data goes in. In return, they are sometimes a little wrong, in a way you know in advance.
+
+## How it works inside
+
+### Bloom filter: have I seen this before?
 
 A Bloom filter is a row of **bits** (each one 0 or 1), all starting at 0, plus a few hash functions.
 
@@ -29,7 +41,7 @@ A Bloom filter is a row of **bits** (each one 0 or 1), all starting at 0, plus a
   - **Any bit is 0** → the item was **definitely never added**.
   - **All bits are 1** → the item was **maybe** added.
 
-### A worked example
+#### A worked example
 
 10 bits (positions 0 to 9) and 2 hash functions. Add "alice" (her positions are 1 and 4), then "bob" (positions 4 and 7):
 
@@ -60,7 +72,7 @@ flowchart TB
   BF -->|"Maybe"| DB[("Check the database<br/>to be sure")]:::db
 ```
 
-## HyperLogLog: how many unique items?
+### HyperLogLog: how many unique items?
 
 **The idea only.** Think of flipping a coin. If a friend says "my longest run of heads in a row was 2", they probably only flipped a few times. If they say "my longest run was 20", they must have flipped **a huge number** of times, because a run of 20 is very rare. **The rarest thing you saw tells you roughly how many tries there were.**
 
@@ -95,7 +107,7 @@ PFCOUNT visitors:2024-06-01        # 3
 PFMERGE visitors:2024-06 visitors:2024-06-01 visitors:2024-06-02
 ```
 
-## Count-Min Sketch: how many times?
+### Count-Min Sketch: how many times?
 
 A Count-Min Sketch is a small **table of counters**. Each row has its own hash function.
 
@@ -104,7 +116,7 @@ A Count-Min Sketch is a small **table of counters**. Each row has its own hash f
 
 Why the smallest? Different items can land in the **same counter** (a **collision**). Collisions only ever push a counter **up**. So the smallest counter has the least extra noise.
 
-### A worked example
+#### A worked example
 
 2 rows, 5 columns. A stream of tags comes in: **cats, dogs, cats, food**. Their columns:
 
@@ -124,7 +136,7 @@ After the stream:
 
 Row A alone would have said 3 dogs. The second row saved us. Real sketches use a few rows with thousands of columns, and still fit in tens of KB.
 
-## Where they are used
+## When to use it
 
 | Where | Structure | Why |
 | --- | --- | --- |
@@ -133,6 +145,21 @@ Row A alone would have said 3 dogs. The second row saved us. Real sketches use a
 | Blocking known bad links or spam | Bloom filter | A fast first check before a slow, exact one |
 | Unique visitors, unique searches | HyperLogLog | Count uniques in about 12 KB |
 | [Trending topics](../questions/top-k.mdx), heavy users | Count-Min Sketch | Count how often each item appears in a huge stream |
+
+**Don't use it when:**
+
+- The answer must be **exact**: money, stock counts, billing. (A Bloom filter's "maybe" is fine only when you then check for real.)
+- The data is **small**. A plain `Set` or `Map` in memory is exact and simple.
+- You need to **delete** items from a Bloom filter, or **list** the items. HyperLogLog can count visitors, but it can't tell you who they were.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Exact set or map** | Store every item or every counter, in memory or in Redis | The data fits in memory, or the answer must be exact |
+| **A database query** | `COUNT(DISTINCT user_id)`, or a unique index check | Small data, or a report that may run slowly |
+| **Cuckoo filter** | Like a Bloom filter, but you can delete items. Redis has one (`CF.ADD`) | You need "seen it?" and also need to remove items |
+| **Sampling** | Look at, say, 1% of the events and scale the numbers up | Rough totals are fine and the stream is huge |
 
 ## In the real world
 
@@ -152,8 +179,10 @@ Bring these up when a question says **"unique"**, **"have we seen this?"** or **
 
 <Callout title="Remember this" type="success">
   - Trade a **small error** for **tiny memory** and high speed.
+  - **Why:** exact answers need memory that **grows with the data** (every ID, every counter). These use a small, fixed amount.
   - **Bloom filter:** "seen it?" Answers **"definitely not"** or **"maybe"**. No false negatives. Can't delete.
   - **HyperLogLog:** counts **unique** items in about **12 KB**, about 1% off. Idea: the longest run of leading zeros.
   - **Count-Min Sketch:** "how many times?" Take the **smallest** counter. Can be too high, never too low.
   - Classic uses: Bloom filters in **Cassandra** reads and **crawlers**, HyperLogLog for **unique views**, Count-Min Sketch for **trending**.
+  - **Alternatives:** an exact set or map (small data), a database query, a cuckoo filter (can delete), sampling.
 </Callout>

@@ -4,14 +4,26 @@ description: Servers that sit in the middle. A forward proxy works for clients. 
 icon: Shuffle
 ---
 
-## The idea
+## What is it?
 
 A **proxy** is a server that sits **in the middle** and passes messages on someone else's behalf.
 
 - A **forward proxy** works for the **clients**. Think of an office receptionist who makes outside calls for the staff. The people being called only see the office number, never your own.
 - A **reverse proxy** works for the **servers**. Think of a hotel front desk. Guests only talk to the desk, and never walk into the back offices. The desk passes each request to the right person.
 
-## Forward proxy
+## Why do we need it?
+
+Without a middleman, every server talks to the internet on its own:
+
+- Each server needs a **public IP**, its own **certificate**, and its own protection against attacks.
+- Clients must know **which server** to call. Add or remove a server, and every client has to change.
+- On the client side, every laptop in an office talks to the internet directly. There is **no single place** to set rules, keep logs, or cache files.
+
+A proxy gives you **one place** to do these jobs, without changing the clients or the servers.
+
+## How it works inside
+
+### Forward proxy
 
 A forward proxy sits **in front of the clients**. All their traffic goes through it before reaching the internet.
 
@@ -33,7 +45,7 @@ What it is used for:
 - **Shared caching:** if 100 people in an office download the same file, the proxy can fetch it once.
 - **Getting around blocks:** reach content that is blocked in your region.
 
-## Reverse proxy
+### Reverse proxy
 
 A reverse proxy sits **in front of the servers**. Users think they are talking to the website directly, but they only ever reach the proxy.
 
@@ -85,6 +97,16 @@ server {
 }
 ```
 
+### What happens to one request
+
+1. The reverse proxy accepts the user's connection, and unlocks HTTPS if it holds the certificate.
+2. It reads the request: the `Host` header, the path, other headers.
+3. It picks a server, and sends the request over its **own connection**. Proxies keep a pool of open connections to the servers and reuse them.
+4. The server now sees the **proxy's IP**, not the user's. So the proxy adds a header like `X-Forwarded-For` with the user's real IP.
+5. It passes the answer back. If the server gives a broken answer, the user gets `502 Bad Gateway`. If it takes too long, `504 Gateway Timeout`.
+
+A **forward proxy** handles HTTPS differently. The browser sends `CONNECT shop.example.com:443`, and the proxy just passes the locked bytes along. It sees **which site** you visit, but not what is inside. Some companies install their own certificate on work laptops, so their proxy can unlock and inspect the traffic too.
+
 ## Forward vs reverse
 
 | | Forward proxy | Reverse proxy |
@@ -103,6 +125,26 @@ All three sit in front of your servers, so they overlap:
 - An **API gateway** is a reverse proxy with extra API features: login checks, rate limits, API keys (see [API Gateway](../hld-basics/api-gateway.mdx)).
 
 In real systems, one tool like Nginx or Envoy often does all three jobs.
+
+## When to use it
+
+- **Reverse proxy:** in front of almost every website in production. One public entry point that ends HTTPS, routes, caches and blocks bad traffic.
+- **Forward proxy:** a company or school that must filter, log or cache its users' web traffic. Also for servers on a private network that may only reach a few approved outside APIs.
+
+**Don't use it when** the traffic isn't HTTP, like a UDP game server. An HTTP proxy can't read it. Use an L4 load balancer, or connect directly.
+
+And never run **only one**. All traffic goes through it, so a single proxy is a single point of failure. Run at least two.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Direct connection** | Clients reach the server's own public IP | One small server, with nothing to hide or spread |
+| **DNS load balancing** | DNS returns several server IPs, and each client picks one | Simple spreading with no box in the middle. See [DNS](./dns.mdx) |
+| **L4 load balancer** | Passes TCP or UDP connections on, without reading HTTP | Non-HTTP traffic, or the lowest delay. See [Load Balancing](../hld-basics/load-balancing.mdx) |
+| **Sidecar proxy** (service mesh) | A small proxy, often Envoy, next to every service | Many services calling each other, with encryption, retries and metrics on every call |
+| **VPN** (instead of a forward proxy) | Sends **all** of a device's traffic through an encrypted tunnel | Reach a private network, or hide your IP for every app, not only the browser |
+| **NAT gateway** (instead of a forward proxy) | Lets private servers reach the internet, without reading the traffic | Servers need to go out to the internet, and no filtering is needed |
 
 ## In the real world
 
@@ -124,4 +166,7 @@ You usually draw the reverse proxy as your load balancer or API gateway. Say wha
   - **Reverse proxy** = works for **servers**. Load balancing, HTTPS, caching, routing, security.
   - Load balancers and API gateways are **special kinds of reverse proxy**.
   - Examples: **Nginx, HAProxy, Envoy, Cloudflare**.
+  - **Why:** **one place** for HTTPS, routing, caching and protection, so clients and servers don't have to change.
+  - **Inside:** a new connection to the server, reused from a pool. The user's IP goes in `X-Forwarded-For`. Broken answer = `502`, too slow = `504`.
+  - **Alternatives:** a direct connection, DNS load balancing, an L4 load balancer, a sidecar proxy, a VPN, a NAT gateway.
 </Callout>

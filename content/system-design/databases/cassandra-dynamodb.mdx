@@ -4,7 +4,7 @@ description: "Databases built for huge write volumes and simple reads by key. Yo
 icon: Table2
 ---
 
-## The idea
+## What is it?
 
 Think of a big **filing cabinet** in a post office. Each drawer has a label, like a street name. Inside a drawer, the letters are kept **in order by date**.
 
@@ -15,7 +15,15 @@ Think of a big **filing cabinet** in a post office. Each drawer has a label, lik
 
 They are cousins. Both grew out of ideas in Amazon's **Dynamo** paper (2007): spread data over many machines by hashing a key, and keep several copies. Cassandra is a **wide-column** store. DynamoDB is usually called a **key-value** store, but it reads data the same way: by partition key, then a range of sort keys. See [SQL vs NoSQL](./sql-vs-nosql.mdx) for the families.
 
-## Side by side
+## Why do we need it?
+
+A single SQL database runs out of room when writes are huge and the data never stops growing: chat messages, events, sensor readings, activity logs. You can shard PostgreSQL yourself, but then your team writes the routing, moves the data and handles failover (see [Partitioning and Sharding](./partitioning-sharding.mdx)).
+
+Cassandra and DynamoDB do that work for you. They spread data over many machines from day one, keep several copies, and keep taking writes when a machine, or even a whole data center, is down. Adding machines adds capacity. The price: you can only read by key, so you design your tables around your queries.
+
+## How it works inside
+
+### Side by side
 
 | | Cassandra | DynamoDB |
 | --- | --- | --- |
@@ -29,7 +37,7 @@ They are cousins. Both grew out of ideas in Amazon's **Dynamo** paper (2007): sp
 
 "Clustering key" and "sort key" mean the same thing. This page says **sort key** for both.
 
-## The primary key: partition key + sort key
+### The primary key: partition key + sort key
 
 Every table has a primary key with two parts:
 
@@ -51,6 +59,53 @@ The rules that follow from this:
 - **Every query must give the full partition key**, as an exact value. That is how the database knows where to look.
 - The sort key can be a **range**: `<`, `>`, between, or "starts with" (DynamoDB).
 - Reading one partition is fast because it sits on **one set of machines**, already sorted on disk.
+
+### Why writes are so fast
+
+This part is about Cassandra (and ScyllaDB). AWS does not let you see how DynamoDB stores data. You just get fast writes at any size.
+
+Cassandra stores data in an **LSM tree** (explained in [Indexes: B-Trees and LSM Trees](./indexes.mdx)). A write is two cheap steps: **append** to a log on disk, and add to a sorted list **in memory**. Later, the list is written to disk as a sorted file in one go.
+
+What this means in practice:
+
+- **No reading before writing.** Cassandra doesn't look up the old row first. `INSERT` and `UPDATE` both just write the new value. Writing the same key twice **overwrites** it, so a retry never makes a duplicate. See [Idempotency](../messaging/idempotency.mdx).
+- **Newest timestamp wins.** If two writes hit the same row, the one with the later timestamp is kept. So server clocks matter (see [Clocks](../distributed-systems/clocks.mdx)).
+- **A delete is a write too.** It writes a marker called a **tombstone**. The data really goes away later, during **compaction** (by default, after 10 days). Many deletes leave many tombstones, and reads slow down as they step over them. This is why Cassandra makes a **bad queue**: a queue deletes every item it handles.
+- **Data can expire by itself.** `INSERT ... USING TTL 2592000` deletes the row after 30 days. DynamoDB has TTL too, but it removes expired items some time later, not at the exact second.
+
+### Copies and tunable consistency
+
+Cassandra keeps each partition on several machines, usually **3**. This number is the **replication factor**.
+
+There is **no leader**. Any machine can take a request. That machine is called the **coordinator** for that request. It sends the write to all 3 copies, and waits for as many answers as you asked for:
+
+```mermaid
+flowchart TB
+  App["Chat Service"]:::service -->|"write, QUORUM"| Co["Coordinator<br/>(any node)"]:::lb
+  Co -->|"saved"| R1[("Copy 1")]:::db
+  Co -->|"saved"| R2[("Copy 2")]:::db
+  Co -.->|"slow, catches up later"| R3[("Copy 3")]:::db
+```
+
+With `QUORUM`, the coordinator answers "OK" after **2 of 3** copies have saved the write. The third copy gets it a moment later.
+
+You pick the **consistency level** on each read and write. With 3 copies:
+
+| Level | Waits for | Good for |
+| --- | --- | --- |
+| `ONE` | 1 copy | Fastest. A read may be old. Likes, views, logs |
+| `QUORUM` | 2 of 3 copies | **The usual choice.** One copy can be down |
+| `LOCAL_QUORUM` | A majority in **this** data center | Apps in several regions: no waiting on far-away copies |
+| `ALL` | All 3 copies | Rare. Fails if any copy is down |
+
+**`QUORUM` writes + `QUORUM` reads:** 2 + 2 is more than 3, so the copies you read and the copies you wrote always overlap. A read sees the latest finished write. This is the **R + W > N** rule. It is close to strong consistency, but not fully. The edge cases are in [Consistency Models](../distributed-systems/consistency-models.mdx).
+
+Things to know:
+
+- **Missed writes catch up.** If a copy was down, the coordinator keeps a note and replays it when the copy is back (**hinted handoff**). Reads that spot an old copy fix it (**read repair**). A regular **repair** job compares all copies.
+- **"Only if it does not exist" is slow.** `INSERT ... IF NOT EXISTS` is a **lightweight transaction**. It needs several round trips between the copies (it uses Paxos, see [Leader Election and Consensus](../distributed-systems/leader-election-consensus.mdx)). Use it for rare things, like claiming a username, not for every message.
+
+**DynamoDB** does the copying for you: 3 copies in 3 data centers of one AWS region. Reads are **eventually consistent** by default, at half the price. Add `"ConsistentRead": true` to get the latest value. **Global tables** copy a table to other AWS regions.
 
 ## Query-first data modeling
 
@@ -137,53 +192,6 @@ Cassandra refuses it with an error, unless you add `ALLOW FILTERING`. That makes
 
 `"ScanIndexForward": false` means "newest first". The answer includes a `LastEvaluatedKey`. Send it back as `ExclusiveStartKey` to get the next, older page.
 
-## Why writes are so fast
-
-This part is about Cassandra (and ScyllaDB). AWS does not let you see how DynamoDB stores data. You just get fast writes at any size.
-
-Cassandra stores data in an **LSM tree** (explained in [Indexes: B-Trees and LSM Trees](./indexes.mdx)). A write is two cheap steps: **append** to a log on disk, and add to a sorted list **in memory**. Later, the list is written to disk as a sorted file in one go.
-
-What this means in practice:
-
-- **No reading before writing.** Cassandra doesn't look up the old row first. `INSERT` and `UPDATE` both just write the new value. Writing the same key twice **overwrites** it, so a retry never makes a duplicate. See [Idempotency](../messaging/idempotency.mdx).
-- **Newest timestamp wins.** If two writes hit the same row, the one with the later timestamp is kept. So server clocks matter (see [Clocks](../distributed-systems/clocks.mdx)).
-- **A delete is a write too.** It writes a marker called a **tombstone**. The data really goes away later, during **compaction** (by default, after 10 days). Many deletes leave many tombstones, and reads slow down as they step over them. This is why Cassandra makes a **bad queue**: a queue deletes every item it handles.
-- **Data can expire by itself.** `INSERT ... USING TTL 2592000` deletes the row after 30 days. DynamoDB has TTL too, but it removes expired items some time later, not at the exact second.
-
-## Copies and tunable consistency
-
-Cassandra keeps each partition on several machines, usually **3**. This number is the **replication factor**.
-
-There is **no leader**. Any machine can take a request. That machine is called the **coordinator** for that request. It sends the write to all 3 copies, and waits for as many answers as you asked for:
-
-```mermaid
-flowchart TB
-  App["Chat Service"]:::service -->|"write, QUORUM"| Co["Coordinator<br/>(any node)"]:::lb
-  Co -->|"saved"| R1[("Copy 1")]:::db
-  Co -->|"saved"| R2[("Copy 2")]:::db
-  Co -.->|"slow, catches up later"| R3[("Copy 3")]:::db
-```
-
-With `QUORUM`, the coordinator answers "OK" after **2 of 3** copies have saved the write. The third copy gets it a moment later.
-
-You pick the **consistency level** on each read and write. With 3 copies:
-
-| Level | Waits for | Good for |
-| --- | --- | --- |
-| `ONE` | 1 copy | Fastest. A read may be old. Likes, views, logs |
-| `QUORUM` | 2 of 3 copies | **The usual choice.** One copy can be down |
-| `LOCAL_QUORUM` | A majority in **this** data center | Apps in several regions: no waiting on far-away copies |
-| `ALL` | All 3 copies | Rare. Fails if any copy is down |
-
-**`QUORUM` writes + `QUORUM` reads:** 2 + 2 is more than 3, so the copies you read and the copies you wrote always overlap. A read sees the latest finished write. This is the **R + W > N** rule. It is close to strong consistency, but not fully. The edge cases are in [Consistency Models](../distributed-systems/consistency-models.mdx).
-
-Things to know:
-
-- **Missed writes catch up.** If a copy was down, the coordinator keeps a note and replays it when the copy is back (**hinted handoff**). Reads that spot an old copy fix it (**read repair**). A regular **repair** job compares all copies.
-- **"Only if it does not exist" is slow.** `INSERT ... IF NOT EXISTS` is a **lightweight transaction**. It needs several round trips between the copies (it uses Paxos, see [Leader Election and Consensus](../distributed-systems/leader-election-consensus.mdx)). Use it for rare things, like claiming a username, not for every message.
-
-**DynamoDB** does the copying for you: 3 copies in 3 data centers of one AWS region. Reads are **eventually consistent** by default, at half the price. Add `"ConsistentRead": true` to get the latest value. **Global tables** copy a table to other AWS regions.
-
 ## Hot partitions
 
 All traffic for one partition key goes to the **same few machines**. If one key gets far more traffic than others, or grows far bigger, those machines struggle while the rest sit idle. This is a **hot partition**.
@@ -234,7 +242,7 @@ With 100 machines, that is 100 requests for one query. A secondary index is fine
 
 **The usual answer in both:** make another table for the new query. In Cassandra, your app writes to both tables. In DynamoDB, a GSI does that copying for you. And never use a **scan** (read the whole table) to answer a user's request.
 
-## Cassandra or DynamoDB, or PostgreSQL?
+## When to use which
 
 **Start with PostgreSQL** (see [SQL vs NoSQL](./sql-vs-nosql.mdx)). Switch only when you can name the reason.
 
@@ -250,6 +258,17 @@ With 100 machines, that is 100 requests for one query. A secondary index is fine
 - **On AWS and want no servers to run:** DynamoDB.
 - **Not on AWS, or in several clouds:** Cassandra (or ScyllaDB, which speaks the same language).
 - **Very large, steady traffic:** running Cassandra yourself can cost less than paying DynamoDB per request. But you pay for it in engineers' time.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **ScyllaDB** | A rewrite of Cassandra in C++. Speaks CQL | You want Cassandra's model on fewer machines, with no Java garbage-collection pauses |
+| **Bigtable, HBase** | Wide-column stores built on Google's Bigtable design. Rows are sorted by row key across the whole table | You need scans over ranges of row keys at huge scale |
+| **MongoDB** | A document database with rich secondary indexes and sharding | You want flexible JSON documents and queries on many fields |
+| **Distributed SQL** (CockroachDB, Spanner) | SQL with transactions that shards and copies itself | You need huge scale **and** transactions across rows |
+| **Time-series database** | Built for timestamped readings | Metrics and sensor data read by time range. See [Time-Series Databases](../advanced-components/time-series-databases.mdx) |
+| **Redis** | An in-memory key-value store | Small, hot data that needs answers in under 1 ms. See [Redis](../caching/redis.mdx) |
 
 ## In the real world
 
@@ -282,4 +301,6 @@ Avoid "NoSQL, because it scales" on its own. Say **which query** it serves, and 
   - Watch for **hot partitions**: pick a key that spreads traffic, add a **time bucket** to stop endless growth.
   - Secondary indexes are weak in Cassandra. DynamoDB has **GSIs**, which are eventually consistent.
   - **Default to PostgreSQL.** Pick these for huge writes, endless data and reads by a known key.
+  - **Why:** one SQL machine can't take endless writes, and sharding it by hand is hard. These spread and copy data for you.
+  - **Alternatives:** ScyllaDB, Bigtable/HBase, MongoDB, distributed SQL, a time-series database.
 </Callout>

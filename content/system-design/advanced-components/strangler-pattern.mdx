@@ -4,7 +4,7 @@ description: "Replace an old system piece by piece, not all at once. Optional."
 icon: GitBranch
 ---
 
-## The idea
+## What is it?
 
 A **strangler fig** is a plant that starts high up on an old tree. It sends roots down and slowly grows around the tree. Years later, the old tree has rotted away, and the fig stands on its own in the same place.
 
@@ -14,7 +14,7 @@ Martin Fowler gave the pattern this name in 2004, after seeing these trees in Au
 
 It is like **renovating a house room by room** while you still live in it, instead of moving out and rebuilding from the ground up.
 
-## The problem with big rewrites
+## Why do we need it?
 
 The tempting plan is "let's rewrite the whole thing from scratch". It usually goes badly:
 
@@ -23,7 +23,9 @@ The tempting plan is "let's rewrite the whole thing from scratch". It usually go
 - **Hidden rules get lost.** Old code is full of small fixes for strange cases that nobody wrote down. The rewrite forgets them.
 - **One huge switch day.** Everything changes at once, so if something breaks, everything breaks.
 
-## Moving traffic piece by piece
+## How it works inside
+
+### The routing layer
 
 The key part is a **routing layer** in front of everything, often called a **facade**. It can be an [API gateway](../hld-basics/api-gateway.mdx) or a [reverse proxy](../foundations/proxies.mdx). Users only talk to it. It decides, per request, whether the old or the new system answers.
 
@@ -36,6 +38,10 @@ flowchart TB
   Old --> ODB[("Old database")]:::db
   ODB -.->|"copy changes (CDC)"| NDB
 ```
+
+**How the router picks.** Usually there is one rule per URL path: `/search/*` goes to the new service. For the "1% of requests" step, the router can **hash the user ID** and send a user to the new system only if the hash falls in the first 1%. Then the same user always lands on the same side, instead of jumping between old and new on every click.
+
+### Moving traffic piece by piece
 
 <Steps>
 <Step>
@@ -65,6 +71,8 @@ flowchart TB
 </Step>
 </Steps>
 
+### Data during the move
+
 **Data is the hardest part.** While both systems run, they often need the same data. Common ways: copy changes from the old database into the new store with [Change Data Capture](../distributed-systems/change-data-capture.mdx), or let the new service call the old system's API for data it doesn't own yet.
 
 ## An example
@@ -80,6 +88,27 @@ Two habits make each step safe:
 - **Shadow traffic.** Send a **copy** of real requests to the new service too, compare its answers with the old ones, and show users only the old answer until they match.
 - **A switch to go back.** Every route can be flipped back to the old system in seconds.
 
+## When to use it
+
+- Replacing a **big old system** that must keep running while you work.
+- Moving a **monolith to services**, one feature at a time.
+- Moving to a **new database, language or cloud** without one big switch day.
+
+**Don't use it when:**
+
+- The system is **small**. Rewriting it in a few weeks is faster than running two systems side by side.
+- There is **no single entry point** to put a router in front of, like many desktop apps talking straight to the old database. Make one first.
+- The old system **works fine** and isn't slowing anyone down. Moving it costs time and brings risk for no gain.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Big-bang rewrite** | Build the whole new system, then switch everyone over on one day | The system is small, or the old one can be frozen during the rewrite |
+| **Refactor in place** | Clean up the old code step by step, with no new system | The old technology is fine, only the code is messy |
+| **Branch by abstraction** | Inside the code, put an interface in front of the old part, build the new part behind it, and switch with a flag | The part to replace sits deep inside the app, not behind a URL |
+| **Parallel run** | Run old and new on all traffic for weeks, and compare every result | Correctness matters most, like payroll or billing |
+
 ## In the real world
 
 **Martin Fowler named it.** Fowler described the "strangler fig application" in a 2004 article. It is now a standard way to move from a monolith to services. See [Monolith vs Microservices](../hld-basics/monolith-vs-microservices.mdx).
@@ -93,9 +122,11 @@ Use this when the question says "we have an old system" or "how would you migrat
 > "I won't rewrite the monolith in one go. I'll put a gateway in front, move search out first, and shift its traffic to the new service bit by bit, with the old route ready as a fallback."
 
 <Callout title="Remember this" type="success">
-  - **Big-bang rewrites** are risky: moving target, no feedback, lost rules, one huge switch day.
+  - **Why:** **big-bang rewrites** are risky: moving target, no feedback, lost rules, one huge switch day.
   - **Strangler:** put a **routing layer** in front, move **one feature at a time**, then delete the old part.
   - Move traffic **slowly** (1%, 10%, 100%) and keep a way to **switch back**.
   - Start with **low-risk, read-only** features. Do money flows last.
   - Keep data in sync during the move, for example with **CDC**.
+  - **Inside:** the router picks by **URL path**, and by a **hash of the user ID** for the small first steps, so each user stays on one side.
+  - **Alternatives:** a big-bang rewrite (small systems), refactor in place, branch by abstraction, a parallel run.
 </Callout>

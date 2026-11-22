@@ -4,7 +4,7 @@ description: "A smart way to spread data across servers, so adding or removing a
 icon: CircleDot
 ---
 
-## The idea
+## What is it?
 
 You have millions of keys (user IDs, cache keys) and a few servers. Each key must live on exactly one server. Every app server must be able to work out which one, on its own, without asking anyone.
 
@@ -12,7 +12,9 @@ Think of a **circular bus route**. The bus stops are the servers. Each passenger
 
 That is consistent hashing. When you add or remove a server, **only a small share of the keys move**. The simple way, "hash mod N", moves almost all of them.
 
-## The problem with simple hashing (hash mod N)
+## Why do we need it?
+
+When data is spread over many servers (a [sharded](./partitioning-sharding.mdx) database, or a cache on many nodes), every app server needs a rule to find a key's server. Servers are added when traffic grows, and they die without warning. So the rule must keep working when the **number of servers changes**. The simple rule, hash mod N, breaks badly when it does.
 
 A **hash function** turns any text into a number. The same text always gives the same number. Different texts give numbers that look random. MD5 and MurmurHash are examples.
 
@@ -45,7 +47,9 @@ Here is an example with small, made-up hash values. We start with 3 servers, the
 
 What we want: when we go from 3 to 4 servers, only about **1/4** of the keys should move. That is the fair share of the new server.
 
-## The hash ring, step by step
+## How it works inside
+
+### The hash ring, step by step
 
 <Steps>
 <Step>
@@ -130,7 +134,7 @@ Now Server B (at 30) dies. Each of its keys walks clockwise to the next server:
 
 Only the dead server's keys move, and they go to its clockwise neighbor.
 
-## Virtual nodes for an even spread
+### Virtual nodes for an even spread
 
 One spot per server has two problems:
 
@@ -157,6 +161,38 @@ flowchart TB
 - **Even spread.** Each server owns many small arcs, so in total each one gets close to an equal share.
 - **Failure load is shared.** If Server A dies, the keys of A-1 walk on to B-1, and the keys of A-2 walk on to C-2. The load **splits between B and C**, instead of landing on one server.
 - **Bigger machines can do more.** Give a server with twice the memory twice as many vnodes.
+
+### Finding the owner fast
+
+The code does not really walk around a circle. It keeps every spot (every vnode) in a **sorted list**, together with the server it belongs to. To find a key's owner:
+
+1. Hash the key.
+2. **Binary search** the list for the first spot that is equal to or bigger than the hash.
+3. If there is none, wrap around and take the **first** spot in the list.
+
+Binary search is fast even with thousands of vnodes. Every app server builds the same list from the same server names, so they all agree on the owner without asking anyone.
+
+## When to use it
+
+- **A distributed cache,** where nodes are added and lost. Only about 1/N of the keys miss after a change.
+- **A sharded key-value store,** like Cassandra or Dynamo, that grows by adding nodes.
+- **Sticky routing:** send the same user, chat room or session to the same server every time.
+
+**Don't use it when:**
+
+- **The number of servers never changes.** Plain hash mod N is simpler.
+- **You need range queries,** like "all orders from last week". Hashing scatters neighbors across every node. Use range sharding.
+- **You must move single keys by hand,** like giving one huge customer its own machine. Use a lookup table (a directory).
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Hash mod N** | `hash(key) % N` | The number of servers is fixed, or moving almost every key is OK |
+| **Hash slots** | Keys map to a fixed number of slots, and a small table maps slots to nodes (Redis Cluster uses 16,384) | You want to move data in clear chunks, and see exactly who owns what |
+| **Rendezvous hashing** | For each key, score every server with `hash(key + server)` and pick the highest | Few servers. Even spread with no ring and no vnodes, but each lookup checks every server |
+| **Jump consistent hash** | A tiny function from Google (2014) that maps a key to a bucket number, moving as few keys as possible | Shards are numbered and only grow. You can't remove a server in the middle |
+| **Directory** | A lookup table that says which server owns each key | You need full control over where each key lives. See [Partitioning and Sharding](./partitioning-sharding.mdx) |
 
 ## In the real world
 
@@ -185,4 +221,7 @@ Bring it up whenever data is spread over many cache or database nodes and nodes 
   - Only about **1/N** of the keys move.
   - **Virtual nodes:** many spots per server give an even spread and share the load when a server dies.
   - Used by **Cassandra**, **Dynamo**, and cache clients. **Redis Cluster** uses 16,384 slots instead.
+  - **Why:** servers come and go. With mod N, every change moves most keys, so caches miss and data is copied.
+  - **Inside:** a **sorted list** of spots and a **binary search** for the first spot at or after the key's hash.
+  - **Alternatives:** hash mod N, hash slots, rendezvous hashing, jump hash, a directory.
 </Callout>

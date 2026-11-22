@@ -4,7 +4,7 @@ description: "Keeping the system up and working correctly, even when parts fail.
 icon: HeartPulse
 ---
 
-## The idea
+## What is it?
 
 Two words that sound alike, but mean different things:
 
@@ -12,10 +12,6 @@ Two words that sound alike, but mean different things:
 - **Reliability:** does it **work correctly**, every time, over a long period?
 
 Think of an ATM. If it is switched on and accepts your card, it is **available**. If it also gives you the right amount of cash and takes the right amount from your account, it is **reliable**. An ATM that is always on but sometimes gives the wrong cash is available, but not reliable.
-
-Both start from the same fact: **parts will fail.** Disks die, servers crash, networks break, and people make mistakes. A good design expects failure and keeps working anyway.
-
-## Availability vs reliability
 
 | | Availability | Reliability |
 | --- | --- | --- |
@@ -27,7 +23,21 @@ A reliable system is almost always available. But an available system is not alw
 
 In interviews, people mostly talk about **availability**, and they measure it in "nines".
 
-## Uptime and the "nines"
+## Why do we need it?
+
+Both start from the same fact: **parts will fail.** Disks die, servers crash, networks break, and people make mistakes. A good design expects failure and keeps working anyway.
+
+At scale, failure is not rare. It is daily. Say one server breaks about once every 3 years (about 1,000 days). With **1,000 servers**, about **one breaks every day**.
+
+And when the system is down, it costs real things:
+
+- **Money:** a shop that is down sells nothing. An SLA can force you to pay customers back.
+- **Trust:** users who see errors, or lose an order, move to another app.
+- **Other systems:** if login or payments are down, every service that depends on them breaks too.
+
+## How it works inside
+
+### Uptime and the "nines"
 
 **Uptime** is the share of time the system works. People write it as a percentage, like **99.9%** ("three nines") or **99.99%** ("four nines").
 
@@ -46,7 +56,18 @@ At five nines, a person doesn't even have time to notice the problem and log in.
 
 Teams set an availability goal for themselves (an **SLO**), and sometimes promise it to customers in a contract (an **SLA**). See [SLI, SLO and SLA](../production/sli-slo-sla.mdx).
 
-## Parts in a chain vs parts side by side
+### Two levers: fail less, recover faster
+
+Availability depends on two numbers:
+
+- **MTBF** (mean time between failures): how long it runs, on average, before it breaks.
+- **MTTR** (mean time to recovery): how long it takes, on average, to work again.
+
+**Availability = MTBF / (MTBF + MTTR)**
+
+Say a service breaks once a month. If a person takes **43 minutes** to fix it, that is **99.9%**. If a spare takes over automatically in **4 minutes**, the same failures give **99.99%**. You often can't stop failures, but you can make recovery fast. That is why automatic failover matters so much.
+
+### Parts in a chain vs parts side by side
 
 Availability changes when you connect parts together. There are two simple rules.
 
@@ -78,7 +99,7 @@ flowchart TB
   Chain ~~~ Side
 ```
 
-## Single points of failure
+### Single points of failure
 
 A **single point of failure** (SPOF) is any one part that takes the whole system down when it breaks.
 
@@ -105,7 +126,7 @@ Common SPOFs:
 - One DNS provider (see [DNS](../foundations/dns.mdx))
 - Hidden ones: one config server, one shared cache, or one person who knows how to deploy
 
-## How to make a system more available
+### How to make a system more available
 
 | Technique | What it means | Example |
 | --- | --- | --- |
@@ -124,7 +145,26 @@ Two cloud words you will hear a lot:
 
 Running in two or more zones is the normal setup. Running in several regions protects you from a whole region going down, but costs much more. Spare copies and failover are covered in depth in [Redundancy and Failover](../reliability-security/redundancy-failover.mdx).
 
+## When to use it
+
+Every system needs some availability. The real question is **how many nines** to aim for.
+
 **More nines cost more.** Each extra nine costs a lot more money and work. Pick the target the product really needs. A payment system needs more nines than a company's internal lunch menu.
+
+Aim high (99.99% or more) for:
+
+- **The core path users pay for:** checkout, login, sending a message.
+- **Parts many other services depend on:** auth, payments, DNS, the API gateway.
+
+**Don't chase extra nines when:**
+
+- **Users can wait or retry**, like an internal tool, a nightly report, or a batch job that can run again.
+- **A wrong answer is worse than no answer.** A bank balance should show an error before it shows a wrong number. Here you pick correctness over availability. See [CAP Theorem](../distributed-systems/cap-theorem.mdx).
+- **One region is enough.** Many regions cost much more and add hard data problems. Most products are fine with several zones in one region.
+
+## Alternatives
+
+There is no way around parts failing. If you don't build for high availability, the choice is to **accept some downtime and recover well**: good backups, a tested restore, and a clear status page. For many internal or early-stage products that is the right trade. See [Disaster Recovery](../reliability-security/disaster-recovery.mdx).
 
 ## In the real world
 
@@ -140,8 +180,11 @@ Availability is a **non-functional requirement**. Give a target and say why. The
 
 <Callout title="Remember this" type="success">
   - **Availability** = is it up? **Reliability** = does it work correctly over time?
+  - **Why:** parts **always** fail. With 1,000 servers, one breaks about every day. Downtime costs money and trust.
   - Each extra **nine** = 10× less downtime. **99.9% ≈ 9 hours a year. 99.99% ≈ 53 minutes a year.**
+  - **Inside:** availability = MTBF / (MTBF + MTTR). Fast, **automatic** recovery is the big lever.
   - Parts **in a chain** multiply availability down. Parts **side by side** multiply it up.
   - A **single point of failure** takes everything down. Ask "what if this one dies?"
   - Fix with **redundancy, failover, health checks, many zones** and careful deploys.
+  - **Alternatives:** none to failure itself. Without high availability, accept downtime and recover well (backups, tested restore).
 </Callout>

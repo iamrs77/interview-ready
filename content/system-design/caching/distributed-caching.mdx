@@ -4,7 +4,7 @@ description: "One cache shared by all servers, spread across many machines, with
 icon: Server
 ---
 
-## The idea
+## What is it?
 
 When you have many app servers, where should the cache live? And what if one cache machine is not big enough?
 
@@ -14,7 +14,21 @@ Think of a **restaurant kitchen with many cooks**:
 - The kitchen also has **one big shared pantry**. A few steps away, but everyone sees the same shelves. This is a **shared cache**.
 - When the pantry gets too small, you split it into **several rooms**: A to H in room 1, I to P in room 2, and so on. This is a **distributed cache**: one shared cache, spread over many machines.
 
-## Local cache vs shared cache
+## Why do we need it?
+
+A cache inside one app server only helps that server. With 20 app servers, the same item is loaded from the database 20 times, the copies can disagree, and every deploy empties them. So most systems use a **shared** cache.
+
+But one cache machine has limits too:
+
+- **Memory:** it holds what fits in its RAM, maybe tens of gigabytes.
+- **Traffic:** its CPU and network can serve only so many requests per second.
+- **Failure:** if it dies, every key becomes a miss at once, and the database is flooded (see [Cache Problems](./cache-problems.mdx)).
+
+A distributed cache fixes both problems: **one shared cache**, split across **many machines**, with **copies** of each part.
+
+## How it works inside
+
+### Local cache vs shared cache
 
 A **local cache** lives inside each app server's memory (like a `Map` in Node.js). A **shared cache** is a separate server, like Redis, that all app servers talk to over the network.
 
@@ -46,7 +60,7 @@ On a miss in both levels, the **app** reads the database and saves a copy in Red
 
 Keep the local level's TTL **short** (seconds), because the local copies can't all be deleted at once when data changes.
 
-## Spreading keys across cache servers
+### Spreading keys across cache servers
 
 One Redis machine holds what fits in its memory, maybe tens of gigabytes. When you need more, you split the keys across several machines. Each machine holds **one part** of the keys. This is called **sharding**, and each part is a **shard**.
 
@@ -60,7 +74,7 @@ flowchart TB
   Lib -->|"user:3, cart:5"| C3[("Cache server C")]:::cache
 ```
 
-### The simple rule, and its problem
+#### The simple rule, and its problem
 
 The simplest rule is `server = hash(key) mod N`, where `N` is the number of servers. ("mod" is the remainder after dividing.)
 
@@ -82,7 +96,7 @@ There are two common fixes:
 - **Consistent hashing.** It places servers and keys on a ring, so adding a 4th server moves only the keys that the new server takes over: about 1 in 4. Memcached client libraries often use it. See [Consistent Hashing](../databases/consistent-hashing.mdx).
 - **Hash slots.** Redis Cluster does not use a ring. It splits keys into a fixed number of **slots** (16,384), and each server owns some slots. Adding a server moves only some slots to it, with their keys. The rest stay where they are.
 
-## Replicas and failover
+### Replicas and failover
 
 If a cache server dies, all its keys are gone at once, and they all become misses. To avoid that, each shard has a **replica**: a copy that receives every change from the **primary**.
 
@@ -117,6 +131,28 @@ The two classic choices for a distributed cache:
 
 **One Redis Cluster rule to know:** a command that touches several keys only works if those keys are in the **same slot**. You force keys into the same slot with a **hash tag**: only the part inside curly braces is hashed, so `{user:42}:cart` and `{user:42}:profile` land on the same shard.
 
+## When to use it
+
+- **Many app servers** read the same data.
+- The hot data is **bigger than one machine's memory**, or there are more requests than one machine can serve.
+- The database **can't survive** losing the cache, so each part needs a replica.
+
+**Don't use it when:**
+
+- **One node is enough.** A single Redis primary with a replica is simpler. Sharding adds machines, and limits commands that touch several keys.
+- **There is one app server, or the data is tiny.** A local cache is enough.
+- **Every read must be exact.** A cache is a copy, and async replicas can lose the newest writes.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **One node plus a replica** | A single cache primary, with a replica ready to take over | The hot data fits in one machine's memory. The simplest setup |
+| **In-memory data grid** (Hazelcast, Apache Ignite) | The cache runs inside the app servers, and they share the data among themselves | Java apps that want a shared cache without separate cache servers |
+| **Database read replicas** | Copies of the database that serve reads. See [Replication](../databases/replication.mdx) | The data is too varied to cache well |
+
+For other cache servers (Memcached, Valkey, Dragonfly) and a CDN, see the alternatives on the [Redis](./redis.mdx) page.
+
 ## In the real world
 
 **Facebook routes Memcached traffic through a proxy.** Facebook built **mcrouter**, a proxy that sits between its web servers and thousands of Memcached servers. It decides which server holds each key, and handles failover. Facebook open-sourced it in 2014.
@@ -140,4 +176,6 @@ If the interviewer asks "what happens when a cache node dies?", talk about repli
   - `hash mod N` moves **most keys** when N changes. Use **consistent hashing** (a ring) or **hash slots** (Redis Cluster).
   - **Replicas** keep a copy of each shard. **Failover** promotes the replica when the primary dies.
   - **Redis Cluster:** data types, built-in sharding (16,384 slots) and failover. **Memcached:** simple and multi-threaded, no replicas.
+  - **Why:** a local cache helps only one server, and one cache machine runs out of memory, traffic, or dies.
+  - **Alternatives:** one node plus a replica, an in-memory data grid (Hazelcast), database read replicas.
 </Callout>

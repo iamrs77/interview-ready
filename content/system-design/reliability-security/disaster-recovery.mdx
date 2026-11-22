@@ -4,7 +4,7 @@ description: "Getting back up after a big failure, like losing a whole data cent
 icon: Siren
 ---
 
-## The idea
+## What is it?
 
 You are writing a long report on your laptop, and the laptop dies. Two questions matter:
 
@@ -15,7 +15,7 @@ These two questions are exactly **RPO** and **RTO**.
 
 **Disaster recovery (DR)** is the plan for getting back after a big failure: a whole data center loses power, a cloud region goes down, someone deletes the production database by mistake, or ransomware locks your files. [Redundancy](./redundancy-failover.mdx) handles one server dying. Disaster recovery is for when a whole site, or the data itself, is gone.
 
-## RPO and RTO
+### RPO and RTO
 
 ```mermaid
 flowchart LR
@@ -36,7 +36,20 @@ flowchart LR
 
 Lower RPO and RTO cost more. Zero data loss with zero downtime is the most expensive thing you can build. So ask: what does one hour of downtime cost us, and what does one hour of lost data cost us?
 
-## Backups
+## Why do we need it?
+
+Spares inside one site handle **one part** failing: a server, a disk, a zone. Some failures hit **everything in a place at once**, or the data itself:
+
+- **A whole region goes down**: a power cut, a flood, a fire, or a cloud outage that spreads across its zones.
+- **People make mistakes.** One wrong command can delete a whole table, and spares don't help (see Backups below).
+- **Bad code corrupts data** slowly, and nobody notices for days.
+- **Attackers** lock or delete your files (ransomware), or get into the production account.
+
+The rule underneath: **copies in the same place, or under the same control, fail together.** Disaster recovery keeps a copy far enough away, and far enough back in time, that one event can't destroy it. (For single-part failures, see [Redundancy and Failover](./redundancy-failover.mdx).)
+
+## How it works inside
+
+### Backups
 
 **Replication is not a backup.** If someone runs `DELETE FROM orders` by mistake, every replica copies the delete within a second. You now have several copies of the mistake. You also need **backups**: copies from the past that you can go back to.
 
@@ -56,7 +69,7 @@ Where to keep backups:
 - **Locked against changes** for a set time, so even an admin can't delete them. Amazon S3 calls this Object Lock. It protects against ransomware.
 - Follow the **3-2-1 rule**: 3 copies of the data, on 2 different kinds of storage, with 1 copy in another place.
 
-## Multi-region setups
+### Multi-region setups
 
 To survive losing a whole region, you need something ready in a second region. There are four common strategies, from cheapest and slowest to most expensive and fastest. AWS's disaster recovery guide uses the same four, and calls the last one **multi-site active/active**.
 
@@ -90,7 +103,7 @@ The copy between regions is usually **asynchronous**: the primary doesn't wait f
 
 To fail over, you promote the replica database, scale up the app servers, and point DNS at Region B (see [DNS](../foundations/dns.mdx)).
 
-## Testing your recovery
+### Testing your recovery
 
 A backup you have never restored is only a hope. Teams that recover well do this:
 
@@ -99,6 +112,29 @@ A backup you have never restored is only a hope. Teams that recover well do this
 - **Runbooks.** A written, step-by-step recovery guide, so whoever is on call at 3 a.m. doesn't have to invent the steps.
 - **Chaos engineering.** Break things on purpose, in a controlled way, to find weak spots before a real disaster does.
 - **Watch the backup jobs.** Alert when a backup fails, or when no backup has run for too long.
+
+## When to use it
+
+- **Backups: always**, for any data you can't rebuild. Point-in-time recovery for the main database.
+- **A second region** when losing a whole region for hours would be very costly: payments, banking, health, large shops.
+- **Pick the strategy from the RPO and RTO.** Hours are fine: backup and restore. Minutes: pilot light or warm standby. Near zero: active-active.
+
+**Don't use it when:**
+
+- **The data can be rebuilt** from somewhere else: caches, search indexes, reports built from raw data. Rebuild them instead.
+- **A second region costs more than the outage.** For an internal tool, a day of downtime may be fine. Backups in another region are still cheap and worth it.
+- **You don't plan to test it.** An untested DR plan gives false comfort.
+
+## Alternatives
+
+There is no real substitute for backups. But you can choose how far to go beyond them:
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Multi-zone redundancy only** | Spares across zones in one region, no second region | Most apps. It survives a data center failure, not a region failure |
+| **Managed cross-region copies** | The provider copies data to another region for you (S3 cross-region replication, DynamoDB global tables, Aurora Global Database) | You want a low RPO without building the copying yourself |
+| **Rebuild from the source** | Recreate derived data from the original data | The data is a cache, an index or a report |
+| **Accept the risk** | Write down that a region outage means downtime | The system is low value, and everyone agrees on it |
 
 ## In the real world
 
@@ -117,9 +153,11 @@ When asked "what if a whole region goes down?", or when the system is critical (
 <Callout title="Remember this" type="success">
   - **RPO** = how much data you can lose. It sets how often you copy data.
   - **RTO** = how long you can be down. It sets how ready the spare must be.
+  - **Why:** some failures hit a whole region, or the data itself (a bad `DELETE`, ransomware). Copies in the same place fail together.
   - Lower RPO and RTO cost more. Choose based on what downtime and lost data cost.
   - **Replication is not a backup**: it copies mistakes too. Keep point-in-time backups.
   - Keep backups in **another region** and **another account**, locked against deletes.
   - Strategies: backup and restore, pilot light, warm standby, active-active.
   - **Practice restores and failovers.** An untested backup is only a hope.
+  - **Alternatives:** multi-zone only, managed cross-region copies, rebuild from the source, or accept the risk. Backups are never optional.
 </Callout>

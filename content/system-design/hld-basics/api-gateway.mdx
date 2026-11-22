@@ -4,7 +4,7 @@ description: "The front door of your system: routing, login checks and rate limi
 icon: DoorOpen
 ---
 
-## The idea
+## What is it?
 
 An **API gateway** is one front door for all your backend services. Every request from outside comes to the gateway first. The gateway checks it, then sends it to the right service.
 
@@ -12,7 +12,15 @@ Think of the reception desk in a big office building. Visitors don't wander the 
 
 In tech: a shopping app has a user service, an order service and a product service. The mobile app talks to just one address, `api.shop.com`. The gateway sends `/orders` requests to the order service, `/products` requests to the product service, and so on.
 
-## What an API gateway does
+## Why do we need it?
+
+Once a backend is split into many services, clients and services both run into trouble:
+
+- **Clients must know many addresses.** The mobile app would call the user service, the order service and the product service directly. Split or move one service, and every app must be updated (and old app versions stay on phones for years).
+- **The same checks are repeated everywhere.** Every service must check login tokens and count requests on its own. That is the same code written many times, maybe in different languages, and it is easy to get one of them wrong.
+- **Services are exposed to the internet.** Each one needs its own HTTPS, logging and protection from abuse.
+
+A gateway puts all these shared jobs in **one place**, at the door:
 
 ```mermaid
 flowchart TB
@@ -35,6 +43,10 @@ flowchart TB
 | **Logging and metrics** | One place to record every request that comes in |
 | **Versioning** | Send `/v1` to the old service and `/v2` to the new one |
 
+## How it works inside
+
+### The path of one request
+
 Every request goes through the same checks, in order:
 
 ```mermaid
@@ -47,7 +59,7 @@ flowchart TB
   D --> E["Forward the request"]
 ```
 
-## Routing requests to the right service
+### Routing requests to the right service
 
 The gateway keeps a list of rules: "this path goes to that service". Most gateways let you write them as config:
 
@@ -65,9 +77,7 @@ Each service usually runs on many servers. The gateway finds their current addre
 
 The client only needs to know **one address**. You can split, merge or move services behind the gateway, and the mobile app never has to change.
 
-## Login checks and rate limiting in one place
-
-**Without a gateway,** every service must check login tokens and count requests on its own. That is the same code written many times, maybe in different languages, and it is easy to get one of them wrong.
+### Login checks and rate limiting in one place
 
 **With a gateway,** the check happens once, at the door:
 
@@ -112,7 +122,26 @@ flowchart TB
 - **It can be a bottleneck.** All traffic goes through it, so it must scale.
 - **Too much logic.** If business rules creep into the gateway, it becomes a small monolith that every team must change. Keep it to routing and shared checks.
 
-A common variation is the **backend for frontend** (BFF): a separate gateway for each kind of client, such as one for the mobile app and one for the website. Each one shapes the answers for its own client.
+## When to use it
+
+- **Many services behind one public API**, like a shopping app with user, order and product services.
+- **A public API with keys, plans and limits**, where you must know who is calling and how much.
+- **Many kinds of clients** (web, iOS, Android, partners) that should all see one stable address.
+
+**Don't use it when:**
+
+- **You have one service.** A load balancer is enough.
+- **The traffic is between your own services.** Internal calls don't need to go out to the front door and back. Call directly, or use a service mesh.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Load balancer only** | Spreads traffic over copies of one service | One service, or an internal app with no API keys. See [Load Balancing](./load-balancing.mdx) |
+| **Backend for frontend (BFF)** | A separate gateway for each kind of client, such as one for the mobile app and one for the website. Each one shapes the answers for its own client | Clients need very different data from the same services |
+| **Service mesh** | A small proxy next to each service handles TLS, retries and metrics for calls between services | Traffic inside your system. Often used with a gateway at the edge |
+| **Shared library** | Each service checks tokens and limits with the same code library | A few services in one language. Every fix means redeploying every service |
+| **GraphQL server** | One endpoint where the client asks for exactly the fields it needs, even across services | Many clients that each need different, combined data. See [gRPC and GraphQL](../foundations/grpc-and-graphql.mdx) |
 
 ## In the real world
 
@@ -130,8 +159,11 @@ With a single service, a load balancer is enough. Don't add a gateway just becau
 
 <Callout title="Remember this" type="success">
   - An **API gateway** is one front door for many services.
+  - **Why:** without it, clients track many addresses, and every service repeats the same login, limit and HTTPS code.
   - Its jobs: **routing, login checks, rate limits, TLS**, logging, and sometimes combining answers.
   - Check **who you are** once at the gateway. Services still check **what you may do** with their data.
   - **Load balancer** = spread traffic over copies of one service. **Gateway** = route to different services and apply API rules.
+  - **Inside:** check token → check rate limit → match the path to a service → find a healthy server → forward.
   - Run several gateway copies, and keep business logic out of it.
+  - **Alternatives:** a plain load balancer, BFF, a service mesh, a shared library, a GraphQL server.
 </Callout>

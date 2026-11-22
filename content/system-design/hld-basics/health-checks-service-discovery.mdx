@@ -4,7 +4,7 @@ description: "How the system knows which servers are alive, and where to find th
 icon: Stethoscope
 ---
 
-## The idea
+## What is it?
 
 In a big system, servers come and go all the time. Some crash. Some are added when traffic is high. Some are replaced during a deploy. Two questions keep coming up:
 
@@ -13,7 +13,19 @@ In a big system, servers come and go all the time. Some crash. Some are added wh
 
 Think of a taxi company. Every few minutes, the dispatcher radios each driver: "Are you okay? Are you working?" That is a health check. The dispatcher also keeps a board of which drivers are working right now and where they are. When a customer calls, the dispatcher looks at the board and picks a free driver. That is service discovery. If a driver stops answering the radio, their name comes off the board.
 
-## Health checks: is this server okay?
+## Why do we need it?
+
+Because servers come and go, any fixed list of servers is soon wrong. Without these two tools:
+
+- **Traffic keeps going to dead servers.** If one server out of four freezes, about **1 in 4 requests fails** until a person notices and removes it by hand.
+- **Addresses go stale.** With many services, the Order service needs to call the Payment service. But payment servers come and go, and their IP addresses change. If you write `10.0.3.17` in a config file, it breaks the moment that server is replaced.
+- **People can't keep up.** With servers changing every few minutes, no human can update the lists fast enough. It must be automatic.
+
+Health checks find out **who is alive**. Service discovery tells callers **where they are**.
+
+## How it works inside
+
+### Health checks: is this server okay?
 
 A **health check** is a small test that runs again and again. Usually the load balancer calls an address like `GET /health` every few seconds. A `200 OK` answer means healthy. An error, or no answer in time, means not.
 
@@ -44,7 +56,7 @@ Every health check has a few settings:
 
 Why not remove a server after **one** failure? Networks have small hiccups. If one slow answer removed a server, servers would keep dropping out and coming back. This is called **flapping**.
 
-### Shallow and deep checks
+#### Shallow and deep checks
 
 - A **shallow** check asks: "Is the program running, and can it answer?" The `/health` page just returns `200` right away.
 - A **deep** check asks: "Can it really do its job?" It also tests the database connection, the cache, and free disk space.
@@ -79,14 +91,14 @@ app.get("/health/ready", (req, res) => {
 });
 ```
 
-### Active and passive checks
+#### Active and passive checks
 
 - **Active:** the load balancer sends test requests, like the ones above.
 - **Passive:** the load balancer watches **real** traffic. If a server returns many `5xx` errors or times out, it is taken out for a while. Envoy calls this **outlier detection**.
 
 Many systems use both.
 
-## Removing dead servers automatically
+### Removing dead servers automatically
 
 Health checks are what let a system heal itself, with no human awake at 3 a.m.:
 
@@ -102,9 +114,7 @@ An **auto-scaler** is the part that adds and removes servers, like an AWS Auto S
 
 During a deploy, it works the other way around. The old server is first marked "not ready", so it gets no new requests. It finishes the requests it already has (**draining**), and only then shuts down. Users see no errors.
 
-## Service discovery: finding other services
-
-With many services, the Order service needs to call the Payment service. But payment servers come and go, and their IP addresses change. If you write `10.0.3.17` in a config file, it breaks the moment that server is replaced.
+### Service discovery: finding other services
 
 **Service discovery** means finding the **current** addresses of a service by its **name**.
 
@@ -176,6 +186,24 @@ Keep the readiness probe about **this pod only**, like the `/health/ready` code 
 
 More on Kubernetes in [CI/CD, Docker and Kubernetes](../production/cicd-docker-kubernetes.mdx).
 
+## When to use it
+
+- **Health checks: always**, for every server behind a load balancer or in Kubernetes. There is no good reason to skip them.
+- **Service discovery:** when you have **many services** whose servers change often, through auto-scaling, containers or frequent deploys.
+
+**Don't use it when:**
+
+- **You have a few servers with fixed addresses.** A config file or one DNS name is simpler than running a registry.
+- **Your platform already does it.** Kubernetes Services and cloud load balancers have discovery and health checks built in. Don't add a second registry on top.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Static config** | A list of server addresses in a config file | A few servers that almost never change |
+| **One fixed address** | Callers use one DNS name or load balancer address, and the platform handles the rest | Most teams on a cloud or Kubernetes. Discovery still happens, just out of sight |
+| **Service mesh** | A small proxy next to each service (like Envoy, in Istio or Linkerd) does discovery, health checks and retries | Many microservices that all need the same network features |
+
 ## In the real world
 
 **Netflix Eureka.** Netflix runs its services on AWS, where servers are started and stopped all the time. It built **Eureka** to keep track of them, and released it as open source. Each server registers with Eureka and sends heartbeats. Callers ask Eureka for the list and pick a server themselves, which is client-side discovery.
@@ -190,9 +218,12 @@ You usually need only a sentence or two. Bring it up when you have many services
 
 <Callout title="Remember this" type="success">
   - A **health check** is a regular "are you okay?" test, usually `GET /health`.
+  - **Why:** servers come and go. Without checks, traffic goes to dead servers. Without discovery, hard-coded addresses break.
   - Fail a few times **in a row** → removed. Pass a few times → added back.
   - **Liveness** = is it running? (restart if not). **Readiness** = can it take traffic? (remove if not).
   - Readiness checks only what the server **owns**. If it checks a shared database, one slow database can fail every server at once.
   - **Service discovery** = find a service's current addresses by name, using a **registry**.
   - **Client-side** (Eureka) vs **server-side** (load balancer, Kubernetes Service).
+  - **Inside:** servers **register**, stay listed with checks or **heartbeats**, and callers **look up** healthy addresses.
+  - **Alternatives:** a static config file, one fixed DNS or load balancer address, a service mesh.
 </Callout>

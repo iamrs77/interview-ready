@@ -4,7 +4,7 @@ description: "Strong vs eventual consistency, the useful levels in between, and 
 icon: Equal
 ---
 
-## The idea
+## What is it?
 
 Big systems keep **copies** of the same data on many machines. A copy is called a **replica**. When you write, the change reaches one copy first and the others a moment later.
 
@@ -17,7 +17,9 @@ Think of a teacher who moves the exam to Friday:
 
 A stronger promise is easier to build on, but it is **slower** and **fails more often** when the network has problems.
 
-## The setup
+## Why do we need it?
+
+Copies exist for good reasons: more reads, surviving a dead machine, and being close to users (see [Replication](../databases/replication.mdx)). But the copies are never updated at the exact same moment.
 
 ```mermaid
 flowchart TB
@@ -29,7 +31,11 @@ flowchart TB
 
 The delay before a replica gets the change is called **replica lag**. Usually it is milliseconds. Under heavy load it can be seconds. See [Replication](../databases/replication.mdx).
 
-## Strong consistency
+Without a clear promise, every developer guesses, and bugs show up: the buyer sees the old price, a user's own edit seems lost, a comment vanishes on refresh. A consistency model is the **contract**. It tells you which of these can happen, so you can design around them, or pay for a stronger promise only where it matters.
+
+## How it works inside
+
+### Strong consistency
 
 **Every read sees the latest write.** It behaves as if there were only one copy of the data. (The formal name is **linearizability**.)
 
@@ -47,16 +53,18 @@ The cost:
 
 Use it for: bank balances, booking the last seat, unique usernames, stock count at checkout.
 
-## Eventual consistency
+### Eventual consistency
 
 **If writes stop, all copies will become the same, eventually.** Usually within milliseconds or seconds, but there is no promise about exactly when. Until then, a reader may see old data.
+
+How it works: the copy that takes the write answers **right away**, and sends the change to the other copies **in the background**. If two copies accept different writes to the same key, they must settle it later, often with **last write wins** (keep the value with the newest timestamp).
 
 - **Good:** fast, and it keeps working during network problems.
 - **Bad:** strange moments. You post a comment, refresh, and it's gone. Refresh again and it's back.
 
 Use it for: like counts, view counts, feeds, reviews, search results.
 
-## The levels in between
+### The levels in between
 
 Between "always the latest" and "eventually", there are useful promises. Most of them are about **what one user sees**, so they are often called **session guarantees**.
 
@@ -90,7 +98,7 @@ The user thinks their change was lost. Ways to fix it:
 
 More ways to hide the delay are in [Eventual Consistency in Async Systems](../messaging/eventual-consistency-async.mdx).
 
-## Quorums: choosing per request
+### Quorums: choosing per request
 
 Some databases, like Cassandra, let you choose the level for each request. Three numbers matter:
 
@@ -108,7 +116,7 @@ If **R + W is greater than N**, the copies you read and the copies you wrote alw
 
 **A quorum is not full strong consistency.** It makes reads see the latest **finished** write, but edge cases remain. While a write is still being copied, one reader can see the new value and the next reader the old one. And a write that fails on some copies is not undone on the copies that saved it. For truly strong reads, use a single leader or consensus.
 
-## Picking the right level per feature
+## When to use which
 
 Ask one question: **"What breaks if this read is a few seconds old?"**
 
@@ -123,6 +131,16 @@ Ask one question: **"What breaks if this read is a few seconds old?"**
 | Feeds, search results | Eventual | A few seconds late is fine |
 
 One app usually mixes several levels. That is normal and a good thing to say out loud.
+
+## Alternatives
+
+Beyond the levels above:
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Bounded staleness** | Reads may be old, but by **at most** a set time or number of versions. Azure Cosmos DB offers it as a level | Old data is fine, but only up to a limit, like 5 seconds |
+| **CRDTs** | Data types (counters, sets, lists) built so copies can always merge, with no conflicts | Many copies accept writes at the same time, like multi-region counters or shared editing |
+| **No replicas** | Keep a single copy. Every read is the latest | Traffic fits on one database. The simplest choice |
 
 ## In the real world
 
@@ -140,9 +158,12 @@ Say the level **per feature** in your non-functional requirements, and handle re
 
 <Callout title="Remember this" type="success">
   - A **consistency model** = what a reader may see while copies catch up.
+  - **Why:** copies are never updated at the same moment. The model tells you which odd reads can happen, so you design for them.
   - **Strong:** always the latest. Slower, and fails during network problems.
   - **Eventual:** copies agree soon. Fast and always up, but reads can be old.
+  - **Inside:** strong = one leader or **consensus**. Eventual = copy **in the background**, settle conflicts later.
   - **Read-your-writes:** users always see their own changes. Read from the primary right after a write.
   - **Quorum:** if **R + W is greater than N**, reads see the latest finished write. Close to strong, but not fully strong.
   - Ask **"what breaks if this is a few seconds old?"** and choose **per feature**.
+  - **Alternatives:** bounded staleness, CRDTs, or just one copy.
 </Callout>

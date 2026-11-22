@@ -4,15 +4,21 @@ description: "Turn text and images into lists of numbers, so you can search by m
 icon: ChartScatter
 ---
 
-## The idea
+## What is it?
 
 Think of a **supermarket**. Similar things sit close together: apples next to pears, pasta next to pasta sauce, and soap far away in another aisle. If you hold an apple and want "something like this", you don't walk the whole store. You look at the shelves **around you**.
 
 A **vector database** does the same with meaning. Every item (a product, a sentence, a photo, a song) gets a spot on a giant map, where **similar meaning = close together**. A search becomes "what is near this spot?".
 
-Why this matters: a shopper types **"cheap laptop for college"**. A product called **"Budget notebook for students"** shares **no words** with that query, so a keyword search (see [Search](./search.mdx)) misses it. A search by meaning finds it, because the two sit close together on the map. This is called **semantic search**.
+## Why do we need it?
 
-## Embeddings: meaning as a list of numbers
+**Keyword search matches words, not meaning.** A shopper types **"cheap laptop for college"**. A product called **"Budget notebook for students"** shares **no words** with that query, so a keyword search (see [Search](./search.mdx)) misses it. A search by meaning finds it, because the two sit close together on the map. This is called **semantic search**.
+
+The same need shows up in "more like this" recommendations, similar photos, and chatbots that must find the right part of your docs. Each time the question is: **which items are closest to this one?** A normal database can't answer that fast over millions of items (the reason is below). A vector database is built for exactly that question.
+
+## How it works inside
+
+### Embeddings: meaning as a list of numbers
 
 An **embedding model** (a trained AI model) reads a piece of text and returns a list of numbers, called a **vector** or an **embedding**. For example, OpenAI's `text-embedding-3-small` model returns **1,536 numbers** for any text you give it.
 
@@ -48,7 +54,7 @@ Things to know:
 - **Images work too.** Models like OpenAI's **CLIP** put images and text on the **same** map, so the text "red running shoes" lands near photos of red running shoes.
 - **Use the same model for everything.** The stored items and the search text must be turned into vectors by the **same model**. Vectors from two different models can't be compared. Change the model, and you must re-embed every item.
 
-## Measuring "close"
+### Measuring "close"
 
 There are three common ways to measure how close two vectors are:
 
@@ -89,7 +95,7 @@ console.log(cosineSimilarity(kitten, car).toFixed(2)); // 0.35
 
 Many models return vectors that all have length 1. Then cosine and dot product give the **same order** of results. In practice, use the measure the model's docs recommend.
 
-## Why exact search is too slow
+### Why exact search is too slow
 
 The simple way to find the 10 nearest vectors: compare the search vector with **every** stored vector, and keep the best 10. This is **exact** search (also called brute force, or flat search). It is perfect, and it is fine for a few thousand items.
 
@@ -103,9 +109,9 @@ A normal **B-tree index** (see [Indexes](../databases/indexes.mdx)) can't help. 
 
 The answer is **approximate nearest neighbor (ANN)** search: find **almost** the best 10, by checking only a small part of the data. We give up a tiny bit of accuracy for a huge gain in speed, the same trade as in [Probabilistic Data Structures](./probabilistic-data-structures.mdx).
 
-## ANN indexes
+### ANN indexes
 
-### HNSW: a graph of shortcuts
+#### HNSW: a graph of shortcuts
 
 Think of travelling from a small village in one country to a small village in another. You take a **flight** between two big cities, then a **train** to the nearest town, then a **local bus** to the exact street. Big jumps first, small steps last.
 
@@ -125,7 +131,7 @@ flowchart TB
 
 A search touches only a few thousand points, not 100 million. HNSW is fast and finds most of the true nearest neighbors. The costs: it uses **a lot of memory** (the vectors and all the links are kept in RAM), and it is **slow to build**.
 
-### IVF: buckets
+#### IVF: buckets
 
 Think of a **library** sorted into sections. For a cooking question, you search the cooking section and maybe the one next to it, not the whole building.
 
@@ -148,7 +154,7 @@ With 100 million vectors in 1,000 buckets, each bucket holds about 100,000. Sear
 
 The catch is the same **edge problem** as geohash cells: a close match can sit just across the border, in a bucket you skipped. Search more buckets to miss less. That setting is often called **probes**.
 
-### HNSW vs IVF
+#### HNSW vs IVF
 
 | | HNSW | IVF |
 | --- | --- | --- |
@@ -160,7 +166,7 @@ The catch is the same **edge problem** as geohash cells: a close match can sit j
 
 HNSW is the usual default today. To save memory at huge scale, systems also use **quantization**: store each number in fewer bytes (for example, 1 byte instead of 4). Memory drops about 4 times, and accuracy drops a little.
 
-## Recall vs speed
+### Recall vs speed
 
 ANN results are "almost right". We measure how close with **recall**:
 
@@ -175,7 +181,7 @@ Every ANN index has a knob that trades speed for recall:
 
 For search and recommendations, a recall of about 95% is usually fine. A shopper won't notice that the 9th best laptop was really the 11th best. Pick the setting by **measuring**: keep a test set of searches, compare with exact search, and raise the knob until recall is good enough at your speed target.
 
-## Filtering with metadata
+### Filtering with metadata
 
 Real searches have rules too: "dresses **like this one**, **under $50**, **in stock**, **size M**". So each vector is stored with **metadata**: price, stock, size, and, in a [multi-tenant](./multi-tenancy.mdx) app, the `tenant_id`.
 
@@ -188,66 +194,6 @@ There are three ways to mix the two:
 | **Filter during** | Check the rules **while** walking the index, and skip failing points | The best answer. Dedicated vector databases are built to do this |
 
 The "filter after" problem is real. pgvector's own docs warn that if a filter matches 10% of rows, an HNSW search with the default settings returns only about **4 rows** on average. Fixes: ask for more candidates (raise `ef_search`), use newer pgvector versions that keep scanning until enough rows pass, or give a common filter its own index.
-
-## Where it is used
-
-**Semantic search.** Search by meaning: "cheap laptop for college" finds "budget notebook for students". The vectors are a **copy**, made from the real data, so keep them in sync with **CDC**, exactly like an Elasticsearch index (see [Elasticsearch](./elasticsearch.mdx)):
-
-```mermaid
-flowchart TB
-  DB[("PostgreSQL<br/>source of truth")]:::db -->|"CDC: product changed"| IDX["Indexer"]:::service
-  IDX -->|"text to vector"| EM["Embedding model"]:::external
-  IDX -->|"vector + price, stock"| VDB[("Vector DB")]:::db
-  U["Shopper"]:::client -->|"cheap laptop for college"| S["Search Service"]:::service
-  S -->|"query to vector"| EM
-  S -->|"nearest 10, in stock"| VDB
-```
-
-**Recommendations.** "More like this": find the songs, products or videos whose vectors are nearest to the one you just liked.
-
-**RAG for chatbots.** RAG means **Retrieval-Augmented Generation**. A chatbot for a help center can't know your company's docs by heart. So:
-
-1. **Before:** split every help article into small pieces (**chunks**), embed each one, and store them in the vector database.
-2. **At question time:** embed the question, find the 5 nearest chunks, and send the question **plus those chunks** to the LLM (the large language model). It answers using your docs.
-
-```mermaid
-sequenceDiagram
-  participant U as User
-  participant C as Chat Service
-  participant E as Embed model
-  participant V as Vector DB
-  participant L as LLM
-  U->>C: How do I reset my password?
-  C->>E: Embed the question
-  E-->>C: Vector
-  C->>V: Nearest 5 chunks
-  V-->>C: 5 help-center chunks
-  C->>L: Question + 5 chunks
-  L-->>C: Answer, based on the chunks
-  C-->>U: Answer
-```
-
-**Others:** image search ("find similar photos"), and finding near-duplicates (the same product listed twice with different words).
-
-### Keyword vs semantic, and hybrid search
-
-Neither search wins every time:
-
-| | Keyword search (BM25) | Semantic search (vectors) |
-| --- | --- | --- |
-| **Good at** | Exact words: names, model numbers, error codes like `E1045` | Meaning: synonyms, other phrasings, other languages |
-| **Bad at** | "cheap laptop" vs "budget notebook" | Exact codes: `E1045` and `E1046` look almost the same to it |
-
-So real products often run **both** and merge the two lists. This is **hybrid search**. A common way to merge is **Reciprocal Rank Fusion (RRF)**: each result gets `1 / (60 + its rank)` points from each list, the points are added up, and the highest total wins. A result that is high in **both** lists comes first:
-
-| Result | Keyword rank | Vector rank | Points | Final |
-| --- | --- | --- | --- | --- |
-| Doc A | 1 | 2 | 1/61 + 1/62 = 0.0325 | **1st** |
-| Doc C | 3 | 1 | 1/63 + 1/61 = 0.0323 | 2nd |
-| Doc B | 2 | — | 1/62 = 0.0161 | 3rd |
-| Doc D | — | 3 | 1/63 = 0.0159 | 4th |
-
-Elasticsearch and OpenSearch can do keyword and vector search **in one query**, which makes hybrid search easy if you already run them.
 
 ## Example: pgvector
 
@@ -293,7 +239,47 @@ LIMIT 10;
 
 **Simple rule:** start with what you already run. PostgreSQL → **pgvector**. Elasticsearch → its **vector fields**. Move to a **dedicated** vector database when you reach hundreds of millions of vectors, need very high search rates, or have heavy filtering that the general tools handle badly.
 
-## When to use it in an interview
+## When to use it
+
+**Semantic search.** Search by meaning: "cheap laptop for college" finds "budget notebook for students". The vectors are a **copy**, made from the real data, so keep them in sync with **CDC**, exactly like an Elasticsearch index (see [Elasticsearch](./elasticsearch.mdx)):
+
+```mermaid
+flowchart TB
+  DB[("PostgreSQL<br/>source of truth")]:::db -->|"CDC: product changed"| IDX["Indexer"]:::service
+  IDX -->|"text to vector"| EM["Embedding model"]:::external
+  IDX -->|"vector + price, stock"| VDB[("Vector DB")]:::db
+  U["Shopper"]:::client -->|"cheap laptop for college"| S["Search Service"]:::service
+  S -->|"query to vector"| EM
+  S -->|"nearest 10, in stock"| VDB
+```
+
+**Recommendations.** "More like this": find the songs, products or videos whose vectors are nearest to the one you just liked.
+
+**RAG for chatbots.** RAG means **Retrieval-Augmented Generation**. A chatbot for a help center can't know your company's docs by heart. So:
+
+1. **Before:** split every help article into small pieces (**chunks**), embed each one, and store them in the vector database.
+2. **At question time:** embed the question, find the 5 nearest chunks, and send the question **plus those chunks** to the LLM (the large language model). It answers using your docs.
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant C as Chat Service
+  participant E as Embed model
+  participant V as Vector DB
+  participant L as LLM
+  U->>C: How do I reset my password?
+  C->>E: Embed the question
+  E-->>C: Vector
+  C->>V: Nearest 5 chunks
+  V-->>C: 5 help-center chunks
+  C->>L: Question + 5 chunks
+  L-->>C: Answer, based on the chunks
+  C-->>U: Answer
+```
+
+**Others:** image search ("find similar photos"), and finding near-duplicates (the same product listed twice with different words).
+
+In short:
 
 | Use a vector database for | Don't use it for |
 | --- | --- |
@@ -301,6 +287,35 @@ LIMIT 10;
 | **"More like this"** recommendations | **Filters only**, like "price under $50". A normal index does it |
 | **RAG**: giving a chatbot your own documents | The **main copy** of your data. Vectors are made from it |
 | **Similar images**, near-duplicate listings | **Exact codes and names** alone. Keyword search is better, or use hybrid |
+
+### Keyword vs semantic, and hybrid search
+
+Neither search wins every time:
+
+| | Keyword search (BM25) | Semantic search (vectors) |
+| --- | --- | --- |
+| **Good at** | Exact words: names, model numbers, error codes like `E1045` | Meaning: synonyms, other phrasings, other languages |
+| **Bad at** | "cheap laptop" vs "budget notebook" | Exact codes: `E1045` and `E1046` look almost the same to it |
+
+So real products often run **both** and merge the two lists. This is **hybrid search**. A common way to merge is **Reciprocal Rank Fusion (RRF)**: each result gets `1 / (60 + its rank)` points from each list, the points are added up, and the highest total wins. A result that is high in **both** lists comes first:
+
+| Result | Keyword rank | Vector rank | Points | Final |
+| --- | --- | --- | --- | --- |
+| Doc A | 1 | 2 | 1/61 + 1/62 = 0.0325 | **1st** |
+| Doc C | 3 | 1 | 1/63 + 1/61 = 0.0323 | 2nd |
+| Doc B | 2 | — | 1/62 = 0.0161 | 3rd |
+| Doc D | — | 3 | 1/63 = 0.0159 | 4th |
+
+Elasticsearch and OpenSearch can do keyword and vector search **in one query**, which makes hybrid search easy if you already run them.
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **Keyword search (BM25)** | An inverted index, as in Elasticsearch or PostgreSQL full-text search | Users type exact words: names, model numbers, codes. See [Search](./search.mdx) |
+| **Exact search, no index** | Compare the search vector with every stored vector, in plain code | A few thousand items. Perfect results, nothing to tune |
+| **A vector library in your service** | FAISS or Annoy, loaded into your own app's memory | The vectors rarely change, so a batch job can rebuild the index (for example, nightly recommendations) |
+| **"Bought together" counts** | Count which items show up together in orders or plays | Recommendations, when you have lots of user activity and don't need to understand the text |
 
 ## In the real world
 
@@ -323,6 +338,7 @@ Say how vectors are made, kept in sync, searched and filtered, and what you trad
 **Answer:** "Vectors from different models can't be compared, so I re-embed every product into a **new** index in the background, while the old one keeps serving. When it's full, I switch the alias to the new index in one step, like any Elasticsearch rebuild. The source text stays in PostgreSQL, so I can always rebuild."
 
 <Callout title="Remember this" type="success">
+  - **Why:** keyword search matches **words, not meaning**, and a normal index can't find "closest" fast.
   - An **embedding** turns text or images into a list of numbers. **Similar meaning = close together.** Use the **same model** for items and searches.
   - Measure closeness with **cosine similarity** (same direction) or distance.
   - **Exact search** compares with every vector: too slow at scale. **ANN** finds almost the best, much faster.
@@ -331,4 +347,5 @@ Say how vectors are made, kept in sync, searched and filtered, and what you trad
   - **Filter during** the search, not after, or you get too few results.
   - Uses: **semantic search**, **recommendations**, **RAG**. Mix with keyword search for **hybrid** search (RRF).
   - Start with **pgvector** or **Elasticsearch** if you have them. Go **dedicated** (Pinecone, Weaviate, Milvus, Qdrant) at huge scale.
+  - **Alternatives:** keyword search (exact words), exact search (small data), FAISS or Annoy inside your service, "bought together" counts.
 </Callout>

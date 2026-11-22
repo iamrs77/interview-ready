@@ -4,7 +4,7 @@ description: The most common way to design APIs. Resources, URLs and HTTP method
 icon: Plug
 ---
 
-## The idea
+## What is it?
 
 An **API** is the menu of your system. It lists what other programs can ask for, and how to ask.
 
@@ -15,6 +15,51 @@ An **API** is the menu of your system. It lists what other programs can ask for,
 3. You use **HTTP methods** (`GET`, `POST`, `PATCH`, `DELETE`) to say what you want to do with it.
 
 Think of a library. Every book has its own shelf number (the URL). You don't walk in and shout "do the borrowing thing". You take book number 42 to the desk and say "borrow" (the method).
+
+## Why do we need it?
+
+Before REST, every API made up its own style. One had `/createOrder` and `/getOrderById`. Another (old **SOAP** services) sent every call as a `POST` to one URL, wrapped in XML. This caused two problems:
+
+- **Every API had to be learned from zero.** Nothing was the same from one company to the next.
+- **HTTP's help was lost.** When every call is a `POST`, caches can't store reads, and clients can't tell which calls are safe to retry.
+
+REST reuses what HTTP already has: **URLs** to name things, **methods** for the actions, **status codes** for the result (see [HTTP Methods, Status Codes and Headers](./http-methods-status-codes-headers.mdx)). So caches, proxies, browsers and tools just work, and any language can call the API with plain HTTP. The idea comes from Roy Fielding's PhD thesis in 2000.
+
+## How it works inside
+
+### One request, step by step
+
+When `GET /orders/42` reaches the server:
+
+1. The **router** matches the method and the path against a pattern, like `GET /orders/:id`, and picks the code that handles it.
+2. It reads the **path param** (`id` is `42`) and the **login token** from the headers.
+3. The handler reads the order from the **database**.
+4. It turns the result into a **status code** and a **JSON** body.
+
+Here is that handler in Express (Node.js):
+
+```js
+app.get("/orders/:id", async (request, response) => {
+    // Path param: which order
+    const orderId = request.params.id;
+
+    // The user comes from the login token (a login middleware set it)
+    const userId = request.user.id;
+
+    const order = await db.findOrder(orderId, userId);
+
+    if (order === null) {
+        response.status(404).json({ error: "ORDER_NOT_FOUND" });
+        return;
+    }
+
+    response.status(200).json(order);
+});
+```
+
+### What "REST" means
+
+REST stands for **REpresentational State Transfer**. The server never hands out the resource itself (a row in its database). It sends a **representation** of it, usually JSON. The client changes the resource by sending a representation back, like a `PATCH` body. And because each request is **stateless**, any server behind the load balancer can answer it.
 
 ## Resources and URLs
 
@@ -234,6 +279,28 @@ In an interview, if a search has many or complex filters, you can say: "For simp
 - Returning a list of 100,000 items with no paging.
 - Changing the API in a way that breaks old apps, without a new version.
 
+## When to use it
+
+- **Public APIs** that other developers will use. Everyone knows REST, and every language can call it.
+- **Web and mobile apps** talking to their own backend: create, read, change and delete resources.
+- **Reads you want to cache**, with `Cache-Control` and CDNs.
+
+**Don't use it when:**
+
+- **Your own services call each other** a huge number of times, and speed matters most. Use gRPC.
+- **Each screen needs data from many resources**, and different apps need different fields. REST means many round trips, or too much data. Use GraphQL.
+- **The server must push updates**, like chat or live scores. Use [WebSockets or SSE](./polling-websockets-sse.mdx).
+
+## Alternatives
+
+| Option | What it is | Pick it when |
+| --- | --- | --- |
+| **gRPC** | Call a function on another service. Small binary messages on HTTP/2 | Fast calls between your own services. See [gRPC and GraphQL](./grpc-and-graphql.mdx) |
+| **GraphQL** | One endpoint. The client asks for exactly the fields it needs | Many different screens and apps need different data. See [gRPC and GraphQL](./grpc-and-graphql.mdx) |
+| **WebSockets or SSE** | A connection that stays open, so the server can push | Live updates. See [Polling, WebSockets and SSE](./polling-websockets-sse.mdx) |
+| **Webhooks** | The other system calls **your** URL when something happens | You want to hear about events, like Stripe telling you a payment succeeded |
+| **SOAP** | An older style: XML messages and a strict contract | Old enterprise systems that already use it |
+
 ## In the real world
 
 **Stripe** is famous for its clean REST API. Its resources look like `/v1/customers` and `/v1/refunds`, and errors come back with a clear type and message. The `/v1` in the URL has stayed the same for years. Real changes get **date-named versions** (like `2024-06-20`): each account stays on its version until it chooses to upgrade, and an app can ask for a version with the `Stripe-Version` header. So old apps keep working. Teams often copy Stripe's style.
@@ -255,4 +322,7 @@ In the API step, write one endpoint for each feature, and say where the user com
   - **One endpoint per feature.**
   - Take the **user from the token**, never from the body.
   - **Page** big lists. **Version** the API when it changes.
+  - **Why:** one shared style that **reuses HTTP** (URLs, methods, status codes), so caches, retries and tools just work.
+  - **Inside:** the router matches **method + path pattern**, the handler reads the token and the database, and returns a **status code + JSON**.
+  - **Alternatives:** gRPC (service to service), GraphQL (flexible fields), WebSockets/SSE (push), webhooks.
 </Callout>
