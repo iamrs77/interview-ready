@@ -358,6 +358,59 @@ Nothing later beats 49.
 
 **Time:** O(n) · **Space:** O(1). Each step moves one pointer inward, so there are at most n - 1 steps.
 
+### 4. Trapping Rain Water (Hard)
+
+**Problem:** `heights[i]` is the height of a bar of width 1. After rain, how much water is trapped between the bars? `[4, 2, 0, 3, 2, 5]` gives 9.
+
+**Idea:** the water above one bar is **the lower of (the tallest bar on its left) and (the tallest bar on its right), minus its own height**. Above the bar of height 0 in the example, the tallest on the left is 4 and on the right is 5, so the water there is 4 - 0 = 4.
+
+Keep one pointer at each end, and the tallest bar seen so far from each end: `leftMax` and `rightMax`. Work on the side whose tallest bar is **lower**. Say `leftMax` is the lower one. The other side already has a bar at least as tall as `leftMax`, so the water at `left` can't be held any higher than `leftMax`. We know the answer for `left` right now, without looking further.
+
+```js
+function trap(heights) {
+    let left = 0;
+    let right = heights.length - 1;
+
+    // The tallest bar seen so far from each end.
+    let leftMax = 0;
+    let rightMax = 0;
+
+    let water = 0;
+
+    while (left <= right) {
+        if (leftMax <= rightMax) {
+            // The left wall is the lower one, so it sets the level here.
+            leftMax = Math.max(leftMax, heights[left]);
+            water = water + leftMax - heights[left];
+            left++;
+        } else {
+            // The right wall is the lower one, so it sets the level here.
+            rightMax = Math.max(rightMax, heights[right]);
+            water = water + rightMax - heights[right];
+            right--;
+        }
+    }
+
+    return water;
+}
+
+console.log(trap([4, 2, 0, 3, 2, 5])); // 9
+console.log(trap([0, 1, 0, 2, 1, 0, 1, 3, 2, 1, 2, 1])); // 6
+```
+
+How it runs on `[4, 2, 0, 3, 2, 5]`:
+
+| Step | Side (why) | Bar at index: height | That side's tallest | Water on this bar | Total |
+| --- | --- | --- | --- | --- | --- |
+| 1 | left (0 ≤ 0) | 0: 4 | leftMax = 4 | 4 - 4 = 0 | 0 |
+| 2 | right (4 > 0) | 5: 5 | rightMax = 5 | 5 - 5 = 0 | 0 |
+| 3 | left (4 ≤ 5) | 1: 2 | leftMax = 4 | 4 - 2 = 2 | 2 |
+| 4 | left (4 ≤ 5) | 2: 0 | leftMax = 4 | 4 - 0 = 4 | 6 |
+| 5 | left (4 ≤ 5) | 3: 3 | leftMax = 4 | 4 - 3 = 1 | 7 |
+| 6 | left (4 ≤ 5) | 4: 2 | leftMax = 4 | 4 - 2 = 2 | **9** |
+
+**Time:** O(n) · **Space:** O(1). Each step finishes one bar and moves one pointer. A simpler first answer keeps two arrays, the tallest bar to the left of each index and the tallest to the right: also O(n) time, but O(n) space.
+
 ## How to spot it
 
 - The array is **sorted** (or you may sort it), and you need a **pair or triplet** with a given sum: opposite ends.
@@ -393,4 +446,5 @@ Say why each pointer moves:
   - Loop **while `left < right`**, and move at least one pointer on every pass.
   - **3Sum = sort + fix the first number + two pointers.** O(n²). Skip copies to avoid repeat triplets.
   - Container With Most Water: **move the shorter wall**.
+  - Trapping Rain Water: water on a bar = **the lower of the tallest left and tallest right**, minus its height. Work on the side whose tallest is lower.
 </Callout>

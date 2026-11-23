@@ -265,13 +265,15 @@ function randomPartition(numbers, low, high) {
 
 Then call `randomPartition` instead of `partition` inside `quickSortInPlace`. A bad pivot every time becomes very unlikely.
 
+**One case a random pivot can't fix: many equal items.** In `partition`, an item equal to the pivot is not smaller, so it goes to the right side. If every item is 5, each partition peels off just one item, whatever pivot you pick. That is O(n²) time and n nested calls. In Node, 20,000 equal items are already too many: the call stack overflows. The fix is a **three-way partition**: smaller items on the left, equal items in the middle, bigger items on the right. Then only sort the left and right parts. [Sort Colors](#3-sort-colors) below shows the three-way split.
+
 ### Merge sort vs quick sort
 
 | | Merge sort | Quick sort |
 | --- | --- | --- |
 | Idea | split in half, sort the halves, merge | pick a pivot, partition, sort the sides |
 | Time (usual) | O(n log n) | O(n log n) |
-| Time (worst) | O(n log n) | O(n²), rare with a random pivot |
+| Time (worst) | O(n log n) | O(n²), rare with a random pivot and a three-way split |
 | Extra space | O(n) | O(log n) |
 | Stable? | yes | no |
 | Good for | guaranteed speed, linked lists, stable order | arrays in memory, fast in practice |
@@ -481,12 +483,76 @@ console.log(largestNumber([0, 0])); // 0
 
 **Time:** O(n log n) · **Space:** O(n). The sort makes O(n log n) comparisons. Each one glues two short strings, which is quick because a number has at most about 10 digits. The strings take O(n) space.
 
+### 3. Sort Colors
+
+**Problem:** the array holds only 0s, 1s and 2s (red, white and blue). Sort it in place, without `sort()`. `[2, 0, 2, 1, 1, 0]` becomes `[0, 0, 1, 1, 2, 2]`.
+
+**Simple idea: count.** Count the 0s, 1s and 2s, then write that many of each back into the array. That's two passes, O(n). Counting like this is called **counting sort**, and it works whenever the values come from a small, known set.
+
+**One-pass idea: split the array into three parts**, like sorting laundry into three baskets as you go. Three indexes mark the parts:
+
+| Part of the array | Holds |
+| --- | --- |
+| index 0 to `low - 1` | 0s |
+| `low` to `current - 1` | 1s |
+| `current` to `high` | not looked at yet |
+| `high + 1` to the end | 2s |
+
+Look at `colors[current]`:
+
+- **A 0:** swap it to `low`. Move `low` and `current` forward.
+- **A 1:** it's already in the 1s part. Move `current` forward.
+- **A 2:** swap it to `high`, and move `high` back. Don't move `current`: the item that just came from `high` hasn't been looked at yet.
+
+It uses the `swap` helper from quick sort above.
+
+```js
+function sortColors(colors) {
+    let low = 0;
+    let current = 0;
+    let high = colors.length - 1;
+
+    // Stop when nothing is left to look at.
+    while (current <= high) {
+        if (colors[current] === 0) {
+            swap(colors, current, low);
+            low++;
+            current++;
+        } else if (colors[current] === 1) {
+            current++;
+        } else {
+            swap(colors, current, high);
+            high--;
+        }
+    }
+}
+
+const colors = [2, 0, 2, 1, 1, 0];
+sortColors(colors);
+console.log(colors); // [ 0, 0, 1, 1, 2, 2 ]
+```
+
+| colors[current] | What happens | Array after | low | current | high |
+| --- | --- | --- | --- | --- | --- |
+| (start) | | [2, 0, 2, 1, 1, 0] | 0 | 0 | 5 |
+| 2 | swap with index 5, high back | [0, 0, 2, 1, 1, 2] | 0 | 0 | 4 |
+| 0 | swap with index 0 (itself) | [0, 0, 2, 1, 1, 2] | 1 | 1 | 4 |
+| 0 | swap with index 1 (itself) | [0, 0, 2, 1, 1, 2] | 2 | 2 | 4 |
+| 2 | swap with index 4, high back | [0, 0, 1, 1, 2, 2] | 2 | 2 | 3 |
+| 1 | move on | [0, 0, 1, 1, 2, 2] | 2 | 3 | 3 |
+| 1 | move on | [0, 0, 1, 1, 2, 2] | 2 | 4 | 3 |
+
+Now `current` (4) is past `high` (3), so every item has been looked at.
+
+**Time:** O(n) · **Space:** O(1). Each step either moves `current` forward or moves `high` back, so there are at most n steps. This is the same three-way split that keeps quick sort fast when many items are equal.
+
 ## How to spot it
 
 - The **order of the input doesn't matter** for the answer, so you are free to reorder it.
 - Words like **closest**, **smallest difference**, **overlapping**, **meetings**, **schedule**, or "pairs / triplets that add up to".
 - Your first idea compares **every pair** (O(n²)). Sorting first often brings it down to O(n log n).
 - You need **duplicates or groups** next to each other.
+- Only a **few different values**, like 0, 1 and 2: count them, or split the array three ways (Sort Colors). That's O(n), faster than any comparison sort.
 - The problem asks you to **implement** a sort, or to sort a **linked list** (use merge sort: it doesn't need to jump to an index).
 
 **When not to sort:** when the answer needs the **original positions** (Two Sum returns indexes, so use a hash map), or when it's about **subarrays** (items next to each other in the original order). Sorting destroys both.
@@ -499,6 +565,8 @@ console.log(largestNumber([0, 0])); // 0
 - **Leaving out the sort in Big O.** If you sort, the time is at least O(n log n).
 - **Merge sort: forgetting the leftovers.** After the main loop, one side still has items. Copy them.
 - **Quick sort: always picking the last item as the pivot** on sorted input. That's the O(n²) worst case. Use a random pivot.
+- **Quick sort on many equal items.** Even with a random pivot, the equal items all land on one side: O(n²) again. Use a three-way partition.
+- **Sort Colors: moving `current` after a swap with `high`.** The item that came back from `high` hasn't been checked yet.
 
 ## In the interview
 
@@ -510,12 +578,12 @@ console.log(largestNumber([0, 0])); // 0
 
 **Likely follow-up:** "When would you pick merge sort over quick sort?"
 
-**Answer:** "When I need a guaranteed O(n log n), a stable sort, or I'm sorting a linked list. Merge sort also works for data too big for memory: sort chunks, then merge them. Quick sort is in place and usually faster on arrays, but its worst case is O(n²) unless I pick a random pivot."
+**Answer:** "When I need a guaranteed O(n log n), a stable sort, or I'm sorting a linked list. Merge sort also works for data too big for memory: sort chunks, then merge them. Quick sort is in place and usually faster on arrays, but its worst case is O(n²) unless I pick a random pivot and keep items equal to the pivot in the middle."
 
 <Callout title="Remember this" type="success">
   - **Good sorts are O(n log n):** about log n levels of halving, with n work on each level. Simple sorts are O(n²).
   - **Merge sort:** split in half, sort each half, merge with two pointers. Always O(n log n), O(n) space, stable.
-  - **Quick sort:** pick a pivot, put smaller items left and bigger items right, repeat. O(n log n) usually, **O(n²) worst**; a random pivot fixes it.
+  - **Quick sort:** pick a pivot, put smaller items left and bigger items right, repeat. O(n log n) usually, **O(n²) worst**; a random pivot fixes it, and a **three-way split** handles many equal items.
   - In JavaScript: **`sort((a, b) => a - b)`** for numbers. Negative means `a` first. It changes the array and is stable.
   - **Sort first** when the order doesn't matter: neighbors, two pointers, intervals, binary search. Always count the O(n log n).
 </Callout>

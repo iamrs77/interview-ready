@@ -264,6 +264,8 @@ console.log(eraseOverlapIntervals([[1, 2], [1, 2], [1, 2]])); // 2
 
 **Time:** O(n log n) · **Space:** O(n). The sort is the slow part; the loop is one pass. The sorted copy holds n intervals.
 
+**Same idea: Minimum Number of Arrows to Burst Balloons.** Each balloon is an interval, and one arrow at point x bursts every balloon with start ≤ x ≤ end. Sort by end. Shoot the first arrow at the end of the first balloon, skip every balloon that starts at or before that point (touching counts here), and shoot a new arrow at the end of the next balloon. The arrows you shoot are the intervals you keep.
+
 ### 4. Meeting Rooms
 
 **Problem:** can one person go to **every** meeting? `[[0, 30], [5, 10], [15, 20]]` → `false`. `[[7, 10], [2, 4]]` → `true`.
@@ -372,6 +374,51 @@ How the first example runs. `starts` is `[0, 5, 15]` and `ends` is `[10, 20, 30]
 
 **Time:** O(n log n) · **Space:** O(n). Two sorts of n numbers cost n log n; the walk is one pass. The two arrays hold n numbers each.
 
+### 6. Interval List Intersections
+
+**Problem:** you get two lists of intervals. Each list is sorted, and inside one list nothing overlaps. Return every overlap between the two lists. Think of two people's free times: when are both free?
+
+**Idea:** both lists are sorted, so use [two pointers](../two-pointers/two-pointers.mdx), one in each list. Two intervals overlap from the **later start** to the **earlier end**, if that is a real range. Then move past the interval that **ends first**. The next interval in the other list starts only after the current one there ends, which is later still, so the one that ends first has nothing left to overlap.
+
+```js
+function intervalIntersection(listA, listB) {
+    const result = [];
+    let indexA = 0;
+    let indexB = 0;
+
+    while (indexA < listA.length && indexB < listB.length) {
+        const [startA, endA] = listA[indexA];
+        const [startB, endB] = listB[indexB];
+
+        // The overlap: from the later start to the earlier end.
+        const start = Math.max(startA, startB);
+        const end = Math.min(endA, endB);
+        if (start <= end) {
+            result.push([start, end]);
+        }
+
+        // Move past the one that ends first. It is used up.
+        if (endA < endB) {
+            indexA++;
+        } else {
+            indexB++;
+        }
+    }
+
+    return result;
+}
+
+const freeA = [[0, 2], [5, 10], [13, 23], [24, 25]];
+const freeB = [[1, 5], [8, 12], [15, 24], [25, 26]];
+
+console.log(intervalIntersection(freeA, freeB));
+// [ [ 1, 2 ], [ 5, 5 ], [ 8, 10 ], [ 15, 23 ], [ 24, 24 ], [ 25, 25 ] ]
+```
+
+Here touching counts as an overlap (`start <= end`), so `[5, 5]` is in the answer. If it shouldn't count, use `start < end`.
+
+**Time:** O(n + m) · **Space:** O(n + m) for the result. Each step moves one pointer forward, and there is no sort, because the lists are already sorted.
+
 ## How to spot it
 
 - The input is a list of **pairs** `[start, end]`: meetings, bookings, time slots, ranges of numbers.
@@ -382,15 +429,16 @@ How the first example runs. `starts` is `[0, 5, 15]` and `ends` is `[10, 20, 30]
 | --- | --- | --- |
 | Merge, or insert one | start | compare with the last merged interval |
 | Can one person attend all? | start | compare each one with the one before |
-| Remove the fewest, or keep the most | **end** | keep the one that ends first |
+| Remove the fewest, keep the most, or the fewest arrows | **end** | keep the one that ends first |
 | Most at the same time, or how many rooms | starts and ends **separately** | walk both with two indexes |
+| Overlaps between two sorted lists | already sorted | one pointer per list; move past the one that ends first |
 
 ## Common mistakes
 
 - **`sort()` with no compare function.** It sorts intervals as text, so `[10, 12]` lands before `[2, 6]`. Write `(a, b) => a[0] - b[0]`.
 - **`last[1] = end` instead of `Math.max(last[1], end)`.** When one interval sits inside another, like `[2, 3]` inside `[1, 10]`, it shrinks the merged interval.
 - **Not asking about touching intervals.** Do `[1, 3]` and `[3, 5]` overlap? It decides `<` or `<=`. Merge Intervals says yes; meetings say no.
-- **Sorting by start when you should sort by end.** For "remove the fewest", sorting by start can keep one long interval that blocks many short ones.
+- **Sorting by start when you should sort by end.** For "remove the fewest", sorting by start and keeping the first interval can keep one long interval that blocks many short ones.
 - **Changing the input.** `sort()` changes the caller's array, and `last[1] = ...` changes an inner array if you pushed the original one. Copy the list, and push new `[start, end]` arrays.
 - **Insert Interval: forgetting to add the merged interval** when it belongs at the very end. The three-part loop always adds it after part 2.
 

@@ -24,9 +24,9 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 **[Big O Notation](./foundations/big-o.mdx)**
 
 - **Big O = how the work grows** as the input grows, not seconds. Always say **time and space**.
-- Fastest to slowest: **O(1), O(log n), O(n), O(n log n), O(n²), O(2ⁿ)**.
+- Fastest to slowest: **O(1), O(log n), O(n), O(n log n), O(n²), O(2ⁿ), O(n!)**.
 - **Drop the constants, keep the biggest term.** One loop after another: **add**. One inside another: **multiply**.
-- Watch for **hidden loops**: `includes`, `indexOf`, `shift`, `slice`, `splice` are O(n). `Map` and `Set` lookups are O(1).
+- Watch for **hidden loops**: `includes`, `indexOf`, `shift`, `slice`, `splice` are O(n). `Map` and `Set` lookups are O(1) on average.
 - **Cutting in half each step = O(log n).** Sorting = O(n log n).
 - `push` is **amortized O(1)**: a big copy once in a while, cheap on average.
 
@@ -103,6 +103,7 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - Two Sum: `needed = target - number`. **Check the Map before you store** the number.
 - Anagrams have the **same counts**, and the same **sorted letters**. Sorted letters make a good group key.
 - Top K: count, then sort (O(n log n)) or **bucket by count** (O(n)).
+- Longest Consecutive Sequence: a Set; only count up from numbers whose `number - 1` is missing. O(n).
 - Start counts from 0: `counts.get(item) || 0`.
 
 **[Prefix Sum](./arrays-hashing/prefix-sum.mdx)**
@@ -110,6 +111,7 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - `prefix[i]` = the sum of the **first i numbers**, and `prefix[0] = 0`. Build it once in O(n).
 - The sum from `left` to `right` = **`prefix[right + 1] - prefix[left]`**: O(1).
 - **Subarray Sum Equals K:** running sum + a Map of sums seen. Look up `runningSum - k`. Start with `0 → 1`.
+- Longest instead of count: store each sum's **first index** (start with `0 → -1`). Divisible by k: store the remainder, made positive.
 - Prefix sums work with **negative numbers**; a sliding window doesn't.
 - **Product except self:** products from the left × products from the right. Start at 1, no division.
 
@@ -123,11 +125,13 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - Loop **while `left < right`**, and move at least one pointer on every pass.
 - **3Sum = sort + fix the first number + two pointers.** O(n²). Skip copies to avoid repeat triplets.
 - Container With Most Water: **move the shorter wall**.
+- Trapping Rain Water: water on a bar = **the lower of the tallest left and tallest right**, minus its height. Work on the side whose tallest is lower.
 
 **[Sliding Window](./two-pointers/sliding-window.mdx)**
 
 - A window is the items **from `left` to `right`**, both included. Its length is **`right - left + 1`**.
 - **Fixed size:** add the item coming in, subtract the item going out. O(n) instead of O(n · k).
+- **Anagram of a pattern inside a text:** a fixed window of `pattern.length`, with two arrays of 26 letter counts.
 - **Variable size:** grow with `right` every step, and shrink with `left` **while** the rule is broken.
 - `left` only moves forward, so the loop inside a loop is still **O(n)**.
 - **Longest** → measure after shrinking. **Shortest** → measure while the window is good, then shrink.
@@ -148,7 +152,7 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 
 - **Good sorts are O(n log n):** about log n levels of halving, with n work on each level. Simple sorts are O(n²).
 - **Merge sort:** split in half, sort each half, merge with two pointers. Always O(n log n), O(n) space, stable.
-- **Quick sort:** pick a pivot, put smaller items left and bigger items right, repeat. O(n log n) usually, **O(n²) worst**; a random pivot fixes it.
+- **Quick sort:** pick a pivot, put smaller items left and bigger items right, repeat. O(n log n) usually, **O(n²) worst**; a random pivot fixes it, and a **three-way split** handles many equal items.
 - In JavaScript: **`sort((a, b) => a - b)`** for numbers. Negative means `a` first. It changes the array and is stable.
 - **Sort first** when the order doesn't matter: neighbors, two pointers, intervals, binary search. Always count the O(n log n).
 
@@ -304,6 +308,7 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - **Path compression** (point straight at the root) + **union by size** (small under big) → **almost O(1)** per operation.
 - `union` returning **false** means "already connected": that edge closes a loop (Redundant Connection).
 - Count groups: start at n, and subtract 1 for every union that returns `true`.
+- **Kruskal (cheapest way to connect everything):** sort the edges cheapest first, and keep an edge only when `union` returns `true`.
 
 **[Shortest Paths](./graphs/shortest-paths.mdx)**
 
@@ -312,6 +317,7 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - **Relax** = if `dist[node] + weight` is less than `dist[neighbor]`, save the cheaper cost and push it.
 - A node is final when it **comes out** of the heap, not when it goes in.
 - O(E log V) time. **No negative weights** (that's Bellman-Ford).
+- **At most k stops** → Bellman-Ford: `k + 1` rounds over every edge, each round reading a **copy** of the last round's prices.
 - Network Delay Time = the **largest** shortest distance; any Infinity → -1.
 
 ## 11. Backtracking
@@ -321,7 +327,7 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - **Backtracking = choose, explore, undo.** One recursive call per choice; undo it before trying the next.
 - Save **a copy**: `result.push([...path])`. Saving `path` itself saves one shared array that ends up empty.
 - `backtrack(i + 1)` → each item once (subsets, combinations). `backtrack(i)` → reuse (combination sum). Loop from 0 with `used` → order matters (permutations).
-- Duplicates: **sort**, then skip `nums[i] === nums[i - 1]` when `i > start`.
+- Duplicates: **sort**, then skip `nums[i] === nums[i - 1]` when `i > start`. For permutations, skip it when `nums[i - 1]` is still unused.
 - Cost = number of answers × cost to copy one: subsets O(n · 2ⁿ), permutations O(n · n!).
 - "Return all ..." with a small n → backtracking. "How many ways" or "the best" → think DP.
 

@@ -434,6 +434,79 @@ We can stop as soon as the bottom-right cell comes out of the heap: like any nod
 
 **Time:** O(R × C × log(R × C)) · **Space:** O(R × C), for a grid with R rows and C columns. There are R × C cells and up to 4 edges per cell, and each heap step costs a log.
 
+### 3. Cheapest Flights Within K Stops
+
+**Problem:** there are `n` cities, numbered 0 to `n - 1`. `flights[i] = [from, to, price]` is a one-way flight. Find the cheapest way from `src` to `dst` with **at most `k` stops** in between. Return -1 if there is none.
+
+```mermaid
+flowchart LR
+  N0((0)):::storage -->|100| N1((1)):::service
+  N1 -->|100| N2((2)):::service
+  N2 -->|100| N0
+  N1 -->|600| N3((3)):::db
+  N2 -->|200| N3
+```
+
+From 0 to 3 with at most 1 stop, the only choice is 0 → 1 → 3, for 700. With 2 stops allowed, 0 → 1 → 2 → 3 costs only 400.
+
+**Why not plain Dijkstra:** Dijkstra keeps only the **cheapest** cost for each city. But here a cheap route with too many stops is useless, and a dearer route with fewer stops may be the only one allowed. Dijkstra would throw that one away.
+
+**Idea (Bellman-Ford, in rounds):** `k` stops means at most `k + 1` flights. So run `k + 1` rounds. In each round, try **every** flight once: if you can reach `from` for some cost, you can reach `to` for that cost plus the price. After round 1, `prices` holds the cheapest cost using at most 1 flight; after round 2, at most 2 flights; and so on.
+
+```js
+function findCheapestPrice(n, flights, src, dst, k) {
+    // prices[city] = cheapest cost found so far. Infinity = not reached.
+    let prices = new Array(n).fill(Infinity);
+    prices[src] = 0;
+
+    // k stops = at most k + 1 flights = k + 1 rounds.
+    for (let round = 0; round <= k; round++) {
+        // Read last round's prices, write into a copy.
+        const nextPrices = [...prices];
+
+        for (const [from, to, price] of flights) {
+            if (prices[from] === Infinity) {
+                continue;
+            }
+
+            const newPrice = prices[from] + price;
+
+            if (newPrice < nextPrices[to]) {
+                nextPrices[to] = newPrice;
+            }
+        }
+
+        prices = nextPrices;
+    }
+
+    if (prices[dst] === Infinity) {
+        return -1;
+    }
+
+    return prices[dst];
+}
+```
+
+```js
+const flights = [
+    [0, 1, 100],
+    [1, 2, 100],
+    [2, 0, 100],
+    [1, 3, 600],
+    [2, 3, 200],
+];
+
+console.log(findCheapestPrice(4, flights, 0, 3, 1)); // 700
+console.log(findCheapestPrice(4, flights, 0, 3, 2)); // 400
+console.log(findCheapestPrice(4, flights, 0, 3, 0)); // -1
+```
+
+**The copy is the trap.** Each round must read only the prices from the round **before**. If you update `prices` in place, one round can use a price it set a moment ago and chain several flights. Then `k = 0` would return 400 (0 → 1, 1 → 2 and 2 → 3 all in one round) instead of -1.
+
+**Time:** O(k × (V + E)) · **Space:** O(V). Each of the `k + 1` rounds copies the price list and tries every flight once.
+
+**Plain Bellman-Ford** (no stop limit, negative weights allowed) is the same loop run V − 1 times, because a cheapest path never needs more than V − 1 edges. That is where its O(V × E) comes from. If one more round still lowers some price, the graph has a **negative cycle**: a loop you could go round forever, getting cheaper each time.
+
 ## When to use BFS instead
 
 | The edges... | Use | Time |
@@ -452,6 +525,7 @@ A quick check: **is there a number on each edge, and do the numbers differ?** Ye
 - **"Network delay", "signal", "cheapest route", "fastest way"**.
 - **A grid where moving between cells costs different amounts** (height differences, effort, a cost per cell) → Dijkstra on a grid.
 - **Every move costs 1** ("minimum number of moves / steps") → that's BFS, not Dijkstra.
+- **A limit on the number of edges** ("at most k stops") → Bellman-Ford in `k + 1` rounds, each reading a copy of the last round.
 
 ## Common mistakes
 
@@ -481,5 +555,6 @@ A quick check: **is there a number on each edge, and do the numbers differ?** Ye
   - **Relax** = if `dist[node] + weight` is less than `dist[neighbor]`, save the cheaper cost and push it.
   - A node is final when it **comes out** of the heap, not when it goes in.
   - O(E log V) time. **No negative weights** (that's Bellman-Ford).
+  - **At most k stops** → Bellman-Ford: `k + 1` rounds over every edge, each round reading a **copy** of the last round's prices.
   - Network Delay Time = the **largest** shortest distance; any Infinity → -1.
 </Callout>

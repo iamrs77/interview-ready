@@ -330,6 +330,12 @@ function removeChar(tracker, char) {
 
 ```js
 function minWindow(text, pattern) {
+    // An empty pattern is never "missing" anything, so the shrink loop
+    // below would never stop. Answer it straight away.
+    if (pattern.length === 0) {
+        return "";
+    }
+
     const tracker = {
         need: countChars(pattern),
         missing: pattern.length,
@@ -385,12 +391,83 @@ We save only `bestStart` and `bestLength` and slice **once** at the end. Slicing
 
 **Time:** O(n + m), where n is the text length and m the pattern length. Counting the pattern is O(m). Then `right` moves n times and `left` at most n times, and each step is O(1). **Space:** O(m) for the `need` Map.
 
+### 4. Permutation in String
+
+**Problem:** does `text` contain some reordering of `pattern` (an anagram of it) as a substring? Both hold only lowercase letters. `pattern = "ab"` and `text = "eidbaooo"` give `true`: `"ba"` is inside. `"ab"` and `"eidboaoo"` give `false`.
+
+**Idea:** an anagram of `pattern` has exactly `pattern.length` letters, so this is a **fixed-size window**. Keep the letter counts of the window in an array of 26 (slot 0 is `"a"`). Slide it one letter at a time: add the letter coming in, remove the letter going out, and compare the counts with the pattern's counts.
+
+**Step 1: compare two arrays of 26 counts.**
+
+```js
+function sameCounts(countsA, countsB) {
+    for (let i = 0; i < 26; i++) {
+        if (countsA[i] !== countsB[i]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+```
+
+**Step 2: slide the window.**
+
+```js
+function containsAnagram(pattern, text) {
+    const size = pattern.length;
+
+    if (size > text.length) {
+        return false;
+    }
+
+    // Letter counts: slot 0 is "a", slot 25 is "z".
+    const patternCounts = new Array(26).fill(0);
+    const windowCounts = new Array(26).fill(0);
+
+    // The pattern, and the first window: the first `size` letters of text.
+    for (let i = 0; i < size; i++) {
+        const patternPlace = pattern.charCodeAt(i) - 97;
+        patternCounts[patternPlace]++;
+
+        const textPlace = text.charCodeAt(i) - 97;
+        windowCounts[textPlace]++;
+    }
+
+    if (sameCounts(patternCounts, windowCounts)) {
+        return true;
+    }
+
+    // Slide: one letter comes in on the right, one goes out on the left.
+    for (let right = size; right < text.length; right++) {
+        const comingIn = text.charCodeAt(right) - 97;
+        const goingOut = text.charCodeAt(right - size) - 97;
+
+        windowCounts[comingIn]++;
+        windowCounts[goingOut]--;
+
+        if (sameCounts(patternCounts, windowCounts)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+console.log(containsAnagram("ab", "eidbaooo")); // true
+console.log(containsAnagram("ab", "eidboaoo")); // false
+```
+
+**Time:** O(n + m), where n is the text length and m the pattern length. Each slide is O(1) work plus one compare of 26 slots, and 26 is a constant. **Space:** O(1): two arrays of 26, whatever the input size.
+
+**Find All Anagrams in a String** is the same loop. Instead of returning `true` on a match, save the window's start, `right - size + 1` (or 0 for the first window), and return the list at the end.
+
 ## How to spot it
 
 - The answer is a **subarray or substring**: items **in a row**, "contiguous", "consecutive".
 - The question says **longest**, **shortest**, **maximum sum**, **at most K**, **at least K**, or **contains all of**.
 - "**Of size k**" or "every k items in a row": a fixed-size window.
-- For sums: the numbers are **all positive**.
+- For sums: the numbers are **never negative**.
 - Not a window: "**subsequence**" (items don't have to be next to each other) usually means [dynamic programming](../dynamic-programming/dp-basics.mdx). An exact sum with **negative numbers** means [prefix sum](../arrays-hashing/prefix-sum.mdx).
 
 ## Common mistakes
@@ -415,6 +492,7 @@ Say why it's a window and why it's O(n):
 <Callout title="Remember this" type="success">
   - A window is the items **from `left` to `right`**, both included. Its length is **`right - left + 1`**.
   - **Fixed size:** add the item coming in, subtract the item going out. O(n) instead of O(n · k).
+  - **Anagram of a pattern inside a text:** a fixed window of `pattern.length`, with two arrays of 26 letter counts.
   - **Variable size:** grow with `right` every step, and shrink with `left` **while** the rule is broken.
   - `left` only moves forward, so the loop inside a loop is still **O(n)**.
   - **Longest** → measure after shrinking. **Shortest** → measure while the window is good, then shrink.

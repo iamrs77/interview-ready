@@ -1,5 +1,38 @@
 # Review notes
 
+# DSA, round 1 (2026-11-23)
+
+## Status: all MUST and SHOULD items fixed
+
+- **Checked:** all 45 DSA pages, read line by line by 4 reviewers.
+  - Every claimed output was run in Node 24. Every algorithm was compared with a brute-force version on hundreds to thousands of random small inputs, plus edge cases: empty input, one item, duplicates, negatives, cycles, no answer.
+  - The diagrams on every changed page parse. MDX check, types, lint and the production build pass.
+- **Found:** 9 MUST, 27 SHOULD, 18 NICE. Wrong `// output` comments: none.
+- **Biggest fixes:**
+  - Bugs: `minWindow(text, "")` looped forever. Combinations had no pruning, so `combine(20, 19)` made about a million calls for 20 answers.
+  - Wrong claims:
+    - A random pivot fixes quick sort's worst case. Not with many equal items: added the three-way partition.
+    - Sort-then-scan is O(1) space. V8's sort can use O(n).
+    - Fibonacci calls "double" with each step. They grow about 1.6 times.
+    - Go's `int` overflows at 2.1 billion. It is 64-bit.
+    - SQS keeps order. A standard queue doesn't.
+    - LeetCode 191's input range is out of date.
+  - Gaps filled:
+    - Problems: Longest Consecutive Sequence, Trapping Rain Water, Permutation in String, Sort Colors, LCA of a binary tree, Cheapest Flights (Bellman-Ford), Min Cost to Connect Points (Kruskal), Permutations II, House Robber II, Interval List Intersections.
+    - Topics: prefix-sum follow-ups, O(n!), and an intervals template on the cheat sheet.
+- **Not done, on purpose:** more classic problems the reviewers listed: Max Path Sum, Build Tree from Preorder + Inorder, Serialize Tree, Subtree, BST delete code, Word Ladder, Alien Dictionary, Longest Repeating Character Replacement, Valid Sudoku.
+
+## Run button: earlier steps
+
+- **Run** on a block now also runs the earlier blocks on the page that it needs (`src/lib/earlier-steps.ts`). For example, Step 2 gets the class from Step 1, a demo gets the setup demo before it, and a class split over several blocks runs as one.
+- **Checked:** every runnable block in the JS, LLD and DSA tracks was run alone and then with this change, in a copy of the playground's worker.
+  - 481 blocks that used to fail now run.
+  - No block that worked before broke.
+  - The only blocks that still fail are the JavaScript ones that throw on purpose.
+- 25 fragments that say "not runnable", and the Node-only logger demo, are now `noRun`. The "paste these in order" lines now describe the Run button.
+
+---
+
 # JavaScript and Low-Level Design, round 1 (2026-11-23)
 
 ## Status: all MUST and SHOULD items fixed
@@ -17,7 +50,7 @@
 - **Not done, on purpose:**
   - Pages built from your notes got error fixes only: no throttle trailing call, no TypeScript declaration merging.
   - NICE items that are rarely asked (each reviewer's list is in the session scratchpad).
-- **Needs you:** a "Step 2" code block's Run button fails on its own (ReferenceError), because it doesn't include Step 1. Fix: have Run add the earlier blocks of the same example, or mark those blocks `noRun`.
+- **Done later:** a "Step 2" block's Run button failed on its own. Run now adds the earlier blocks it needs (see the DSA round).
 
 ---
 

@@ -14,7 +14,7 @@ Trees and recursion fit together perfectly, because **every subtree is a tree to
 
 ## Setup
 
-Paste these two blocks first. They are the same `TreeNode` class and test helper as in [Tree Basics](./tree-basics.mdx), so the code on this page runs on its own.
+The code on this page uses these two blocks, the same `TreeNode` class and test helper as in [Tree Basics](./tree-basics.mdx). **Run** on any block below runs them first.
 
 ```js
 class TreeNode {
@@ -591,7 +591,7 @@ console.log(diameterOfBinaryTree(sideTree)); // 4
 
 **Problem:** return `true` if, at **every** node, the heights of the left and right subtrees differ by at most 1. `[3, 9, 20, null, null, 15, 7]` → `true`. `[1, 2, 2, 3, 3, null, null, 4, 4]` → `false`.
 
-**The slow way:** at every node, call `maxDepth` on both sides and compare. But `maxDepth` walks the whole subtree, and you call it again and again for the same nodes. On a chain that is O(n²).
+**The slow way:** at every node, call `maxDepth` on both sides and compare. But `maxDepth` walks the whole subtree, and you call it again and again for the same nodes. On a balanced tree that is O(n log n). On a long chain, checking every node is O(n²).
 
 **Each call returns:** the height of its subtree, **or -1** if something inside it is not balanced.
 
@@ -646,12 +646,84 @@ console.log(isBalanced(crookedTree)); // false
 
 **Time:** O(n) · **Space:** O(h). Each node is visited once, and its height is worked out once.
 
+### 8. Lowest Common Ancestor of a Binary Tree
+
+**Problem:** given two nodes `p` and `q` of a binary tree, return their **lowest common ancestor**: the deepest node that has both of them in its subtree. A node counts as its own ancestor. Both nodes are always in the tree.
+
+```mermaid
+graph TD
+  A((3)):::db --> B((5)):::storage
+  A --> C((1)):::storage
+  B --> D((6)):::service
+  B --> E((2)):::service
+  C --> F((0)):::service
+  C --> G((8)):::service
+  E --> H((7)):::service
+  E --> I((4)):::service
+```
+
+In this tree, `[3, 5, 1, 6, 2, 0, 8, null, null, 7, 4]`, the two green nodes, 5 and 1, are on different sides of 3, so their LCA is **3**. The LCA of 5 and 4 is **5**: 4 is inside 5's subtree.
+
+**Each call returns:** `p` or `q` if it found one of them in its subtree, the answer once both are found, or `null` if neither is there.
+
+**Idea:** a plain binary tree has no "smaller on the left" rule, so you can't tell which side to go. Search **both** sides. If the left side found something **and** the right side found something, `p` and `q` are on different sides, so this node is where their paths meet. If only one side found something, pass it up.
+
+```js
+// Returns: p or q if one of them is in this subtree,
+// this subtree's answer if both are, or null if neither is.
+function lowestCommonAncestor(node, p, q) {
+    if (node === null) {
+        return null;
+    }
+
+    // This node is p or q. Anything below it can't be a lower answer.
+    if (node === p || node === q) {
+        return node;
+    }
+
+    const leftFound = lowestCommonAncestor(node.left, p, q);
+    const rightFound = lowestCommonAncestor(node.right, p, q);
+
+    // One on each side: they meet at this node.
+    if (leftFound !== null && rightFound !== null) {
+        return node;
+    }
+
+    // Otherwise pass up what one side found (or null).
+    if (leftFound !== null) {
+        return leftFound;
+    }
+
+    return rightFound;
+}
+```
+
+LeetCode passes in the nodes themselves, so we reach them by following the links.
+
+```js
+const lcaTree = buildTree([3, 5, 1, 6, 2, 0, 8, null, null, 7, 4]);
+
+const node5 = lcaTree.left;
+const node1 = lcaTree.right;
+const node4 = lcaTree.left.right.right;
+
+console.log(lowestCommonAncestor(lcaTree, node5, node1).val); // 3
+console.log(lowestCommonAncestor(lcaTree, node5, node4).val); // 5
+```
+
+For 5 and 4, the call on node 5 returns 5 straight away without looking below it. That is fine: the other node is either below 5 (then 5 is the answer) or somewhere else (then a higher node sees both).
+
+**Time:** O(n) · **Space:** O(h). Each node is visited at most once.
+
+This trusts the promise that both nodes are in the tree. If one might be missing, the function would wrongly return the other one, so you would also have to check that both were really found. In a [binary search tree](./binary-search-trees.mdx#3-lowest-common-ancestor-of-a-bst) there is a faster way: the order rule tells you which side to go.
+
 ## How to spot it
 
 - The problem asks about **depth, height, size or paths** from the root to a leaf.
 - It asks you to **compare** two trees, or a tree with its mirror.
 - It asks you to **change every node** (invert, add a value, prune).
 - The answer for a node can be **built from its children's answers**.
+- It asks where two nodes **meet**: their lowest common ancestor.
 - If the problem talks about **levels** or rows, or "the closest leaf", use [Tree BFS](./tree-bfs.mdx) instead.
 
 ## Common mistakes
@@ -659,7 +731,7 @@ console.log(isBalanced(crookedTree)); // false
 - **No `null` check, or the check comes too late.** Reading `node.val` before checking `node === null` crashes on empty spots.
 - **Checking "leaf" with only one side.** A leaf has **both** children `null`. In Path Sum, a node with one child is not the end of a path.
 - **Forgetting `return`.** Writing `maxDepth(node.left);` without saving or returning the answer throws it away.
-- **Calling the same helper twice per node.** The slow balanced check calls `maxDepth` at every node: O(n²). Return everything the parent needs in **one** pass.
+- **Calling the same helper twice per node.** The slow balanced check calls `maxDepth` at every node, so it walks the same nodes again and again (up to O(n²)). Return everything the parent needs in **one** pass.
 - **Mixing up edges and nodes.** Diameter counts edges, Maximum Depth counts nodes. Check the example.
 - **Building the result with spread** (`[node.val, ...preorder(node.left), ...preorder(node.right)]`). It copies lists at every level. Push into one shared array instead.
 - **Changing the input by accident.** Invert Tree changes the tree. Say so, or copy it first.

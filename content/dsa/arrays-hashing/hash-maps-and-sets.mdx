@@ -144,7 +144,7 @@ console.log(containsDuplicate([1, 2, 3, 4])); // false
 
 **Time:** O(n) · **Space:** O(n). One pass, each `has` and `add` is O(1), and the Set may end up holding every value.
 
-Another way: sort, then check each number against its neighbour. That's O(n log n) time but O(1) extra space, if you may sort the input.
+Another way: sort, then check each number against its neighbour. That's O(n log n) time and no Set, if you may sort the input. The neighbour check needs only O(1) extra space, but say "apart from the sort": JavaScript's built-in `sort` can use up to O(n) memory inside (see [Sorting](../searching-sorting/sorting.mdx)).
 
 ### 2. Valid Anagram
 
@@ -396,12 +396,60 @@ console.log(topKFrequentFast([1, 1, 1, 2, 2, 3], 2)); // [ 1, 2 ]
 
 **Time:** O(n) · **Space:** O(n). Counting is O(n), there are n + 1 buckets, and each number is placed and read once. A heap also works, in O(n log k): see [Top K](../heaps/top-k.mdx).
 
+### 6. Longest Consecutive Sequence
+
+**Problem:** the array is **not sorted**. Return the length of the longest run of numbers that follow each other, like 1, 2, 3, 4. Do it in O(n). `[100, 4, 200, 1, 3, 2]` gives 4: the run 1, 2, 3, 4.
+
+**Idea:** sorting would make the runs easy to see, but sorting is O(n log n). Instead, put every number in a **Set**. A number **starts** a run only when `number - 1` is not in the Set. From each start, count up while `number + 1`, `number + 2`, ... are in the Set.
+
+```js
+function longestConsecutive(numbers) {
+    const allNumbers = new Set(numbers);
+    let best = 0;
+
+    for (const number of allNumbers) {
+        // Not the start of a run: number - 1 will count it.
+        if (allNumbers.has(number - 1)) {
+            continue;
+        }
+
+        // A run starts here. Count up: number + 1, number + 2, ...
+        let length = 1;
+        while (allNumbers.has(number + length)) {
+            length++;
+        }
+
+        best = Math.max(best, length);
+    }
+
+    return best;
+}
+
+console.log(longestConsecutive([100, 4, 200, 1, 3, 2])); // 4
+console.log(longestConsecutive([0, 3, 7, 2, 5, 8, 4, 6, 0, 1])); // 9
+console.log(longestConsecutive([])); // 0
+```
+
+How it runs on `[100, 4, 200, 1, 3, 2]`:
+
+| number | `number - 1` in the Set? | What happens | Run length |
+| --- | --- | --- | --- |
+| 100 | no (99) | a start: 101 is missing | 1 |
+| 4 | yes (3) | skip | |
+| 200 | no (199) | a start: 201 is missing | 1 |
+| 1 | no (0) | a start: 2, 3 and 4 are there, 5 is missing | **4** |
+| 3 | yes (2) | skip | |
+| 2 | yes (1) | skip | |
+
+**Time:** O(n) · **Space:** O(n). The `while` loop only runs from the start of a run, and each number belongs to one run, so over the whole loop it steps at most n times. Loop over the **Set**, not the array: with many copies of a start number, the array loop would count the same run again for every copy, which can make it O(n²).
+
 ## How to spot it
 
 - "**Duplicate**", "**unique**", "seen before", "first repeating": a Set.
 - "**Count**", "**frequency**", "most common", "**top k**", "same letters": a Map of counts.
 - A **pair that adds up** to a target, in an **unsorted** array: a Map from value to index.
 - "**Group**" things that share something: a Map from key to list.
+- "**Consecutive**" numbers in an unsorted array, in O(n): a Set, and look for `number - 1` and `number + 1`.
 - The brute force has an **inner loop that searches for one value**. Replace that search with a lookup.
 
 ## Common mistakes
@@ -421,7 +469,7 @@ Say what the Map saves you from:
 
 **Likely follow-up:** "Can you do it with O(1) extra space?"
 
-**Answer:** "If I may sort and I don't need the original indexes, yes. I sort and use two pointers from both ends: O(n log n) time and O(1) extra space. For Contains Duplicate, I sort and compare each number with its neighbour."
+**Answer:** "If I may sort and I don't need the original indexes, almost. I sort and use two pointers from both ends: O(n log n) time, and the pointers need only O(1) extra space. JavaScript's built-in sort can itself use up to O(n) memory, so for a strict O(1) I'd need an in-place sort like heap sort. For Contains Duplicate, I sort and compare each number with its neighbour."
 
 <Callout title="Remember this" type="success">
   - A hash map finds a key in **O(1) on average**; a set answers "seen it?" in O(1). The price is **O(n) extra memory**.
@@ -429,5 +477,6 @@ Say what the Map saves you from:
   - Two Sum: `needed = target - number`. **Check the Map before you store** the number.
   - Anagrams have the **same counts**, and the same **sorted letters**. Sorted letters make a good group key.
   - Top K: count, then sort (O(n log n)) or **bucket by count** (O(n)).
+  - Longest Consecutive Sequence: a Set; only count up from numbers whose `number - 1` is missing. O(n).
   - Start counts from 0: `counts.get(item) || 0`.
 </Callout>

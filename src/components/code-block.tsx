@@ -6,17 +6,20 @@ import { Play } from 'lucide-react';
 import { CodeBlock, Pre } from 'fumadocs-ui/components/codeblock';
 import { runInPlayground } from '@/components/js-playground';
 import { hasPlaygroundAt } from '@/lib/playground';
+import { codeWithEarlierSteps } from '@/lib/earlier-steps';
 
 /*
  * Lesson code blocks. On tracks with the JS playground, JavaScript blocks get a "Run" button: one click
  * puts the block's code in the playground, opens it and runs it. A block marked ```js noRun gets none.
+ * A block that builds on earlier ones ("Step 2" using the class from "Step 1") runs with the earlier blocks
+ * it needs put in front (see codeWithEarlierSteps).
  * Other blocks look exactly like Fumadocs' normal code block.
  */
 
 const RUNNABLE_LANGUAGES = ['js', 'javascript', 'jsx'];
 
 /** The block's code as plain text, the same way Fumadocs' copy button reads it. */
-function readCode(button: HTMLElement): string {
+function readCode(button: Element): string {
   const pre = button.closest('figure')?.querySelector('pre');
   if (!pre) {
     return '';
@@ -28,12 +31,21 @@ function readCode(button: HTMLElement): string {
 
 function RunButton() {
   function run(event: MouseEvent<HTMLButtonElement>) {
-    runInPlayground(readCode(event.currentTarget));
+    // Every Run button on the page, in page order. Their blocks are the code this block may build on.
+    const buttons = Array.from(document.querySelectorAll('[data-run-button]'));
+    const blocks = buttons.map(readCode);
+    const index = buttons.indexOf(event.currentTarget);
+    if (index < 0) {
+      runInPlayground(readCode(event.currentTarget));
+      return;
+    }
+    runInPlayground(codeWithEarlierSteps(blocks, index));
   }
 
   return (
     <button
       type="button"
+      data-run-button=""
       onClick={run}
       title="Run this code in the JS Playground"
       className="inline-flex h-6 items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 text-xs font-medium text-indigo-700 transition-colors hover:border-indigo-300 hover:bg-indigo-100"

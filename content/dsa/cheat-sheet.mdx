@@ -185,6 +185,35 @@ function findFirstYes(low, high, works) {
 }
 ```
 
+### Merge intervals
+
+Sort by start, then compare each interval with the last merged one. O(n log n) time for the sort, O(n) space.
+
+```js
+function merge(intervals) {
+    // Copy, then sort by start, so the input is not changed.
+    const sorted = [...intervals].sort((a, b) => a[0] - b[0]);
+    const merged = [];
+
+    for (const [start, end] of sorted) {
+        const last = merged[merged.length - 1];
+
+        if (merged.length === 0 || start > last[1]) {
+            // A gap: start a new interval.
+            merged.push([start, end]);
+        } else {
+            // Overlap: stretch the last one. Math.max, not just end.
+            last[1] = Math.max(last[1], end);
+        }
+    }
+
+    return merged;
+}
+```
+
+- **Remove the fewest so none overlap:** sort by **end**, keep each interval that starts at or after the last kept end.
+- **Meeting rooms:** sort the starts and the ends separately; a start at or after the earliest unused end reuses that room.
+
 ### BFS on a graph or a grid
 
 BFS goes ring by ring, so the first time it reaches a node is by the fewest steps. O(V + E) time, O(V) space.
@@ -351,6 +380,8 @@ function rob(houses) {
 
 `dp[i]` only reads the last two cells? Keep two variables instead: O(1) space.
 
+**Knapsack in one row** (`dp[c]` for each size `c` up to the limit): loop `c` **down** from the limit to the item's weight when each item is used once (0/1 knapsack, Partition, Target Sum). Loop it **up** from the weight when items can be reused (Coin Change, Coin Change II). Base case by goal: best value `0`, is it possible `true`, count the ways `1`.
+
 ### Topological sort
 
 Kahn's algorithm. O(V + E) time and space.
@@ -419,7 +450,7 @@ Course Schedule's `[a, b]` means "a needs b", so the arrow is **b → a**.
 
 `parent[i]` points up, and a root points to itself. Same group means `find(a) === find(b)`. Write these inside your solution, where `count` is the number of items.
 
-```js
+```js noRun
 // [0, 1, 2, ...]: every item starts as its own root.
 const parent = Array.from({ length: count }, (_, index) => index);
 
@@ -452,7 +483,7 @@ Add **union by size** (hang the smaller group under the bigger root) and each ca
 
 JavaScript has no heap. The API: `new MinHeap()`, `push(value)` O(log n), `pop()` O(log n), `peek()` O(1), `size()` O(1). The full class is in [Heaps and Priority Queues](./heaps/heaps.mdx#writing-a-minheap-in-javascript). For pairs or a max-heap, use the `Heap` with a compare function from [Top K and Merge K](./heaps/top-k.mdx).
 
-```js
+```js noRun
 // The k largest numbers: keep a min-heap of size k.
 // Its top is the smallest of the big ones: the next to throw out.
 const heap = new MinHeap();
@@ -499,7 +530,7 @@ Full lesson: [Big O Notation](./foundations/big-o.mdx).
 | Map, Set, object | O(1) on average | O(1) on average | O(1) on average |
 | Stack (array) | top O(1) | `push` O(1) | `pop` O(1) |
 | Queue (array + head index) | front O(1) | `push` O(1) | `head++` O(1) |
-| Linked list | O(n) | O(1) at the head or after a known node | O(1) after a known node |
+| Linked list | O(n) | O(1) at the head or after a known node | O(1) at the head or after a known node |
 | Heap | top O(1), any value O(n) | O(log n) | top O(log n) |
 | Binary search tree | O(h) | O(h) | O(h) |
 | Trie | O(L) | O(L) | O(L) |
@@ -517,6 +548,8 @@ h = tree height: about log n when balanced, n when the tree is a chain. L = the 
 | Binary search | O(log n) | O(1) |
 | Binary search on the answer | O(cost of one check × log of the range) | O(1) |
 | Sorting | O(n log n) | O(n) for merge sort |
+| Intervals: sort, then one pass | O(n log n) | O(n) for the sorted copy |
+| Greedy | O(n), or O(n log n) with a sort | O(1), plus the sorted copy |
 | Stack, monotonic stack | O(n) | O(n) |
 | Tree DFS, tree BFS | O(n) | DFS O(h), BFS O(widest level) |
 | Graph BFS or DFS | O(V + E) | O(V) |
@@ -526,6 +559,7 @@ h = tree height: about log n when balanced, n when the tree is a chain. L = the 
 | Merge k sorted lists (N items in all) | O(N log k) | O(k) |
 | Backtracking: subsets, permutations | O(n · 2ⁿ), O(n · n!) | O(n), not counting the answers |
 | Dynamic programming | cells × work per cell | the cells (less if you keep only the last row) |
+| Knapsack | O(n × limit) | O(limit) with one row |
 
 ## JavaScript gotchas
 

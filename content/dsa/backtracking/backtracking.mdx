@@ -178,7 +178,7 @@ In some problems the path is a string. Strings can't be changed in JavaScript: `
 
 **Problem:** return every way to pick `size` numbers from the numbers 1 to `maxNumber`. Order doesn't matter, so `[1, 2]` and `[2, 1]` count once. Picking 2 from 1 to 4 gives `[1, 2] [1, 3] [1, 4] [2, 3] [2, 4] [3, 4]`.
 
-**Idea:** the same tree as subsets, but save a path only when it has exactly `size` numbers. Then go back right away: there is no point going deeper.
+**Idea:** the same tree as subsets, but save a path only when it has exactly `size` numbers. Then go back right away: there is no point going deeper. And don't start a path that can never fill up.
 
 ```js
 function combine(maxNumber, size) {
@@ -192,7 +192,12 @@ function combine(maxNumber, size) {
             return;
         }
 
-        for (let number = start; number <= maxNumber; number++) {
+        // Leave room for the numbers we still need.
+        // Needing 2 more from 1 to 4, the next one can be at most 3.
+        const stillNeeded = size - path.length;
+        const lastChoice = maxNumber - stillNeeded + 1;
+
+        for (let number = start; number <= lastChoice; number++) {
             path.push(number);
             backtrack(number + 1);
             path.pop();
@@ -206,6 +211,8 @@ function combine(maxNumber, size) {
 console.log(combine(4, 2));
 // [ [ 1, 2 ], [ 1, 3 ], [ 1, 4 ], [ 2, 3 ], [ 2, 4 ], [ 3, 4 ] ]
 ```
+
+**Why `lastChoice`?** Without it, the loop also starts paths that can never reach `size` numbers. Needing 2 numbers, a path that starts at 4 has nothing left to add. For 4 choose 2 that wastes one call. For 20 choose 19 it wastes over a million calls, to find just 20 answers. With the limit, every call leads to at least one answer.
 
 **Time:** O(k · C(n, k)) · **Space:** O(k). Here n is `maxNumber` and k is `size`. There are C(n, k) answers ("n choose k": 6 for 4 choose 2), and copying each one takes k steps. The path and the stack hold at most k items.
 
@@ -297,6 +304,67 @@ console.log(subsetsWithDup([2, 1, 2]));
 ```
 
 **Time:** O(n · 2ⁿ) · **Space:** O(n). With no duplicates, this is the same work as plain subsets. Sorting adds O(n log n), which is smaller.
+
+**The same skip in Combination Sum II.** Each number may be used once, and the input has duplicates: sort, skip `sorted[i] === sorted[i - 1]` when `i > start`, and call `backtrack(i + 1, ...)`.
+
+#### Permutations II: orderings when the input has duplicates
+
+**Problem:** return every **different** ordering. `[1, 2, 1]` gives `[1, 1, 2] [1, 2, 1] [2, 1, 1]`, not 6 orderings.
+
+**Idea:** the permutation loop starts at 0 every time, so `i > start` doesn't work here. Instead, sort, and use equal numbers **in order, left to right**. Skip a number if the equal number just before it is still free. Then the two 1s can only go into the path as "first 1, then second 1", never the other way round, so no ordering is built twice.
+
+**Step 1: the skip rule.**
+
+```js
+// Skip sorted[i] if it is already in the path, or if an
+// equal number just before it is still free.
+function shouldSkip(sorted, used, i) {
+    if (used[i]) {
+        return true;
+    }
+
+    const sameAsBefore = i > 0 && sorted[i] === sorted[i - 1];
+    return sameAsBefore && !used[i - 1];
+}
+```
+
+**Step 2: Permutations, with the skip rule.**
+
+```js
+function permuteUnique(nums) {
+    const sorted = nums.toSorted((first, second) => first - second);
+    const result = [];
+    const path = [];
+    const used = new Array(sorted.length).fill(false);
+
+    function backtrack() {
+        if (path.length === sorted.length) {
+            result.push([...path]);
+            return;
+        }
+
+        for (let i = 0; i < sorted.length; i++) {
+            if (shouldSkip(sorted, used, i)) {
+                continue;
+            }
+
+            used[i] = true;
+            path.push(sorted[i]);
+            backtrack();
+            path.pop();
+            used[i] = false;
+        }
+    }
+
+    backtrack();
+    return result;
+}
+
+console.log(JSON.stringify(permuteUnique([1, 2, 1])));
+// [[1,1,2],[1,2,1],[2,1,1]]
+```
+
+**Time:** O(n · n!) · **Space:** O(n). It is never slower than plain permutations, and with many duplicates it is much faster.
 
 ### 4. Combination Sum
 
@@ -465,9 +533,10 @@ console.log(letterCombinations("23").join(" ")); // ad ae af bd be bf cd ce cf
 | Problem | Key trick |
 | --- | --- |
 | Subsets | save at every call, loop from `start` |
-| Combinations | save when `path.length === size` |
+| Combinations | save when `path.length === size`; stop when too few numbers are left |
 | Permutations | loop from 0, `used` array |
 | Subsets II | sort, skip `nums[i] === nums[i - 1]` when `i > start` |
+| Permutations II | sort, skip `nums[i] === nums[i - 1]` when `nums[i - 1]` is still free |
 | Combination Sum | track `remaining`, call `backtrack(i)` to reuse |
 | Generate Parentheses | count `open` and `close` |
 | Phone letters | one level per digit |
@@ -491,13 +560,13 @@ console.log(letterCombinations("23").join(" ")); // ad ae af bd be bf cd ce cf
 
 **Likely follow-up:** "What if the input has duplicates?"
 
-**Answer:** "I'll sort it first. Then in each loop I skip a number that equals the one before it, but only when `i > start`. So each value is picked once per level and no subset repeats, but a deeper level can still use the second copy."
+**Answer:** "I'll sort it first. Then in each loop I skip a number that equals the one before it, but only when `i > start`. So each value is picked once per level and no subset repeats, but a deeper level can still use the second copy. For permutations, the loop starts at 0, so instead I skip a number when the equal one before it is still unused."
 
 <Callout title="Remember this" type="success">
   - **Backtracking = choose, explore, undo.** One recursive call per choice; undo it before trying the next.
   - Save **a copy**: `result.push([...path])`. Saving `path` itself saves one shared array that ends up empty.
   - `backtrack(i + 1)` → each item once (subsets, combinations). `backtrack(i)` → reuse (combination sum). Loop from 0 with `used` → order matters (permutations).
-  - Duplicates: **sort**, then skip `nums[i] === nums[i - 1]` when `i > start`.
+  - Duplicates: **sort**, then skip `nums[i] === nums[i - 1]` when `i > start`. For permutations, skip it when `nums[i - 1]` is still unused.
   - Cost = number of answers × cost to copy one: subsets O(n · 2ⁿ), permutations O(n · n!).
   - "Return all ..." with a small n → backtracking. "How many ways" or "the best" → think DP.
 </Callout>

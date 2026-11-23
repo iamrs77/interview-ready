@@ -62,7 +62,7 @@ Example: from index 1 to index 3 is 1 + 4 + 1 = 6.
 | `prefix[1]` = 3 | ✓ | | | | |
 | 9 - 3 = **6** | | ✓ | ✓ | ✓ | |
 
-Paste this after `buildPrefix`:
+It uses `buildPrefix` from above:
 
 ```js
 function rangeSum(prefix, left, right) {
@@ -143,6 +143,15 @@ How it runs on `[1, 2, 3]` with target 3:
 Look at the last row. `needed` is 3, and the running sum was 3 right after `[1, 2]`. So the part after that point, `[3]`, adds up to 6 - 3 = 3.
 
 **Time:** O(n) · **Space:** O(n). One pass with O(1) Map lookups, and the Map can hold up to n different running sums.
+
+**Same trick, small changes.** Interviewers often change the question a little. The loop stays the same; only what the Map stores changes.
+
+| The question | What the Map stores | What changes |
+| --- | --- | --- |
+| **Count** the subarrays with sum k | running sum → how many times seen | Nothing: that's the code above. |
+| The **longest** subarray with sum k | running sum → the **first** index where it appeared | Start with `0 → -1`. At index `i`, if `runningSum - k` is stored at index `start`, the run's length is `i - start`. Never overwrite a sum that is already stored: the earliest index gives the longest run. |
+| Count the subarrays whose sum is **divisible by k** | running sum **% k** → how many times seen | Two running sums with the same remainder have a gap that divides by k. In JavaScript `%` can be negative, so use `((runningSum % k) + k) % k` (see [Numbers and Math](../js-toolkit/numbers-and-math.mdx)). |
+| The longest subarray with as many 0s as 1s ("Contiguous Array") | like "the longest" above | Count each 0 as -1, then look for the longest subarray with sum 0. |
 
 ### 2. Product of Array Except Self
 
@@ -252,6 +261,7 @@ For Subarray Sum Equals K:
   - `prefix[i]` = the sum of the **first i numbers**, and `prefix[0] = 0`. Build it once in O(n).
   - The sum from `left` to `right` = **`prefix[right + 1] - prefix[left]`**: O(1).
   - **Subarray Sum Equals K:** running sum + a Map of sums seen. Look up `runningSum - k`. Start with `0 → 1`.
+  - Longest instead of count: store each sum's **first index** (start with `0 → -1`). Divisible by k: store the remainder, made positive.
   - Prefix sums work with **negative numbers**; a sliding window doesn't.
   - **Product except self:** products from the left × products from the right. Start at 1, no division.
 </Callout>

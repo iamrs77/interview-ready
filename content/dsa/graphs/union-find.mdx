@@ -342,6 +342,71 @@ How the second example runs:
 
 **Time:** O(n) · **Space:** O(n). Each edge is one almost-O(1) union, and the arrays hold n + 1 items.
 
+### 3. Min Cost to Connect All Points (Kruskal's algorithm)
+
+**Problem:** `points[i] = [x, y]` is a point on a grid. Joining two points costs their **Manhattan distance**: `|x1 - x2| + |y1 - y2|`. Return the smallest total cost that connects every point (directly or through other points). With `points = [[0, 0], [2, 2], [3, 10], [5, 2], [7, 0]]`, the answer is 20.
+
+The cheapest set of links that connects everything is called a **minimum spanning tree** (MST). It never has a loop: a loop always has one link you could drop and still be connected.
+
+**Idea (Kruskal):** list every possible link with its cost, and go from the **cheapest** up. Take a link only if it joins two **different** groups. If both ends are already connected, the link would only close a loop, so skip it. Union-find answers "already connected?" in almost O(1), and `union` returning `false` is exactly the "skip it" case.
+
+**Step 1: every pair of points is a possible link.**
+
+```js
+function allLinks(points) {
+    const links = [];
+
+    for (let i = 0; i < points.length; i++) {
+        for (let j = i + 1; j < points.length; j++) {
+            const [firstX, firstY] = points[i];
+            const [secondX, secondY] = points[j];
+            const cost = Math.abs(firstX - secondX) + Math.abs(firstY - secondY);
+
+            links.push([cost, i, j]);
+        }
+    }
+
+    return links;
+}
+```
+
+**Step 2: take the cheapest links first.** It uses the `UnionFind` class from above. n points need exactly n - 1 links, so stop once you have them.
+
+```js
+function minCostConnectPoints(points) {
+    const links = allLinks(points);
+
+    // Cheapest first. Compare the costs as numbers.
+    links.sort((linkA, linkB) => linkA[0] - linkB[0]);
+
+    const groups = new UnionFind(points.length);
+    let totalCost = 0;
+    let linksUsed = 0;
+
+    for (const [cost, pointA, pointB] of links) {
+        if (linksUsed === points.length - 1) {
+            break;
+        }
+
+        // false means already connected: this link would close a loop.
+        if (groups.union(pointA, pointB)) {
+            totalCost += cost;
+            linksUsed++;
+        }
+    }
+
+    return totalCost;
+}
+
+const points = [[0, 0], [2, 2], [3, 10], [5, 2], [7, 0]];
+
+console.log(minCostConnectPoints(points)); // 20
+console.log(minCostConnectPoints([[3, 12], [-2, 5], [-4, 1]])); // 18
+console.log(minCostConnectPoints([[0, 0]])); // 0
+```
+
+**Time:** O(n² log n) · **Space:** O(n²), for n points. There are about n² / 2 links, and sorting them is the slow part. For a graph that gives you E edges, Kruskal is O(E log E): sort the edges, then one almost-O(1) union per edge.
+
 ## How to spot it
 
 - **"Groups", "connected", "same group", "friend circles", "provinces", "merge accounts".**
@@ -378,4 +443,5 @@ How the second example runs:
   - **Path compression** (point straight at the root) + **union by size** (small under big) → **almost O(1)** per operation.
   - `union` returning **false** means "already connected": that edge closes a loop (Redundant Connection).
   - Count groups: start at n, and subtract 1 for every union that returns `true`.
+  - **Kruskal (cheapest way to connect everything):** sort the edges cheapest first, and keep an edge only when `union` returns `true`.
 </Callout>
