@@ -162,7 +162,7 @@ Key choices:
 | --- | --- |
 | `RideService.requestRide(riderId, pickup, drop)` | Makes a `REQUESTED` ride, sets the fare, and picks a driver to offer it to. |
 | `RideService.findDriver(rideId)` | Asks the matching strategy for a driver again (say, after the first one said no). |
-| `RideService.acceptRide(driverId, rideId)` | Atomic: checks the driver is free and the ride is still open, then links them. |
+| `RideService.acceptRide(driverId, rideId)` | Atomic: checks the driver is free, the ride is still open and was offered to this driver, then links them. |
 | `RideService.startRide(driverId, rideId)` | The rider is in the car. |
 | `RideService.completeRide(driverId, rideId)` | The trip is over. The driver is free again, at the drop point. |
 | `RideService.cancelRide(rideId)` | Allowed only before the trip starts. Frees the driver. |
@@ -519,12 +519,17 @@ class RideService {
         const driver = this.#find(this.drivers, driverId);
         const ride = this.#find(this.rides, rideId);
 
-        // 1. Check that the driver is free and the ride is still open.
+        // 1. Check that the driver is free, and the ride is still open.
         if (driver.status !== DriverStatus.AVAILABLE) {
             throw new Error(`${driver.name} is not available`);
         }
         if (ride.status !== RideStatus.REQUESTED) {
             throw new Error(`Ride ${rideId} is already ${ride.status}`);
+        }
+        // Only the driver we asked may take it. A late answer, after the
+        // ride went to someone else, is refused.
+        if (ride.offeredTo !== driver) {
+            throw new Error(`Ride ${rideId} was not offered to ${driver.name}`);
         }
 
         // 2. Link them.
@@ -699,6 +704,7 @@ In step 6, Ravi is nearest again, because he finished R1 at Asha's drop point, (
 | An offline driver is closest | Skipped. Only `AVAILABLE` drivers are picked. |
 | A driver accepts two rides | The second `acceptRide` throws `Ravi is not available`. |
 | Two drivers accept the same ride | The second throws `Ride R1 is already ACCEPTED`. |
+| A driver accepts a ride offered to someone else (say, a late answer after `findDriver` moved it on) | Throws `Ride R2 was not offered to Ravi`. |
 | Cancel after the trip started | `moveTo` throws `can't go from STARTED to CANCELLED`. |
 | A driver tries to start someone else's ride | `#driversRide` throws `Ride R1 is not d2's ride`. |
 | Complete a ride twice | The second call throws `can't go from COMPLETED to COMPLETED`. |

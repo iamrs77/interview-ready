@@ -115,20 +115,25 @@ class FakeMailer {
 **Step 3: the tests.** Each test passes in the fakes it needs:
 
 ```js
-// Node's built-in assert. assert.equal(a, b) throws an error if a and b differ.
-import assert from "node:assert/strict";
+// A tiny test helper: it throws an error if the two values differ.
+// In Node you can use the built-in node:assert module instead.
+function assertEqual(actual, expected) {
+    if (actual !== expected) {
+        throw new Error(`Expected ${expected}, got ${actual}`);
+    }
+}
 
 // Test 1: the payment goes through, so one email is sent.
 const mailer = new FakeMailer();
 const service = new OrderService(new FakeGateway(true), mailer);
 const result = service.placeOrder("asha@example.com", 30);
-assert.equal(result, "Order placed");
-assert.equal(mailer.sent.length, 1);
+assertEqual(result, "Order placed");
+assertEqual(mailer.sent.length, 1);
 
 // Test 2: the payment is declined.
 const declined = new OrderService(new FakeGateway(false), new FakeMailer());
 const declinedResult = declined.placeOrder("asha@example.com", 30);
-assert.equal(declinedResult, "Payment failed");
+assertEqual(declinedResult, "Payment failed");
 
 console.log("All tests passed"); // All tests passed
 ```
@@ -167,7 +172,7 @@ classDiagram
 
 Someone still has to call `new StripeGateway()`. Do it in **one place**, at the start of the program, often called the **composition root**. It is the only place that knows which real classes are used:
 
-```js
+```js noRun
 // main.js (not runnable on its own: StripeGateway and SmtpMailer are not defined here)
 const gateway = new StripeGateway(process.env.STRIPE_KEY);
 const mailer = new SmtpMailer("mail.example.com");
@@ -203,6 +208,14 @@ In one line: **inversion** decides the socket shape; **injection** is someone el
 
 You can inject a concrete class (DI without DIP). And a class can look up an interface from a registry instead of receiving it (DIP without DI). You get the full benefit with both: depend on an interface, **and** receive it.
 
+**And Inversion of Control (IoC)?** It is the widest of the three ideas: **someone else runs the flow and calls your code**. "Don't call us, we'll call you." Express calling your route handler when a request comes in is IoC. DI is one kind of IoC: your class gives up control over **creating** its dependencies. That is why DI containers, like Spring's, are also called **IoC containers**.
+
+| Name | Kind of thing | One line |
+| --- | --- | --- |
+| Dependency Inversion (DIP) | Design principle | Depend on an interface, not a concrete class |
+| Dependency Injection (DI) | Coding technique | Receive dependencies from outside |
+| Inversion of Control (IoC) | General idea | A framework calls your code; DI is one kind of it |
+
 ## Common mistakes
 
 - **A default that builds the real thing:** `constructor(gateway = new StripeGateway())`. Handy, but the class still imports and depends on Stripe. Fine for small scripts only.
@@ -231,5 +244,5 @@ In LLD code, write constructors that **take** their collaborators. It shows you 
   - **Constructor injection** is the default.
   - The big win: tests can pass **fakes**. No network, no real money.
   - Create the real objects in **one place**, at program start (the composition root).
-  - **Injection** = how it arrives. **Inversion** = depend on an interface.
+  - **Injection** = how it arrives. **Inversion** = depend on an interface. **IoC** = a framework calls your code; DI is one kind of it.
 </Callout>

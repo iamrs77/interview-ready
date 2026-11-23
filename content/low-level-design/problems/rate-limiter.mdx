@@ -551,7 +551,7 @@ The fix: do "read, check, write" as **one step** inside the store. In Redis, tha
 
 **With many servers,** each server has its own Map. Behind a load balancer with 4 servers, a user can get 4 times the limit. The counts must live in one shared place, like Redis, and be changed in one atomic step. That is the [system design version](/learn/system-design/questions/rate-limiter).
 
-**In Java,** many threads can call `allow` for the same user at once. Mark each strategy's `allow` as `synchronized`, so only one thread changes one user's bucket at a time, while different users never wait for each other. Keep the strategies in a `ConcurrentHashMap`. See [Race Conditions and Locks](../concurrency/race-conditions-locks.mdx).
+**In Java,** many threads can call `allow` for the same user at once. Mark each strategy's `allow` as `synchronized`, so only one thread changes one user's bucket at a time, while different users never wait for each other. Keep the strategies in a `ConcurrentHashMap`, and make a user's strategy with `computeIfAbsent`. A plain "get, then put if missing" lets two threads each make a full bucket for the same new user, and one of them is lost. See [Race Conditions and Locks](../concurrency/race-conditions-locks.mdx).
 
 ### Adding features
 

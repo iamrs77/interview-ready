@@ -460,6 +460,13 @@ class TaskScheduler {
             wait = 0;
         }
 
+        // setTimeout can't wait longer than about 24.8 days. A bigger number
+        // fires at once. So wait the longest it can, then check again.
+        const longestWait = 2147483647;
+        if (wait > longestWait) {
+            wait = longestWait;
+        }
+
         this.timer = setTimeout(() => {
             this.timer = null;
             this.runDueTasks();
@@ -707,6 +714,8 @@ await sleep(300);
 | Case | What happens |
 | --- | --- |
 | A delay of 0, or a time in the past | The wait becomes 0, so it runs as soon as possible. |
+| A delay longer than about 24.8 days | `setTimeout` can't wait that long: a bigger number fires at once. `armTimer` waits the longest it can, and `runDueTasks` sees the task is not due yet and sets the timer again. |
+| The timer fires a little early | `runDueTasks` checks `runAt` again, finds nothing due, and sets the timer again. So a task never runs early. |
 | Two tasks due at the same moment | The task added first runs first (`isBefore` compares `number`). |
 | A task is due, but all slots are busy | It stays in the heap and runs when a slot frees. Late, but never skipped. |
 | Cancel a waiting task | Marked `CANCELLED`, and skipped when it comes out of the heap. |
@@ -779,7 +788,7 @@ For a few simple tasks, that is fine. But you can't limit how many run at once, 
 </Accordion>
 <Accordion title="Fixed rate or fixed delay?">
 
-**Fixed delay** (ours): the next run starts `interval` after the last run **ends**. Runs never overlap, but the times drift if runs are slow. **Fixed rate**: the next run is at the planned time plus `interval` (9:00, 9:05, 9:10), however long each run takes. It keeps the clock times, but if a run is slower than the interval, runs pile up. Java offers both: `scheduleWithFixedDelay` and `scheduleAtFixedRate`.
+**Fixed delay** (ours): the next run starts `interval` after the last run **ends**. Runs never overlap, but the times drift if runs are slow. **Fixed rate**: the next run is at the planned time plus `interval` (9:00, 9:05, 9:10), however long each run takes. It keeps the clock times, but if a run is slower than the interval, the late runs pile up and start back to back (Java never runs two at the same time). Java offers both: `scheduleWithFixedDelay` and `scheduleAtFixedRate`.
 
 </Accordion>
 <Accordion title="How else could cancel remove a task from the heap?">

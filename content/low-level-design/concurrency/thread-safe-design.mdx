@@ -46,7 +46,7 @@ flowchart TB
 ## Step 2: pick a tool, simplest first
 
 1. **Don't share.** Keep data in local variables or in objects made per request.
-2. **Don't change.** Make shared data immutable: freeze it, or build a new object instead of editing the old one.
+2. **Don't change.** Make shared data immutable: freeze it, or build a new object instead of editing the old one. `Object.freeze` only freezes the top level, so freeze nested objects too.
 3. **Atomic step.** Do the check and the write with no `await` between them.
 4. **Lock.** A mutex around the critical section, when an `await` can't be avoided. See [Race Conditions and Locks](./race-conditions-locks.mdx).
 5. **Database rule.** A unique index or a conditional `UPDATE`, when there are many servers.
@@ -63,7 +63,7 @@ Java has ready-made tools for these: `ConcurrentHashMap` for shared maps, `Atomi
 
 The shared state is the lot's map of spots. The unsafe version finds a free spot, awaits something, then takes the spot:
 
-```js
+```js noRun
 // Unsafe, and not complete code: it only shows the bug.
 async assignSpot(plate) {
     // 1. Find a free spot.
@@ -254,8 +254,11 @@ class ShowBooking {
     }
 
     async holdSeats(user, seatIds) {
-        // Sort a copy of the list. Everyone locks seats in the same order: no deadlock.
-        const sorted = Array.from(seatIds);
+        // Copy the list without repeats. A seat asked for twice
+        // would wait for its own lock forever.
+        const sorted = Array.from(new Set(seatIds));
+
+        // Sort it. Everyone locks seats in the same order: no deadlock.
         sorted.sort();
 
         // Wait here until we hold the lock of every seat we want.

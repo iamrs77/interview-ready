@@ -844,7 +844,8 @@ See [Race Conditions and Locks](../concurrency/race-conditions-locks.mdx).
 
 ### Adding features
 
-**1. Pawn promotion.** A pawn that reaches the last rank becomes a queen. Add a new kind of `Move`, a new
+**1. Pawn promotion.** A pawn that reaches the last rank becomes a queen, rook, bishop or knight. The player picks.
+This example always picks a queen, the usual choice. Add a new kind of `Move`, a new
 [Command](../design-patterns/command.mdx). The pieces and the board don't change. `Game` only needs one small
 factory method that picks which `Move` class to create.
 
@@ -894,9 +895,11 @@ console.log(onA7.constructor.name, onA8); // Pawn null
 
 **2. Castling.** The king moves two squares and the rook jumps over it. Add a `CastleMove` command that moves both
 pieces, and undoes both. Give each piece a `moveCount` (raised in `execute`, lowered in `undo`), because castling is
-allowed only if neither piece has moved. The king must not be in check, or pass over an attacked square.
+allowed only if neither piece has moved. Every square between the king and the rook must be empty. The king must not
+be in check, pass over an attacked square, or land on one.
 
-**3. En passant.** A pawn can capture an enemy pawn that just moved two squares past it. The rule needs the **last
+**3. En passant.** A pawn can capture an enemy pawn that has just moved two squares and landed right beside it. It
+takes it as if that pawn had moved only one square, and only on the very next move. The rule needs the **last
 move**, which `Game` already keeps in its history. Add an `EnPassantMove` command whose captured pawn is not on the
 "to" square.
 

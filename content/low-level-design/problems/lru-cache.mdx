@@ -465,10 +465,12 @@ try {
 ```
 
 <Callout title="Why the interviewer may still want the long way" type="idea">
-  The `Map` version is correct and short, and it is fine for real JavaScript code. But the question tests whether you
-  can **build** an O(1) structure: pointers, sentinels and the Map that points into the list. The trick also works
-  only in JavaScript. Java's `HashMap` keeps no order, so a Java interviewer expects the list (or Java's ready-made
-  `LinkedHashMap`). A good plan: say the trick in one sentence, then offer to write the long way.
+  The `Map` version is correct and short, and it is fine for small caches in real JavaScript code. On a big cache,
+  finding the oldest key can slow down (see "Is the Map shortcut really O(1)?" below). And the question tests whether
+  you can **build** an O(1) structure: pointers, sentinels and the Map that points into the list. The trick also
+  depends on JavaScript's `Map` keeping its order. Java's `HashMap` keeps no order, so a Java interviewer expects the
+  list (or Java's ready-made `LinkedHashMap`). A good plan: say the trick in one sentence, then offer to write the
+  long way.
 </Callout>
 
 ## Step 6: Edge cases and extensions
@@ -540,7 +542,11 @@ To remove a node from the middle, you must change the node **before** it. A sing
 </Accordion>
 <Accordion title="Is the Map shortcut really O(1)?">
 
-Yes, on average. `Map`'s `get`, `set`, `delete` and `has` are fast hash lookups. Getting the first key with `keys().next()` is O(1) too. Both versions have the same speed. The difference is what they show the interviewer.
+Not always. `Map`'s `get`, `set`, `delete` and `has` are fast hash lookups, O(1) on average. The weak spot is `keys().next()`.
+
+In V8 (the engine in Chrome and Node.js), a deleted key leaves an empty slot inside the Map until the Map rebuilds its table. `keys().next()` starts at the first slot and steps over every empty one. An LRU cache deletes from the front again and again, so the empty slots pile up right where that walk starts. On a big, full cache, one eviction can cost O(n). In a quick test on Node.js with 64,000 items, evictions were many times slower than in the linked list version.
+
+The linked list version is truly O(1). This is one more reason to know the long way.
 
 </Accordion>
 <Accordion title="LRU or LFU: which is better?">
@@ -585,6 +591,6 @@ Give each item a size (for example, its string length). Keep a running total. In
   - Map for "find it in O(1)", doubly linked list for "move or remove it in O(1)".
   - The node keeps its key, so an evicted node can be deleted from the Map.
   - Fake `head` and `tail` nodes remove every `null` check.
-  - The `Map` shortcut (delete, then set) is fine in real code. Offer it, then write the long way.
+  - The `Map` shortcut (delete, then set) is fine for small caches. It is not a sure O(1): in V8, `keys().next()` slows down after many deletes. Offer it, then write the long way.
   - `get` changes the order too, so in Java even reads need the lock.
 </Callout>

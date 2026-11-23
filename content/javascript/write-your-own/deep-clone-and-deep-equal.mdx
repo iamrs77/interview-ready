@@ -300,7 +300,7 @@ So write your own only when you need something special: for example, keeping fun
 | `{ x: 1, y: 2 }` and `{ y: 2, x: 1 }` | Equal. Key order doesn't matter. |
 | `[1, 2]` and `{ 0: 1, 1: 2 }` | Not equal. One is an array. |
 
-One gap is left in our `deepEqual`: two **Dates** have no own keys, so `deepEqual(new Date(0), new Date(1))` gives `true`. Add these lines after the array check to compare their times:
+Our `deepEqual` still has a gap: two **Dates** have no own keys, so `deepEqual(new Date(0), new Date(1))` gives `true`. Add these lines after the array check to compare their times:
 
 ```js noRun
 // Both must be Dates, or both not. Then compare the time.
@@ -314,6 +314,8 @@ if (aIsDate) {
 }
 ```
 
+**Maps and Sets** have the same gap. They keep their items hidden too, so `deepEqual(new Map([["a", 1]]), new Map())` also gives `true`. If they are in scope, add a check like the Date one: compare the `size`, then each entry.
+
 ## In the real world
 
 - **Lodash**, a popular helper library, has `_.cloneDeep` and `_.isEqual`. They do the same jobs as this page, for many more types.
@@ -326,7 +328,7 @@ if (aIsDate) {
 - **Always starting the copy with `{}`.** Arrays come back as objects with keys `'0'`, `'1'`.
 - **Saving to `seen` after copying the children.** The cycle reaches the object again before it is saved, so it still loops forever. Save first, then go deeper.
 - **Making a new `seen` in every call.** Pass the same one down as the second argument, or cycles are never found.
-- **Comparing with `JSON.stringify(a) === JSON.stringify(b)`.** Key order changes the text, so `{ x: 1, y: 2 }` and `{ y: 2, x: 1 }` look different. Dates, `undefined` and `NaN` are also lost.
+- **Comparing with `JSON.stringify(a) === JSON.stringify(b)`.** Key order changes the text, so `{ x: 1, y: 2 }` and `{ y: 2, x: 1 }` look different. Also, Dates turn into strings, keys holding `undefined` vanish, and `NaN` becomes `null`.
 - **Only checking that `a`'s keys are in `b`.** You also need the key count, or `b` can have extra keys.
 
 ## In the interview

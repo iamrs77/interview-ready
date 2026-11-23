@@ -123,7 +123,7 @@ console.log(asha.name); // Asha
 
 ### Which rule wins?
 
-`bind` is stronger than a method call and stronger than `call`. Once a function is bound, its `this` never changes.
+`bind` is stronger than a method call and stronger than `call`. Once a function is bound, a method call, `call`, `apply` or a second `bind` can't change its `this`. Only `new` can, because `new` always makes a fresh object.
 
 ```js
 function showName() {
@@ -295,6 +295,26 @@ timer.startArrow(); // Arrow: 10
 ```
 
 Before arrow functions, people wrote `const self = this;` above the callback and used `self` inside it. You'll still see this in old code.
+
+### this in DOM event listeners
+
+The browser calls a listener **with** an object: the element the listener is on. So in a regular `function` listener, `this` is that element, the same as `event.currentTarget`. An arrow listener keeps the `this` of the code around it instead.
+
+```js noRun
+const button = document.querySelector("button");
+
+button.addEventListener("click", function () {
+    // A regular function: this is the button.
+    console.log(this === button); // true
+});
+
+button.addEventListener("click", () => {
+    // An arrow: this comes from the code around it, not the button.
+    console.log(this === button); // false
+});
+```
+
+With an arrow, use `event.currentTarget` to get the element.
 
 ## this in classes
 

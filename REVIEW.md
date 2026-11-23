@@ -1,4 +1,27 @@
-# Review — System Design notes
+# Review notes
+
+# JavaScript and Low-Level Design, round 1 (2026-11-23)
+
+## Status: all MUST and SHOULD items fixed
+
+- **Checked:** all 54 JavaScript pages and all 60 Low-Level Design pages, read line by line by 9 reviewers.
+  - Every code block with a claimed output was run in Node 24. The Guess-the-Output puzzles were run 3 ways (the site's Run button, a browser script, a Node file), and every answer matched.
+  - Every LLD practice problem was put together and run end to end. The `Mutex` and `BoundedQueue` were stress-tested, and chess move generation was checked with perft (20 / 400 / 8902 / 197281).
+  - TypeScript blocks were type-checked. The diagrams on every changed page parse. MDX check, types, lint and the production build pass.
+- **Found:** 15 MUST, 51 SHOULD, about 60 NICE. Wrong `// output` comments or puzzle answers: none.
+- **Biggest fixes:**
+  - LRU with only a JS `Map` is **not** O(1) in V8: deleted keys leave empty slots that `keys().next()` steps over. Checked by timing, then fixed in `problems/lru-cache`, SD `caching/cache-eviction` and JS `map-set-weakmap`.
+  - Bugs in example code: Command `slice(0, -0)` wiped the document; pub-sub `seek()` during delivery was ignored; task scheduler `setTimeout` overflowed after 24.8 days; Splitwise accepted an expense with no sharers; `holdSeats("A1", "A1")` deadlocked on its own lock.
+  - Wrong facts: Chain of Responsibility "biggest note first always works"; "TypeScript abstract classes only exist while compiling"; "Node can't run `.ts`"; pawn promotion is "always a queen"; the safe vs transparent Composite; the library "returned on the due date = no fine" case; out-of-date Node module detection; the Java `ConcurrentHashMap` advice in the KV store and rate limiter.
+  - Gaps that interviewers often ask about: pass by value vs reference, `this` in DOM listeners, Object.groupBy, iterator helpers, IoC vs DI vs DIP, LSP contracts, GoF Director, `SharedArrayBuffer` + `Atomics`, detached DOM leaks, 4 problems missing from the LLD cheat sheet.
+- **Not done, on purpose:**
+  - Pages built from your notes got error fixes only: no throttle trailing call, no TypeScript declaration merging.
+  - NICE items that are rarely asked (each reviewer's list is in the session scratchpad).
+- **Needs you:** a "Step 2" code block's Run button fails on its own (ReferenceError), because it doesn't include Step 1. Fix: have Run add the earlier blocks of the same example, or mark those blocks `noRun`.
+
+---
+
+# System Design
 
 Two full reviews so far:
 - **Round 2 (2026-11-20)** is below.

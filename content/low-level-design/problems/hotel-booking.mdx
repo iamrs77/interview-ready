@@ -639,9 +639,13 @@ CREATE EXTENSION btree_gist;
 CREATE TABLE bookings (
   room_id int,
   stay daterange, -- like '[2026-12-24, 2026-12-27)': check-out day not included
-  EXCLUDE USING gist (room_id WITH =, stay WITH &&) -- && means "overlaps"
+  status text,
+  -- && means "overlaps". Cancelled rows stay, so only confirmed ones count.
+  EXCLUDE USING gist (room_id WITH =, stay WITH &&) WHERE (status = 'CONFIRMED')
 );
 ```
+
+Without the `WHERE`, a cancelled booking would still block its dates, because we keep cancelled rows as history.
 
 In Java, an interviewer may expect `synchronized` on `book`, or a lock per room type. In JavaScript, a method with
 no `await` already runs to the end without a break. See [Race Conditions and Locks](../concurrency/race-conditions-locks.mdx),

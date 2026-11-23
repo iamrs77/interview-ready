@@ -53,7 +53,7 @@ classDiagram
 | **Aggregation** | Has it, but the part can live alone or be shared | `o--` hollow diamond on the whole | `Library o-- Member` | The part lives on after the whole |
 | **Composition** | Owns it. The part belongs to one whole only | `*--` filled diamond on the whole | `Book *-- BookCopy` | The part dies with the whole |
 | **Inheritance** | Is a kind of | `<\|--` hollow triangle on the parent | `Member <\|-- Student` | Not about lifetime: one object |
-| **Implements** | Can play the role of an interface | `<\|..` dashed line, hollow triangle | `FinePolicy <\|.. PerDayFine` | Not about lifetime |
+| **Implements** (UML calls it "realization") | Can play the role of an interface | `<\|..` dashed line, hollow triangle | `FinePolicy <\|.. PerDayFine` | Not about lifetime |
 
 The diamond always sits on the **whole** (the owner), and the triangle always points at the **parent**.
 
@@ -73,7 +73,7 @@ The clue in code: the part is **passed in** from outside and may be **shared**.
 
 A book **owns** its copies. The book creates them, nobody else holds them, and a copy makes no sense without its book. Remove the book from the catalogue, and its copies go too.
 
-The clue in code: the whole does `new Part()` **itself**, keeps it private, and never hands it out to be kept.
+The clue in code: the whole does `new Part()` **itself** and keeps it in a private list. No other **whole** ever owns that part. Other objects may still point at it (a loan points at a copy, below), but only the book decides when the copy goes away.
 
 ## Dependency: "uses for a moment"
 
@@ -196,7 +196,7 @@ flowchart TB
   Q4 -->|No| AG["Aggregation"]
 ```
 
-"B dies with A" means A makes B itself and nobody else shares it. If B can live alone or be shared, it is aggregation.
+"B dies with A" means A makes B itself and no other whole shares it. If B can live alone or be shared, it is aggregation.
 
 ## Multiplicity: how many
 
@@ -273,7 +273,7 @@ Say the relationship **and the reason** when you draw each line. The reason matt
 
 **Likely follow-up:** "What is the real difference between aggregation and composition in code?"
 
-**Answer:** "Who creates the part and who else can hold it. In composition, the whole makes the part itself and never shares it, so the part goes away with the whole. In aggregation, the part is made outside, passed in, and can be shared, so it lives on."
+**Answer:** "Who creates the part and who else can hold it. In composition, the whole makes the part itself and no other whole ever owns it, so the part goes away with the whole. In aggregation, the part is made outside, passed in, and can be shared, so it lives on."
 
 <Callout title="Remember this" type="success">
   - **Does the part die with the whole?** Yes = composition (filled diamond), No = aggregation (hollow diamond).

@@ -121,7 +121,7 @@ classDiagram
 - `Group.settle(from, to, amount)`. Records that `from` paid `to` back.
 - `SplitStrategy.split(amount, users, values)` → `Split[]`. The shares always add up to `amount` exactly.
 - `BalanceSheet.describe(user)` → "Asha gets back ₹66.66", "Ravi owes ₹233.33" or "is settled up".
-- `BalanceSheet.simplify()` → the fewest payments, found greedily: the biggest debtor pays the biggest creditor, again and again.
+- `BalanceSheet.simplify()` → a short list of payments (never more than people − 1), found greedily: the biggest debtor pays the biggest creditor, again and again. It is not always the true fewest (see the follow-ups).
 
 The main flow, adding an expense:
 
@@ -477,6 +477,12 @@ class Group {
         // 1. Check the input.
         checkAmount(amount);
         this.checkMember(paidBy);
+
+        // With no sharers, the payer would get money back from no one.
+        if (users.length === 0) {
+            throw new Error("At least one person must share the expense");
+        }
+
         for (const user of users) {
             this.checkMember(user);
         }
@@ -498,6 +504,8 @@ class Group {
 
     settle(from, to, amount) {
         checkAmount(amount);
+        this.checkMember(from);
+        this.checkMember(to);
         this.balances.addPayment(from, to, amount);
     }
 }
@@ -596,7 +604,8 @@ Each person ends with the same balance either way. Only the number of payments c
 | Percents don't add up to 100 | Refused: "Percents add up to 90, not 100". |
 | Exact amounts don't add up to the total | Refused, showing both totals. |
 | Amount is 0, negative, or a decimal like `99.5` | Refused: money is whole paise, above 0. |
-| The payer or a sharer is not in the group | Refused: "Ravi is not in Goa trip". |
+| The payer, a sharer, or someone settling up is not in the group | Refused: "Ravi is not in Goa trip". |
+| An expense with no sharers | Refused. Otherwise the payer gets money back from no one, and the balances stop adding up to 0. |
 | The payer is not one of the sharers | Allowed. Asha can pay for a taxi only Ravi and Meera used. |
 | Someone pays back more than they owe | Allowed. Their balance flips, and now they get money back. |
 | Everyone is settled | `simplify()` returns an empty list. |

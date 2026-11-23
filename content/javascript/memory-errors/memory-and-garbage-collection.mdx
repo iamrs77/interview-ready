@@ -126,7 +126,7 @@ Old browsers like Internet Explorer 6 and 7 used **reference counting** for some
 
 A few more facts worth knowing:
 
-- You **can't** start the GC yourself, and you can't know exactly when it runs. `user = null` only removes **one** reference.
+- Your code **can't** start the GC (only debugging tools can, like the trash icon in DevTools), and you can't know exactly when it runs. `user = null` only removes **one** reference.
 - Engines like **V8** (Chrome and Node.js) split the heap in two. New objects go to a small **young** area that is cleaned often and fast, because most objects are needed only for a moment. Objects that survive a few cleanings move to the **old** area, which is cleaned less often.
 - While the GC works, your code can pause. V8 does much of the work in small steps or on other threads, so these pauses stay short.
 
@@ -348,6 +348,10 @@ console.log(globalThis.total); // 5
 ```
 
 The fix: always declare with `let` or `const`. In **strict mode** and in modules (which are strict by default), this line throws a `ReferenceError` instead, so you find the bug at once.
+
+#### 6. Detached DOM elements (in the browser)
+
+You remove an element from the page, but your code still keeps it in a variable, an array or a Map. The element is now **detached**: it is gone from the screen, but it stays in memory, with everything inside it. The fix: when you remove the element, drop your own reference to it too (remove it from the array, or set the variable to `null`).
 
 ### Finding leaks
 

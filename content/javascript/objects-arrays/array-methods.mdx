@@ -226,6 +226,21 @@ console.log(counts); // { tea: 3, coffee: 2 }
 | 4 | tea | `{ tea: 3, coffee: 1 }` |
 | 5 | coffee | `{ tea: 3, coffee: 2 }` |
 
+**Grouping** items into lists is another classic `reduce` job. It's so common that it's now built in (ES2024): `Object.groupBy`. Your callback gives each item a group name, and you get back an object with one list per group.
+
+```js
+const words = ["apple", "avocado", "banana", "blueberry", "cherry"];
+
+// The group name for each word is its first letter.
+const byLetter = Object.groupBy(words, (word) => word[0]);
+
+console.log(byLetter.a); // [ 'apple', 'avocado' ]
+console.log(byLetter.b); // [ 'banana', 'blueberry' ]
+console.log(byLetter.c); // [ 'cherry' ]
+```
+
+`Map.groupBy` works the same way, but gives back a Map.
+
 **Without a start value**, `reduce` uses the first item as the start and begins at the second item. That works, until the array is empty:
 
 ```js
@@ -344,6 +359,38 @@ const removed = fruits.splice(1, 2, "kiwi");
 console.log(removed); // [ 'banana', 'cherry' ]
 console.log(fruits); // [ 'apple', 'kiwi', 'date' ]
 ```
+
+## A few more you'll see
+
+| Method | Gives back |
+| --- | --- |
+| `includes(value)` | `true` or `false`. It finds `NaN` too |
+| `indexOf(value)` | the first index, or `-1`. It can't find `NaN`, because it uses `===` |
+| `at(index)` | the item. A negative index counts from the end: `at(-1)` is the last item |
+| `findLast`, `findLastIndex` | like `find` and `findIndex`, but they search from the end (added in 2023) |
+| `flat(depth)` | a new array with nested arrays opened up, 1 level by default |
+| `flatMap(callback)` | `map`, then `flat` by one level |
+
+```js
+const numbers = [10, 20, 30, NaN];
+
+console.log(numbers.includes(NaN)); // true
+console.log(numbers.indexOf(NaN)); // -1
+console.log(numbers.at(-2)); // 30
+
+const nested = [1, [2, 3], [4, [5]]];
+
+console.log(nested.flat()); // [ 1, 2, 3, 4, [ 5 ] ]
+console.log(nested.flat(Infinity)); // [ 1, 2, 3, 4, 5 ]
+
+// Each sentence becomes a list of words, then the lists are joined.
+const sentences = ["hi there", "good day"];
+const words = sentences.flatMap((sentence) => sentence.split(" "));
+
+console.log(words); // [ 'hi', 'there', 'good', 'day' ]
+```
+
+Writing `flat` yourself is a common task: see [Flatten and Memoize](../write-your-own/flatten-and-memoize.mdx).
 
 ## Chaining array methods
 

@@ -234,6 +234,35 @@ showArguments("a", "b", "c");
 | Holds | Only the remaining arguments | All the arguments |
 | Use it in new code? | Yes | No |
 
+### Passing an object to a function
+
+JavaScript always passes a **copy of the value**. For a number or a string, that's a copy of the number or string. For an object, the value is a **reference**, so the function gets a copy of the reference. It points to the **same** object as the caller's variable.
+
+- Changing the object's **contents** inside the function changes the caller's object too.
+- Giving the parameter a **new** object only changes the parameter. The caller's variable stays the same.
+
+```js
+function renameUser(user) {
+    // Changes the object the caller also has.
+    user.name = "Ravi";
+}
+
+function replaceUser(user) {
+    // Points only the parameter at a new object.
+    user = { name: "Meena" };
+}
+
+const person = { name: "Asha" };
+
+renameUser(person);
+console.log(person.name); // Ravi
+
+replaceUser(person);
+console.log(person.name); // Ravi
+```
+
+More on references and copies in [Value vs Reference](../core-basics/value-vs-reference.mdx).
+
 ## Functions are values
 
 "**First-class functions**" means functions are treated like any other value. You can store them, pass them and return them.
@@ -466,11 +495,16 @@ Many callbacks nested inside each other get hard to read ("callback hell"). That
 
 **Answer:** "As an object method that uses `this`, because `this` won't be the object. As a constructor, because arrows can't be called with `new`. And when I need the function's own `arguments`, though rest parameters are better anyway. Arrows are great for callbacks inside methods, because they keep the method's `this`."
 
+**Likely follow-up:** "Is JavaScript pass by value or pass by reference?"
+
+**Answer:** "Always pass by value. For an object, the value that gets copied is a reference to the object. So if the function changes the object's properties, the caller sees the change. But if the function gives the parameter a whole new object, the caller's variable still points to the old one."
+
 <Callout title="Remember this" type="success">
   - **Declarations** are hoisted with their body. **Expressions** exist only after their line runs.
   - **Arrow functions** have no own `this`, no `arguments`, and can't be used with `new`.
   - Arrow **without braces** returns its value. **With braces**, write `return`. Objects need `() => ({ ... })`.
   - **Defaults** replace only `undefined`. **Rest** `...args` is a real array. `arguments` is not.
+  - Arguments are passed **by value**. For an object, the value is a **reference**: changing its contents is seen outside, giving the parameter a new object isn't.
   - Functions are **values**: `fn` is the function, `fn()` runs it. An **IIFE** runs right where it's written.
   - A **callback** is a function you pass in, to be called later (async) or right away (like `map`).
 </Callout>

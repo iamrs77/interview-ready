@@ -133,8 +133,10 @@ Key choices:
   free.
 - **Each entry knows its `parent`.** That gives us `path` (walk up to `/`) and `delete` (ask the parent to remove
   me) without searching.
-- **Safe over transparent.** `size()` and `list()` are on every entry, because they make sense for both. But
-  `read()` and `write()` are only on `File`. A folder has no "text", so we don't pretend it does.
+- **Safe over transparent.** `size()` and `list()` are on every entry, because they make sense for both. But the
+  child methods (`child`, `add`, `remove`) are only on `Directory`. A file can't hold children, so we don't pretend
+  it can. That is the "safe" Composite. The "transparent" one puts `add` and `remove` on `Entry` too, so every entry
+  looks the same, but a file must then throw. In the same way, `read()` and `write()` are only on `File`.
 
 ## Step 4: Main methods
 
@@ -582,6 +584,7 @@ real disk.
 | `mkdir` on a folder that exists | Nothing happens, like `mkdir -p`. |
 | Deleting `/` | `Cannot delete "/"`. |
 | Extra slashes, like `/home//asha/` | Fine: empty names are dropped. |
+| A trailing slash on a file, like `/home/asha/hello.js/` | Also accepted here, to keep `parsePath` simple. Linux refuses it with `ENOTDIR`, because a trailing `/` means "this must be a folder". |
 | A path without a leading `/`, or with `..` | Refused with a clear message. |
 | `ls` sorting | Uses JavaScript's default sort, which compares UTF-16 code units, so `B.txt` comes before `a.txt`. |
 
@@ -736,7 +739,7 @@ cache from path to entry.
 
 - Names the Composite pattern and uses it for `size`.
 - Handles every bad path with a clear error: missing, file used as a folder, deleting `/`.
-- Explains safe versus transparent Composite (why `read` is only on `File`).
+- Explains safe versus transparent Composite (why `add` is only on `Directory`).
 - A clean plan for permissions and links.
 
 </Tab>

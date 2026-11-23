@@ -112,7 +112,7 @@ classDiagram
 - **Snakes and ladders share one base class.** Both are "land on cell X, go to cell Y". The board stores them in one `Map`, and the game never asks "is this a snake?". It just follows `jump.to`.
 - **The dice is an interface.** The game gets it from outside. A test passes a `FixedDice`, so every run gives the same game.
 - **The "past 100" check is an interface too.** A new rule is a new class. `Game` doesn't change.
-- **Aggregation for the board and players.** The same board layout can be used for many games, and players can play again.
+- **Aggregation for the board and players.** The same board layout can be used for many games, and players can play again. A new `Game` puts every player back at cell 0.
 
 ## Step 4: Main methods
 
@@ -375,6 +375,11 @@ class Game {
     constructor(board, players, dice, rule = new ExactFinishRule()) {
         if (players.length < 2) {
             throw new Error("Need at least 2 players");
+        }
+
+        // Everyone starts off the board, even players from an old game.
+        for (const player of players) {
+            player.position = 0;
         }
 
         this.board = board;

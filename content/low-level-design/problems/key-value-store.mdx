@@ -615,7 +615,7 @@ session.commit();
 
 If two sessions change the same key, the last commit wins. To catch that, give each key a version number. At commit, if the key changed since the session read it, fail the commit and let the caller try again. This is **optimistic locking**. See [Locks and Deadlocks](/learn/system-design/databases/locking).
 
-**In Java,** keep the data in a `ConcurrentHashMap`, give each thread its own session, and run the outermost commit under one lock, so other threads never see half of it. See [Race Conditions and Locks](../concurrency/race-conditions-locks.mdx).
+**In Java,** give each thread its own session, and guard the saved data with a read-write lock (`ReentrantReadWriteLock`). Every read takes the read lock, and the outermost commit takes the write lock. Then no thread ever sees half a commit. A `ConcurrentHashMap` alone is not enough: it keeps each single `put` safe, but a reader can still see a commit that is half done. See [Race Conditions and Locks](../concurrency/race-conditions-locks.mdx).
 
 **With many servers,** each server has its own memory. One shared store across servers is the [distributed cache](/learn/system-design/questions/distributed-cache) question.
 

@@ -159,12 +159,14 @@ On a server, that loop makes **every user** wait 500 ms. Common causes: big loop
 
 A **worker thread** is a second JavaScript thread, with its own event loop and its own memory. Workers and the main thread talk by sending messages (`postMessage`). They don't share variables, unless you use the special `SharedArrayBuffer`.
 
+Memory in a `SharedArrayBuffer` really is shared. Two workers can change it at the very same instant, so a race can happen at **any line**, just like with Java threads. Four workers that each add 1 to a shared number a million times usually end with less than 4 million. For shared memory, use the `Atomics` functions, like `Atomics.add`, which read and write as one step.
+
 - **Use a worker** for CPU-heavy work: resizing images, hashing or compressing big files, heavy math.
 - **Don't use one** for waiting work. A database call already leaves the thread free.
 
 The example below is one file. First, the import and a slow function:
 
-```js
+```js noRun
 import { Worker, isMainThread, parentPort, workerData } from "node:worker_threads";
 
 // Slow on purpose: for 40, it calls itself hundreds of millions of times.
@@ -179,7 +181,7 @@ function fib(number) {
 
 Next, the main thread starts a worker that runs this same file. `isMainThread` tells each copy which side it is on:
 
-```js
+```js noRun
 if (isMainThread) {
     // Start this same file again, but in a new thread.
     // workerData is the input we hand to the worker.
@@ -232,7 +234,7 @@ You can see it with a real server. The example is one file, in two parts.
 
 **Part 1: the server.** Every request waits 300 ms, like a slow database call, then answers "ok":
 
-```js
+```js noRun
 import http from "node:http";
 
 // Gives back a promise that finishes after "ms" milliseconds.
@@ -256,7 +258,7 @@ const server = http.createServer(async (request, response) => {
 
 **Part 2: two users.** User B arrives 100 ms after user A, while A is still waiting:
 
-```js
+```js noRun
 // Port 0 means "any free port". The callback runs once the server is ready.
 server.listen(0, async () => {
     const port = server.address().port;
@@ -294,6 +296,7 @@ Interviewers often think in Java threads. This table translates:
 | A thread pool (`ExecutorService`) | The event loop, plus Node's thread pool and worker threads |
 | `CompletableFuture` | `Promise` |
 | `synchronized`, `ReentrantLock` | Rarely needed; an async mutex when a check and a write are split by `await` |
+| `AtomicInteger` | `Atomics`, only for workers that share a `SharedArrayBuffer` |
 | `BlockingQueue` | An async queue; see [Producer-Consumer](./producer-consumer.mdx) |
 
 Java 21 added **virtual threads**: very cheap threads, so a Java server can again use one thread per request, even with many thousands of waiting requests.

@@ -210,6 +210,26 @@ console.log(ids.next().value); // 3
 
 Never spread an infinite generator (`[...createIdMaker()]`). Spread asks for **all** the values, so it runs forever.
 
+To take only the first few values, newer engines (ES2025: Node.js 22+ and current browsers) have **iterator helpers**: `map`, `filter`, `take`, `drop` and `toArray`, right on the iterator. They are lazy too, so they work on an endless generator.
+
+```js
+function* createIdMaker() {
+    let id = 1;
+
+    while (true) {
+        yield id;
+        id = id + 1;
+    }
+}
+
+const ids = createIdMaker();
+
+// take(3) stops after 3 values, so the endless loop is safe.
+const firstThree = ids.take(3).toArray();
+
+console.log(firstThree); // [ 1, 2, 3 ]
+```
+
 ### Sending a value back in with next(value)
 
 `next()` can also **send a value into** the generator. The value you pass becomes the result of the `yield` that is paused. The first `next()` only starts the generator, up to the first `yield`.

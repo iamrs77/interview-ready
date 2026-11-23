@@ -124,10 +124,9 @@ class TypeText extends Command {
     }
 
     undo() {
-        const length = this.words.length;
-
-        // slice(0, -5) keeps everything except the last 5 characters.
-        this.doc.text = this.doc.text.slice(0, -length);
+        // Keep everything except the words this command added.
+        const keepLength = this.doc.text.length - this.words.length;
+        this.doc.text = this.doc.text.slice(0, keepLength);
     }
 }
 ```
@@ -144,11 +143,13 @@ class DeleteLast extends Command {
     }
 
     execute() {
-        // Remember the last few characters before deleting them.
-        // slice(-6) gives the last 6 characters.
-        this.removed = this.doc.text.slice(-this.count);
+        // Where the deleted part starts. Never below 0.
+        const start = Math.max(0, this.doc.text.length - this.count);
 
-        this.doc.text = this.doc.text.slice(0, -this.count);
+        // Remember the deleted text, so undo can put it back.
+        this.removed = this.doc.text.slice(start);
+
+        this.doc.text = this.doc.text.slice(0, start);
     }
 
     undo() {
@@ -262,7 +263,8 @@ function typeText(words) {
         },
 
         undo() {
-            doc.text = doc.text.slice(0, -words.length);
+            const keepLength = doc.text.length - words.length;
+            doc.text = doc.text.slice(0, keepLength);
         },
     };
 }
@@ -296,7 +298,7 @@ In Java, the classic command object is a `Runnable`: an object with one `run()` 
 ## When not to use it
 
 - A simple call with no undo, queue or log. Wrapping `save()` in a `SaveCommand` class just adds a layer.
-- The state is tiny. Then it can be simpler to save a **copy of the whole state** before each change, and undo by putting the copy back.
+- The state is tiny. Then it can be simpler to save a **copy of the whole state** before each change, and undo by putting the copy back (that is the **Memento** pattern).
 
 ## Common mistakes
 

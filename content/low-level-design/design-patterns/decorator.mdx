@@ -73,6 +73,8 @@ classDiagram
   class AddOn:::abstract {
     <<abstract>>
     #inner Coffee
+    +cost() number
+    +description() string
   }
   class Milk:::concrete
   class Sugar:::concrete
@@ -114,7 +116,7 @@ class SimpleCoffee extends Coffee {
 
 ### Step 2: The base wrapper
 
-`AddOn` is a `Coffee` that holds another `Coffee` inside it.
+`AddOn` is a `Coffee` that holds another `Coffee` inside it. By default, it passes every call to the coffee inside, so each extra only overrides what it changes.
 
 ```js
 // Abstract: we only make a Milk or a Sugar, never a plain AddOn.
@@ -129,6 +131,15 @@ class AddOn extends Coffee {
 
         // The coffee being wrapped.
         this.inner = inner;
+    }
+
+    // By default, just pass each call to the coffee inside.
+    cost() {
+        return this.inner.cost();
+    }
+
+    description() {
+        return this.inner.description();
     }
 }
 ```
@@ -246,7 +257,7 @@ You may see `@something` above a class or a method in TypeScript or Angular code
 
 ## Common mistakes
 
-- **Not passing every method through.** If the interface has 5 methods, each wrapper needs all 5. A missing one breaks only when called.
+- **Not passing every method through.** If the interface has 5 methods, a wrapper must answer all 5. A missing one breaks only when called. Let the base wrapper (`AddOn`) pass every call to the inner object, so each extra overrides only what it changes.
 - **Checking the type of a wrapped object.** After `new Sugar(new Milk(coffee))`, the outer object is not a `Milk`. `instanceof` checks stop working.
 - **Forgetting that order matters.** "Discount, then tax" and "tax, then discount" give different totals.
 - **Too many layers.** Ten wrappers deep, a stack trace is hard to read.

@@ -123,7 +123,7 @@ console.log(cache.map); // Map(3) { 'C' => 3, 'A' => 1, 'D' => 4 }
 console.log(cache.get("B")); // undefined
 ```
 
-Both `get` and `set` take the same short time no matter how many items there are. People write this as **O(1)**. In coding interviews, the classic version uses a **hash map plus a doubly linked list**. A `Map` does the same job.
+A good LRU cache does `get` and `set` in the same short time, no matter how many items there are. People write this as **O(1)**. The classic way to get it is a **hash map plus a doubly linked list**. The `Map` version above is short and fine for small caches, but it is not a sure O(1): in V8 (Chrome and Node.js), a deleted key leaves an empty slot at the front of the `Map`, and `keys().next()` has to step over all of them. On a big, busy cache, finding the oldest key gets slower. See [Design an LRU Cache](../../low-level-design/problems/lru-cache.mdx).
 
 **LRU's weak spot:** one big job that reads every item once (for example, a nightly report that scans all products) fills the cache with items nobody needs again, and pushes out the truly popular ones.
 
@@ -201,14 +201,14 @@ You rarely need more than one sentence, unless the question is "design a cache":
 
 > "The cache has limited memory, so I'll set an eviction policy of LRU. Popular items stay, and items nobody reads get removed first. In Redis, that's `allkeys-lru`."
 
-If you are asked to build an LRU cache in code, use a hash map plus a doubly linked list, or a `Map` in JavaScript.
+If you are asked to build an LRU cache in code, use a hash map plus a doubly linked list. In JavaScript, mention the `Map` shortcut, then write the list version.
 
 <Callout title="Remember this" type="success">
   - **Eviction** = removing items because the cache is **full**. Expiry = because the **TTL** ran out.
   - **LRU:** remove the item used **longest ago**. The default choice.
   - **LFU:** remove the item used **least often**. Good for stable favorites.
   - **FIFO:** remove the item **added first**. Simple, but ignores popularity.
-  - LRU in JS: a `Map`. On read, delete and re-add the key. When full, remove the **first** key.
+  - LRU in code: a **hash map + doubly linked list**, truly O(1). The JS `Map` shortcut (delete and re-add on read, remove the **first** key when full) is fine for small caches, but slows down on big ones in V8.
   - Redis defaults to `noeviction`. For a cache, set `allkeys-lru`.
   - **Why:** memory only fits the hot data. Evicting the wrong keys means more misses, and more database load.
   - **Alternatives:** more memory, expire-only, smarter policies like **W-TinyLFU** or **ARC**.

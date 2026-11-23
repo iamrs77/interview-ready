@@ -264,6 +264,8 @@ class Subscription {
         this.active = true;
         // The running delivery loop, or null when there is nothing to do.
         this.delivering = null;
+        // Becomes true when seek() moves the offset.
+        this.seekCalled = false;
         // Messages that failed every attempt.
         this.deadLetters = [];
     }
@@ -287,10 +289,11 @@ class Subscription {
 
         while (this.active && this.offset < this.topic.endOffset()) {
             const message = this.topic.messages[this.offset];
+            this.seekCalled = false;
             await this.deliverOne(message);
 
             // Move to the next message, unless seek() moved us while we waited.
-            if (this.offset === message.offset) {
+            if (!this.seekCalled) {
                 this.offset += 1;
             }
         }
@@ -306,6 +309,7 @@ How it works:
 - `delivering` holds the running loop. While it runs, `wake()` does nothing, so there is never more than one loop per subscriber. That keeps the messages in order.
 - `await Promise.resolve()` waits one tiny moment. `publish` finishes first, and the subscriber runs right after. So the publisher never waits for a subscriber.
 - The offset moves only **after** a message is handled, like a Kafka consumer that commits after processing.
+- If `seek()` runs while a message is being handled, `seekCalled` tells the loop to keep the new offset and not add 1. This also works for a seek back to the message being handled: it runs again.
 - A message that arrives while the loop runs is picked up by the same loop, because the `while` checks `endOffset()` each time.
 
 **Piece 3: retries and dead letters.** A failed message is tried again, up to `maxAttempts` times. If it still fails, it goes to `deadLetters`, and the loop moves on.
@@ -339,6 +343,7 @@ This version tries again at once. A real system waits a little between tries, lo
         }
 
         this.offset = offset;
+        this.seekCalled = true;
         this.wake();
     }
 

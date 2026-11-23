@@ -15,7 +15,7 @@ That is a **race condition**: the result depends on the timing of two tasks that
 
 ## "But JavaScript has only one thread"
 
-True: two lines of JavaScript never run at the same instant (see [Concurrency in JavaScript](./concurrency-in-javascript.mdx)). But an `await` hands the thread to other requests. If an `await` sits between the check and the write, another request can run its own check in that gap.
+True: on one thread, two lines of JavaScript never run at the same instant (see [Concurrency in JavaScript](./concurrency-in-javascript.mdx)). But an `await` hands the thread to other requests. If an `await` sits between the check and the write, another request can run its own check in that gap.
 
 Run this, and both bookings succeed.
 
@@ -305,6 +305,7 @@ Databases find deadlocks on their own and cancel one of the transactions, so you
 - **An `await` between the check and the write.** Look for it in every "book", "reserve", "withdraw" or "assign" method.
 - **Not releasing the lock** when something throws. Always use `try`/`finally`.
 - **One big lock for everything.** It is correct, but everyone waits in one line.
+- **Locking the same mutex twice in one task.** This `Mutex` is not reentrant: a task that calls `lock()` again while it holds the lock waits for itself forever. Java's `synchronized` and `ReentrantLock` are reentrant: the same thread may lock again.
 - **Trusting an in-memory lock with many servers.** Use a database rule.
 
 ## In the real world
