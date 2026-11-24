@@ -1,11 +1,214 @@
 ---
 title: "Write These Hooks"
-description: "useDebounce, usePrevious, useLocalStorage and useFetch."
+description: "useDebounce, usePrevious, useLocalStorage and useFetch: the code, how to use each one, and the traps interviewers check."
 icon: Wrench
-planned: true
 ---
 
-- useDebounce
-- usePrevious
-- useLocalStorage
-- useFetch
+Interviewers often ask you to write a small [custom hook](../hooks/custom-hooks.mdx) live. These four come up the most. For each one: the code, a short usage example, and the one or two things the interviewer will check.
+
+## useDebounce
+
+**Debouncing** means waiting until a value **stops changing** before using it. A search box shouldn't call the server on every key press, only once the user has stopped typing.
+
+```jsx
+import { useState, useEffect } from "react";
+
+function useDebounce(value, delay) {
+    const [debouncedValue, setDebouncedValue] = useState(value);
+
+    useEffect(() => {
+        // Copy the value over once it has stayed the same for "delay" ms.
+        const timerId = setTimeout(() => {
+            setDebouncedValue(value);
+        }, delay);
+
+        // A new value cancels the old timer, and the effect starts a new one.
+        return () => {
+            clearTimeout(timerId);
+        };
+    }, [value, delay]);
+
+    return debouncedValue;
+}
+```
+
+Use it:
+
+```jsx
+const [query, setQuery] = useState("");
+// Changes only when the user has stopped typing for 300 ms.
+const debouncedQuery = useDebounce(query, 300);
+```
+
+The input shows `query`, so typing stays instant. Only the slow work, like the fetch, uses `debouncedQuery`.
+
+- **The cleanup is the whole trick.** Each key press changes `value`, so the cleanup clears the last timer before a new one starts. Without `clearTimeout`, every key press still updates the value, just 300 ms late: "a", then "ab", then "abc". Nothing is debounced.
+
+## usePrevious
+
+Returns the value from the **previous render**, for example to show "up from 4" next to a count of 5.
+
+```jsx
+import { useRef, useEffect } from "react";
+
+function usePrevious(value) {
+    const ref = useRef(undefined);
+
+    // Runs after the render: save this render's value for next time.
+    useEffect(() => {
+        ref.current = value;
+    });
+
+    // During the render, the effect hasn't run yet: this is the old value.
+    return ref.current;
+}
+```
+
+Use it:
+
+```jsx
+const [count, setCount] = useState(0);
+const previousCount = usePrevious(count);
+// After clicks that go 0, 1, 2: count is 2 and previousCount is 1.
+```
+
+- **Ref timing.** Effects run **after** the render. So while the component renders, `ref.current` still holds the last render's value. A ref is used because changing it doesn't cause another render.
+- **It's the previous render, not the previous value, and it reads a ref during render.** If the component re-renders for another reason, `previousCount` becomes equal to `count`. And React's docs say not to read refs during render; React's recommended lint rules report it as an error. A pattern from the React docs fixes both: keep the previous value in **state**, and update it during render when the value changes. Setting state during render is safe here only because of the `if`: on the next render `value` equals `current`, so it stops.
+
+```jsx
+function usePrevious(value) {
+    const [current, setCurrent] = useState(value);
+    const [previous, setPrevious] = useState(undefined);
+
+    if (value !== current) {
+        setPrevious(current);
+        setCurrent(value);
+    }
+
+    return previous;
+}
+```
+
+## useLocalStorage
+
+Works like `useState`, but the value is saved in **`localStorage`**, so it survives a page reload.
+
+```jsx
+import { useState, useEffect } from "react";
+
+function useLocalStorage(key, initialValue) {
+    // A function: React calls it only on the first render.
+    const [value, setValue] = useState(() => {
+        const saved = localStorage.getItem(key);
+        if (saved === null) {
+            return initialValue;
+        }
+        try {
+            return JSON.parse(saved);
+        } catch {
+            // The saved text isn't valid JSON.
+            return initialValue;
+        }
+    });
+
+    // Save every change.
+    useEffect(() => {
+        localStorage.setItem(key, JSON.stringify(value));
+    }, [key, value]);
+
+    return [value, setValue];
+}
+```
+
+Use it:
+
+```jsx
+const [theme, setTheme] = useLocalStorage("theme", "light");
+// Same as useState: setTheme("dark") updates the screen and saves it.
+```
+
+- **The lazy initial value.** `useState(readFromStorage())` would read and parse `localStorage` on **every** render, and throw the result away after the first. Passing a **function** makes React call it once. See [useState](../state-and-rendering/use-state.mdx).
+- **`JSON.parse` can throw.** If the saved text isn't valid JSON, because someone edited it by hand or older code saved plain text, `JSON.parse` throws and the component crashes. The `try` / `catch` falls back to `initialValue`. The `null` check matters too: a missing key gives `null`, and `JSON.parse(null)` returns `null` instead of the initial value.
+
+## useFetch
+
+Loads data from a URL, and loads it again when the URL changes.
+
+```jsx
+import { useState, useEffect } from "react";
+
+function useFetch(url) {
+    const [data, setData] = useState(null);
+    const [error, setError] = useState(null);
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        const controller = new AbortController();
+
+        async function load() {
+            setIsLoading(true);
+            setError(null);
+            try {
+                const response = await fetch(url, { signal: controller.signal });
+                if (!response.ok) {
+                    throw new Error("Request failed: " + response.status);
+                }
+                const json = await response.json();
+                setData(json);
+            } catch (err) {
+                // We cancelled this request on purpose. Not a real error.
+                if (err.name === "AbortError") {
+                    return;
+                }
+                setError(err);
+            }
+            setIsLoading(false);
+        }
+
+        load();
+
+        // The URL changed, or the component was removed: cancel the old request.
+        return () => {
+            controller.abort();
+        };
+    }, [url]);
+
+    return { data, error, isLoading };
+}
+```
+
+Use it:
+
+```jsx
+const { data: user, error, isLoading } = useFetch("/api/users/" + userId);
+// Show "Loading..." while isLoading, the error if there is one, then user.name.
+```
+
+- **The race condition, and abort.** If `userId` changes from 1 to 2, and user 1's answer arrives **last**, it would overwrite user 2's. The cleanup calls `controller.abort()`: the old request is cancelled, and its `fetch` throws an `AbortError`, which the `catch` ignores. So only the latest URL can set `data`. See [useEffect](../hooks/use-effect.mdx).
+- **`fetch` doesn't throw on 404 or 500.** It only rejects when the request can't be made at all, like a network error. Check `response.ok` yourself.
+
+## Common mistakes
+
+- **Forgetting the cleanup.** No `clearTimeout` means no debounce. No `abort()` means an old answer can overwrite a new one.
+- **Making the effect function `async`.** It would return a promise instead of a cleanup function. Write an async function **inside** the effect and call it.
+- **`useState(JSON.parse(localStorage.getItem(key)))`.** It reads storage on every render, and crashes on bad JSON. Use a function and a `try` / `catch`.
+- **Showing the `AbortError` as an error.** The request was cancelled on purpose; nothing went wrong. Check `err.name` and skip it.
+- **Leaving values out of the dependency array.** `useFetch` with `[]` instead of `[url]` loads the first URL only, and never loads again when the URL changes.
+
+## In the interview
+
+**Likely question:** "Write a `useDebounce` hook, and use it in a search box."
+
+> "The hook keeps a second copy of the value in state. An effect starts a `setTimeout` that copies the value over after the delay, and its cleanup clears that timer. Each new key press changes the value, so the effect runs again: the cleanup cancels the old timer and a new one starts. The copy only updates once the user stops typing for the whole delay. In the search box, the input uses the live value, and the fetch uses the debounced one."
+
+**Likely follow-up:** "What's the difference between debounce and throttle?"
+
+**Answer:** "Debounce waits until the changes stop, then runs once, which suits search-as-you-type. Throttle runs at most once every N milliseconds while the changes keep coming, which suits scroll or resize handlers that should still update during the movement."
+
+<Callout title="Remember this" type="success">
+  - **useDebounce:** `setTimeout` in an effect, **`clearTimeout` in the cleanup**. The cleanup is what debounces.
+  - **usePrevious:** the effect writes the ref **after** render, so during render the ref still holds the **last render's** value. It's per render, not per change; the **state** version fixes that.
+  - **useLocalStorage:** a **lazy initial value** (`useState(() => ...)`), a **`null` check**, and **`try` / `catch` around `JSON.parse`**. An effect saves each change.
+  - **useFetch:** an **`AbortController`**, aborted in the cleanup, stops old answers from overwriting new ones. **Ignore `AbortError`**, and check **`response.ok`**: `fetch` doesn't throw on 404.
+  - **Debounce** runs once after the changes stop. **Throttle** runs at most once every N ms.
+</Callout>

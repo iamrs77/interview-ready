@@ -1,11 +1,140 @@
 ---
 title: "Making React Apps Fast"
-description: "Finding and fixing slow renders."
+description: "Measuring with the Profiler, then fixing slow renders, long lists, busy inputs and big bundles."
 icon: Zap
-planned: true
 ---
 
-- Measure first: the Profiler
-- Long lists: virtualization
-- Debouncing input
-- The React Compiler
+## The idea
+
+Most React apps are fast enough without any tuning. When one isn't, **measure first**: find what is actually slow, then use the fix that matches the problem. Guessing adds complexity where it doesn't help.
+
+Think of a **doctor**. They run tests before they prescribe anything, and each illness gets its own medicine:
+
+| Symptom | Usual fix |
+| --- | --- |
+| A component re-renders far too often | Move state down, then `React.memo` |
+| A list with thousands of rows is slow | **Virtualization** |
+| A search box sends a request on every key press | **Debouncing** |
+| The first load is slow because the JavaScript is big | **Code splitting** with `lazy` and `Suspense` |
+
+## Measure first: the Profiler
+
+The **React DevTools** browser extension has a **Profiler** tab. Press record, use the slow part of the app, then stop. It shows **which components rendered**, **how long** each one took, and, with the "Record why each component rendered while profiling" setting on, **why** each one rendered. DevTools can also **highlight** components on the page as they re-render.
+
+Measure a **production build with profiling turned on**, like `next build --profile`: a plain production build gives the Profiler no timings. Development mode is slower on purpose: it runs extra checks, and Strict Mode renders components twice.
+
+## Skipping re-renders: React.memo
+
+When a parent re-renders, all its children re-render too. **`React.memo`** skips a child when all its props are the same (by `Object.is`), and **`useCallback`** and **`useMemo`** keep function and object props the same between renders, so `memo` can do its job. See [useMemo and useCallback](../hooks/use-memo-and-use-callback.mdx). Before reaching for them, try **moving state down**: if only one small component uses a piece of state, keep it there, so a change re-renders that component alone instead of the whole page. See [Rendering and the Virtual DOM](../state-and-rendering/how-rendering-works.mdx).
+
+## Long lists: virtualization
+
+Rendering 10,000 rows creates 10,000 rows of DOM nodes, even though the screen shows about 20. **Virtualization** (also called **windowing**) renders only the rows that are **visible**, plus a few above and below. As the user scrolls, it swaps which rows are rendered, and an inner box as tall as the whole list keeps the scrollbar the right size.
+
+You rarely write this yourself: libraries like **react-window** and **TanStack Virtual** do it. The trade-off: the browser's find (Ctrl+F) can't see rows that aren't rendered. Another option is to load the list in pages; see [Pagination and Infinite Scroll](../build-it/pagination-and-infinite-scroll.mdx).
+
+## Debouncing input
+
+When every key press starts slow work, like a search request, **debounce** it: wait until the user **stops typing** for a moment, then do the work once.
+
+```jsx
+import { useEffect, useState } from "react";
+
+function SearchBox() {
+    const [text, setText] = useState("");
+    const [query, setQuery] = useState("");
+
+    useEffect(() => {
+        // Copy the text to query 300 ms after the last key press.
+        const timerId = setTimeout(() => {
+            setQuery(text);
+        }, 300);
+
+        // The next key press cancels this timer.
+        return () => {
+            clearTimeout(timerId);
+        };
+    }, [text]);
+
+    return (
+        <div>
+            <input value={text} onChange={(event) => setText(event.target.value)} />
+            <SearchResults query={query} />
+        </div>
+    );
+}
+```
+
+The input stays instant, because `text` updates on every key. Typing "shoe" quickly changes `query` **once**, to "shoe", so `SearchResults` searches once instead of four times. See [Debounce and Throttle](../../javascript/write-your-own/debounce-and-throttle.mdx), and [Write These Hooks](../build-it/write-these-hooks.mdx) for a reusable `useDebounce`.
+
+When the slow part is **rendering**, not a request, React's `useDeferredValue` keeps typing smooth without a fixed delay. See [Concurrent Rendering](../modern-react/concurrent-rendering.mdx).
+
+## Code splitting: React.lazy and Suspense
+
+Without splitting, every component ends up in one big JavaScript bundle, and the browser downloads all of it before the app starts. **Code splitting** cuts it into pieces that load **only when needed**:
+
+```jsx
+import { lazy, Suspense, useState } from "react";
+
+// The chart's code is downloaded the first time it renders.
+const SalesChart = lazy(() => import("./SalesChart.jsx"));
+
+function Dashboard() {
+    const [showChart, setShowChart] = useState(false);
+
+    return (
+        <div>
+            <button onClick={() => setShowChart(true)}>Show chart</button>
+            {showChart && (
+                <Suspense fallback={<p>Loading chart...</p>}>
+                    <SalesChart />
+                </Suspense>
+            )}
+        </div>
+    );
+}
+```
+
+- **`import("./SalesChart.jsx")`** is a **dynamic import**: it returns a promise, and the bundler (Vite, webpack) puts that file in a **separate chunk**.
+- **`lazy`** turns it into a component. Nothing downloads until `<SalesChart />` renders the first time. After that, React reuses the loaded code.
+- **`<Suspense>`** shows its **`fallback`** while the code is loading. One `Suspense` can cover several lazy components.
+- `lazy` expects a **default export**. For a named one: `lazy(() => import("./SalesChart.jsx").then((module) => ({ default: module.SalesChart })))`.
+- Call `lazy` at the **top level** of the file. Inside a component, every render makes a new lazy component, so the fallback shows again on every re-render.
+- If the download fails, the error goes to the nearest [error boundary](../patterns/error-boundaries.mdx).
+
+The most common place to split is **per page**: each route loads when the user visits it. See [Routing with React Router](../ecosystem/routing.mdx).
+
+## The React Compiler
+
+The **React Compiler** is a build-time tool, the `babel-plugin-react-compiler` package, that **adds memoization for you**: it works out what each component depends on, and skips work that doesn't need redoing, as hand-written `memo`, `useMemo` and `useCallback` would. Its first **stable** release, **1.0**, came out in **October 2025**. You turn it on yourself; in Next.js, that's `reactCompiler: true` in `next.config`. It relies on the code following the **Rules of React**: components must be pure, and hooks must follow the [Rules of Hooks](../hooks/rules-of-hooks.mdx).
+
+## Common mistakes
+
+- **Optimizing without measuring.** Most re-renders are cheap. Use the Profiler first.
+- **Measuring in development mode.** It's slower on purpose. Check a production build.
+- **Rendering thousands of rows at once.** Virtualize the list, or load it in pages.
+- **A request on every key press.** Debounce it.
+- **Calling `lazy` inside a component.** Call it once, at the top level of the file.
+
+## In the interview
+
+**Likely question:** "How would you make a slow React app faster?"
+
+> "First I measure with the React DevTools Profiler, on a production build with profiling turned on, to see which components render, how often, and how long they take. Then I fix the real cause. For needless re-renders, I move state down closer to where it's used, or wrap the child in `React.memo` and keep its props stable with `useCallback` and `useMemo`. For long lists I use virtualization, so only the visible rows are in the DOM, and for search inputs I debounce the expensive work. For a slow first load, I split the bundle with `React.lazy` and `Suspense`, usually per route."
+
+**Likely follow-up:** "How do `React.lazy` and `Suspense` work together?"
+
+**Answer:** "`lazy` takes a function that returns a dynamic `import()`, so the component's code is only downloaded the first time it renders. While it's loading, the nearest `Suspense` above it shows its `fallback`, like a spinner. When the code arrives, React renders the real component. If the download fails, the nearest error boundary catches it."
+
+**Another follow-up:** "With the React Compiler, do we still need `useMemo` and `useCallback`?"
+
+**Answer:** "Much less. The compiler adds memoization automatically at build time, as long as the code follows the Rules of React. They're still useful as an escape hatch when I need exact control, like keeping an effect dependency stable, and most existing code uses them, so I still need to understand them."
+
+<Callout title="Remember this" type="success">
+  - **Measure first** with the **React DevTools Profiler**, on a **production build** with profiling turned on.
+  - Needless re-renders → **move state down**, then **`React.memo`** with stable props from **`useCallback`** and **`useMemo`**.
+  - Long lists → **virtualization**: render only the **visible rows** (react-window, TanStack Virtual).
+  - Slow work on every key press → **debounce**: run it once the user **stops typing**.
+  - Big bundle → **`lazy(() => import("./Page.jsx"))`** inside **`<Suspense fallback>`**, usually **per route**. Call `lazy` at the **top level**.
+  - The **React Compiler** (stable **1.0** since **October 2025**) adds memoization **automatically** at build time.
+</Callout>

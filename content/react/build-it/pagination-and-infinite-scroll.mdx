@@ -1,10 +1,206 @@
 ---
 title: "Pagination and Infinite Scroll"
-description: "Loading a long list in pages."
+description: "Two ways to show a long list a piece at a time: page buttons, and loading more as the user scrolls."
 icon: ChevronsDown
-planned: true
 ---
 
-- Page numbers
-- Load more
-- IntersectionObserver
+## The task
+
+Interviewers ask for one or the other, often as part 1 and part 2.
+
+> "Part 1: show 23 products, 5 per page, with page buttons. Part 2: instead of pages, load 10 more products from the server each time the user scrolls to the bottom."
+
+- **Pagination:** Previous and Next buttons, disabled on the first and last page, and a button for each page number, with the current page marked.
+- **Infinite scroll:** load the first page, then the next one when the user reaches the **bottom** of the list.
+- Show **Loading...** while a page is on its way, and never load the same page twice.
+- **Stop** at the end, and say there's nothing more.
+
+## Plan
+
+- **Pagination:** the only state is **`page`**. The number of pages and the items to show are **derived**: work them out from `items` and `page` on every render.
+- **Infinite scroll:** state is `items` (everything loaded so far), `page`, `hasMore` and `isLoading`. Put an empty `<div>` after the list, called a **sentinel**. An **`IntersectionObserver`** (a browser API that tells you when an element comes on screen) watches it. Sentinel on screen = the user reached the bottom = load the next page.
+
+## The code
+
+### Part 1: Pagination
+
+```jsx
+import { useState } from "react";
+
+const PAGE_SIZE = 5;
+
+function PagedList({ items }) {
+    const [page, setPage] = useState(1);
+
+    // Derived: worked out on every render. An empty list still has one page.
+    const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+    const start = (page - 1) * PAGE_SIZE;
+    const pageItems = items.slice(start, start + PAGE_SIZE);
+
+    const pageNumbers = [];
+    for (let number = 1; number <= totalPages; number++) {
+        pageNumbers.push(number);
+    }
+
+    return (
+        <div>
+            <ul>
+                {pageItems.map((item) => (
+                    <li key={item.id}>{item.name}</li>
+                ))}
+            </ul>
+
+            <nav aria-label="Pages">
+                <button onClick={() => setPage(page - 1)} disabled={page === 1}>
+                    Previous
+                </button>
+                {pageNumbers.map((number) => (
+                    <button
+                        key={number}
+                        aria-current={number === page ? "page" : undefined}
+                        onClick={() => setPage(number)}
+                    >
+                        {number}
+                    </button>
+                ))}
+                <button onClick={() => setPage(page + 1)} disabled={page === totalPages}>
+                    Next
+                </button>
+            </nav>
+        </div>
+    );
+}
+
+// 23 fake products to page through.
+const products = [];
+for (let id = 1; id <= 23; id++) {
+    products.push({ id: id, name: "Product " + id });
+}
+
+function App() {
+    return <PagedList items={products} />;
+}
+```
+
+### Part 2: Infinite scroll
+
+```jsx
+import { useEffect, useRef, useState } from "react";
+
+// A fake server with 23 products. Each call returns one page of 10.
+function fetchProducts(page) {
+    const pageSize = 10;
+    const total = 23;
+    return new Promise((resolve) => {
+        setTimeout(() => {
+            const start = (page - 1) * pageSize;
+            const end = Math.min(start + pageSize, total);
+            const items = [];
+            for (let id = start + 1; id <= end; id++) {
+                items.push({ id: id, name: "Product " + id });
+            }
+            resolve({ items: items, hasMore: end < total });
+        }, 500);
+    });
+}
+
+function InfiniteList() {
+    const [items, setItems] = useState([]);
+    const [page, setPage] = useState(1);
+    const [hasMore, setHasMore] = useState(true);
+    const [isLoading, setIsLoading] = useState(true);
+    const sentinelRef = useRef(null);
+
+    // 1. Load a page each time `page` changes.
+    useEffect(() => {
+        let ignore = false;
+
+        async function loadPage() {
+            const data = await fetchProducts(page);
+            if (ignore) {
+                return;
+            }
+            setItems((current) => [...current, ...data.items]);
+            setHasMore(data.hasMore);
+            setIsLoading(false);
+        }
+
+        loadPage();
+
+        return () => {
+            ignore = true;
+        };
+    }, [page]);
+
+    // 2. Watch the sentinel. When it comes on screen, ask for the next page.
+    useEffect(() => {
+        // While a page is loading, or when there's nothing left, don't watch.
+        if (isLoading || !hasMore) {
+            return;
+        }
+
+        const observer = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting) {
+                setIsLoading(true);
+                setPage((current) => current + 1);
+            }
+        });
+        observer.observe(sentinelRef.current);
+
+        return () => {
+            observer.disconnect();
+        };
+    }, [isLoading, hasMore]);
+
+    return (
+        <div>
+            <ul>
+                {items.map((item) => (
+                    <li key={item.id}>{item.name}</li>
+                ))}
+            </ul>
+            {isLoading && <p>Loading...</p>}
+            {!hasMore && <p>No more products.</p>}
+            <div ref={sentinelRef} />
+        </div>
+    );
+}
+
+function App() {
+    return <InfiniteList />;
+}
+```
+
+## How it works
+
+- **Pagination is just a slice.** `page` 2 with 5 per page is `items.slice(5, 10)`. The page count, the slice and the page numbers are plain variables, not state.
+- **The end buttons disable themselves:** `disabled={page === 1}` and `disabled={page === totalPages}`. A disabled button can't be clicked, so `page` never leaves the range.
+- **A Load more button** would do `setIsLoading(true)` and `setPage(page + 1)` on click. Infinite scroll is the same thing, except the **observer** "clicks" it when the sentinel comes on screen.
+- **Effect 1 loads, effect 2 watches.** Changing `page` makes effect 1 load that page and **add** it to the end, with the updater form `setItems((current) => [...current, ...data.items])`.
+- **No double loads, and a stop at the end:** effect 2 only creates an observer while nothing is loading and `hasMore` is true. The cleanup **disconnects** it. A new observer reports straight away if the sentinel is already on screen, so a first page that doesn't fill the screen loads the next one by itself.
+- **The `ignore` flag** matters even here: in development, Strict Mode runs effect 1 twice on mount, and without the flag page 1 would be added twice (and the keys would clash). See [useEffect](../hooks/use-effect.mdx).
+
+## What interviewers look for
+
+- **Only `page` in state** for pagination. Storing `pageItems` or `totalPages` in state is derived state.
+- **Boundaries:** Previous disabled on page 1, Next on the last page, an empty list handled, and `aria-current="page"` on the current page button.
+- **Resetting to page 1** when the list changes (a new search or filter): set the page in the same handler that changes the filter, or give the list a `key` so it starts over.
+- **No duplicate requests or items:** a guard while loading, the `ignore` flag, and unique `key`s.
+- **Cleanup:** `observer.disconnect()` in the effect's cleanup, and no observer once `hasMore` is false.
+- **Why `IntersectionObserver`** and not a scroll listener: a scroll listener runs again and again while the user scrolls, and needs your own math with `scrollTop` and heights. The observer tells you only when the sentinel comes on screen or leaves it.
+
+## Likely follow-ups
+
+- **Load before the user hits the bottom:** give the observer a margin, `new IntersectionObserver(callback, { rootMargin: "200px" })`, so it fires 200 px early.
+- **Keep the page after a refresh or Back:** keep `page` in the URL (`?page=3`) with `useSearchParams` instead of `useState`. See [Routing](../ecosystem/routing.mdx).
+- **Thousands of rows:** the DOM gets slow. Use **virtualization**: render only the rows on screen, with a library like TanStack Virtual or react-window.
+- **Server-side pages:** send `?page=2&limit=10` (or a **cursor**, the id of the last item) and let the server return just that page. [TanStack Query](../data-and-state/tanstack-query.mdx)'s `useInfiniteQuery` gives you `fetchNextPage` and `hasNextPage`.
+
+<Callout title="Remember this" type="success">
+  - **Pagination:** only **`page`** is state. `totalPages`, the **`slice`** and the page numbers are derived.
+  - **Previous and Next** are **disabled** at the ends. Mark the current page with **`aria-current="page"`**.
+  - **Infinite scroll:** an empty **sentinel** `<div>` after the list, watched by an **`IntersectionObserver`**. On screen → `setPage(current + 1)`.
+  - Load in an effect on **`[page]`**, **append** with the updater form, and drop late answers with an **`ignore`** flag.
+  - Watch only while **not loading** and **`hasMore`**. **`observer.disconnect()`** in the cleanup.
+  - Very long lists → **virtualization**. Start loading early → **`rootMargin`**.
+</Callout>

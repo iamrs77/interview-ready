@@ -1,11 +1,138 @@
 ---
 title: "Fetching Data"
-description: "Loading data from an API the right way."
+description: "Loading data from an API in an effect, with loading and error states, and without race conditions."
 icon: CloudDownload
-planned: true
 ---
 
-- Fetching in an effect
-- Loading and error states
-- Race conditions and AbortController
-- Why data libraries exist
+## The idea
+
+Data from an API **arrives later**. So a component that fetches has three things it can show: a **loading** message, an **error**, or the **data**. The request usually starts in an effect, because the component needs the data **because it's on the screen**, not because the user clicked something.
+
+Think of ordering at a **restaurant**. First the waiter says "it's coming" (loading). Then the dish arrives (data), or the kitchen says it's sold out (error). And if you change your order, you don't want the first dish served to you when it finally comes out.
+
+How effects, cleanup and the dependency array work is on the [useEffect](../hooks/use-effect.mdx) page. This page is about the fetching itself.
+
+## Fetching in an effect
+
+```jsx
+import { useState, useEffect } from "react";
+
+function UserProfile({ userId }) {
+    const [user, setUser] = useState(null);
+    const [error, setError] = useState(null);
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        const controller = new AbortController();
+
+        async function loadUser() {
+            setIsLoading(true);
+            setError(null);
+
+            try {
+                const response = await fetch("/api/users/" + userId, {
+                    signal: controller.signal,
+                });
+
+                if (!response.ok) {
+                    throw new Error("Request failed with status " + response.status);
+                }
+
+                const data = await response.json();
+                setUser(data);
+                setIsLoading(false);
+            } catch (err) {
+                // Cancelled on purpose by the cleanup: not a real error.
+                if (err.name === "AbortError") {
+                    return;
+                }
+                setError(err.message);
+                setIsLoading(false);
+            }
+        }
+
+        loadUser();
+
+        // Cleanup: cancel this request when userId changes or the component is removed.
+        return () => {
+            controller.abort();
+        };
+    }, [userId]);
+
+    if (isLoading) {
+        return <p>Loading...</p>;
+    }
+
+    if (error) {
+        return <p>Something went wrong: {error}</p>;
+    }
+
+    return <h1>{user.name}</h1>;
+}
+```
+
+- **Three pieces of state**: the data, the error, and whether it's loading. Each render shows exactly one of them.
+- **`fetch` doesn't fail on a 404 or a 500.** Its promise rejects only when there's no answer at all, like no network. So check **`response.ok`** yourself, and throw.
+- **Start each request fresh.** `setIsLoading(true)` and `setError(null)` at the start, so switching users doesn't keep showing the last user's error.
+- **`userId` is in the dependency array**, so a new id starts a new request.
+
+## Race conditions
+
+Ana opens user 1, then quickly clicks user 2. Two requests are now on their way, and the network doesn't promise they come back in order:
+
+| Step | What happens |
+| --- | --- |
+| 1 | The request for user 1 starts. |
+| 2 | Ana clicks user 2. The request for user 2 starts. |
+| 3 | User 2's answer arrives. The page shows user 2. |
+| 4 | User 1's answer arrives **late**. Without a fix, user 2's page now shows **user 1**. |
+
+This is a **race condition**: the result depends on which request finishes first. The fix is the **cleanup**. When `userId` changes, React runs the old effect's cleanup **before** the new effect starts:
+
+- **`AbortController`** cancels the old request. `controller.abort()` makes the old `fetch` reject with an error named **`AbortError`**, which the `catch` skips. The browser also stops downloading an answer nobody needs.
+- An **ignore flag**, shown on the [useEffect](../hooks/use-effect.mdx) page, fixes the same race: the old request finishes, but its answer is thrown away. Use it when the request can't be cancelled, like a function that doesn't take a `signal`.
+
+In development, **Strict Mode** runs the effect setup, cleanup, setup. So you see **two requests** in the Network tab, and the first one is cancelled. That's expected. Production sends one.
+
+## Why data libraries exist
+
+The effect above works, but every real app soon needs more:
+
+- **No cache.** Leave the page and come back, and it loads again from zero, with a spinner.
+- **No sharing.** Two components that need the same user send two requests.
+- **No refetching.** The data goes out of date while the tab sits open.
+- **No retries** when the network fails for a moment.
+- **The same code again** for every request: three states, a try/catch, a cleanup.
+
+Libraries like **TanStack Query** (also called React Query) and **RTK Query** do all of this behind one hook. See [Server State with TanStack Query](./tanstack-query.mdx). Frameworks like Next.js can also fetch on the server, before the page reaches the browser. See [Server Components](../modern-react/server-components.mdx).
+
+## Common mistakes
+
+- **Making the effect function `async`.** It returns a promise instead of a cleanup. Write an async function **inside** the effect and call it.
+- **Not checking `response.ok`.** A 404 or a 500 is treated as success. Check it and throw.
+- **No cleanup.** A slow answer for the old id overwrites the new one. Abort the request, or ignore its answer.
+- **Showing `AbortError` as an error.** The screen flashes "Something went wrong" every time the user switches. Skip it in the `catch`.
+- **Leaving `userId` out of the dependency array.** The page keeps showing the first user. Trust the `exhaustive-deps` lint rule.
+
+## In the interview
+
+**Likely question:** "How would you fetch data in a React component?"
+
+> "I keep three pieces of state: the data, an error, and a loading flag. In a `useEffect` that depends on the inputs, like the user id, I call an async function that fetches, checks `response.ok`, and stores either the data or the error. In the cleanup I abort the request with an `AbortController`, so a slow answer for an old id can't overwrite the new one. The component shows a loading message, the error, or the data. In a real app I'd use TanStack Query instead, which adds caching, retries and refetching."
+
+**Likely follow-up:** "What's a race condition when fetching, and how do you prevent it?"
+
+**Answer:** "When the id changes quickly, two requests are on their way, and the older one can finish last, so the screen shows the wrong data. The effect's cleanup runs before the next effect, so I fix it there: I either abort the old request with an `AbortController`, or set an ignore flag so its answer is thrown away."
+
+**Another follow-up:** "Why is my API called twice in development?"
+
+**Answer:** "Strict Mode runs every effect setup, cleanup, setup in development, to check that the cleanup is right. With an `AbortController` in the cleanup, the first request is cancelled. It doesn't happen in production, so I don't try to block it."
+
+<Callout title="Remember this" type="success">
+  - Fetching needs **three states**: **loading**, **error** and **data**. Show exactly one.
+  - Fetch in **`useEffect`** with the inputs, like **`[userId]`**, as dependencies. The effect function **can't be async**: put an async function inside.
+  - **`fetch` doesn't reject on 404 or 500**. Check **`response.ok`** and throw.
+  - **Race condition**: an old, slow answer overwrites a newer one. Fix it in the **cleanup**: **`controller.abort()`**, or an **ignore flag**. Skip the **`AbortError`** in the `catch`.
+  - **Strict Mode** in development: **two requests**, the first cancelled. Production sends one.
+  - Real apps use **TanStack Query** or **RTK Query** for caching, sharing, refetching and retries.
+</Callout>

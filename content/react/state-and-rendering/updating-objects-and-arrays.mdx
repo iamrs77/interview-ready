@@ -1,11 +1,149 @@
 ---
 title: "Updating Objects and Arrays"
-description: "Changing state without mutating it."
+description: "Changing objects and arrays in state by replacing them with new copies, never by changing them in place."
 icon: Layers
-planned: true
 ---
 
-- Why mutating state doesn't re-render
-- Copying objects with spread
-- Adding, removing and changing array items
-- Nested updates and Immer
+## The idea
+
+Objects and arrays in state are **read-only**. To change one, you make a **new copy** with the change, and pass the copy to the setter. Changing the old one in place is called **mutating**, and React won't notice it.
+
+Think of a **printed photo**. To get a different picture, you don't draw on the old print: you print a new one. React tells "changed" from "not changed" by checking whether it got a **new print**.
+
+## Why mutating doesn't re-render
+
+When you call a setter, React compares the new value with the old one using `Object.is`. For objects and arrays, that asks **"is it the very same object?"**, not "is the content the same?".
+
+```jsx
+// Wrong: the same array, so React sees no change and doesn't re-render.
+todos.push(newTodo);
+setTodos(todos);
+```
+
+```jsx
+// Right: a new array with the new item at the end.
+setTodos([...todos, newTodo]);
+```
+
+Mutating is worse than "nothing happens". The change is still inside the object, so it **appears later**, when something else re-renders the component. That makes the bug hard to trace. `React.memo` and effect dependencies use the same "same object?" check, so they miss mutations too.
+
+## Copying objects with spread
+
+The **spread syntax** `...` copies all the fields of an object into a new one. List the fields that change **after** it:
+
+```jsx
+const [user, setUser] = useState({ name: "Ana", email: "ana@example.com" });
+
+function handleRename() {
+    const newUser = { ...user, name: "Ben" };
+    console.log(newUser); // { name: 'Ben', email: 'ana@example.com' }
+    setUser(newUser);
+}
+```
+
+The order matters: `{ name: "Ben", ...user }` puts the old name back on top. And the `useState` setter **replaces** the value; it doesn't merge: `setUser({ name: "Ben" })` loses the `email`.
+
+## Nested objects: copy every level
+
+Spread is **shallow**: it copies only the top level. A nested object inside is still **shared** with the old state. To change a nested field, copy **each level** on the way down:
+
+```jsx
+const [user, setUser] = useState({
+    name: "Ana",
+    address: { city: "Paris", zip: "75001" },
+});
+
+function moveToLondon() {
+    setUser({
+        ...user,
+        address: {
+            ...user.address,
+            city: "London",
+        },
+    });
+}
+```
+
+A trap: `const copy = { ...user }; copy.address.city = "London";` looks safe, but `copy.address` and `user.address` are the **same object**. That still mutates the old state.
+
+## Arrays: use methods that return a new array
+
+| To... | Avoid (changes the array) | Use (returns a new array) |
+| --- | --- | --- |
+| Add | `push`, `unshift` | `[...todos, newTodo]`, `[newTodo, ...todos]` |
+| Remove | `pop`, `shift`, `splice` | `filter` |
+| Change an item | `todos[0] = ...`, `splice` | `map` |
+| Insert in the middle | `splice` | `toSpliced` |
+| Sort or reverse | `sort`, `reverse` | `toSorted`, `toReversed` |
+
+The three things you'll write most often, on a todo list:
+
+```jsx
+function addTodo(text) {
+    const newTodo = { id: crypto.randomUUID(), text: text, done: false };
+    setTodos([...todos, newTodo]);
+}
+
+function deleteTodo(id) {
+    setTodos(todos.filter((todo) => todo.id !== id));
+}
+
+function toggleTodo(id) {
+    const newTodos = todos.map((todo) => {
+        if (todo.id !== id) {
+            return todo;
+        }
+        // A new object for the item that changes.
+        return { ...todo, done: !todo.done };
+    });
+    setTodos(newTodos);
+}
+```
+
+`map` gives a new array, but the items inside are the **same objects**. So the item you change must be a **new object** too: never `todo.done = true` inside the `map`.
+
+## Deep nesting: Immer
+
+With deeply nested state, the spreads get long. **Immer** is a small library that lets you write normal "mutating" code on a **draft**, and builds the new object for you. The old state is never touched. Redux Toolkit uses it inside `createSlice`: see [Redux and Redux Toolkit](../data-and-state/redux.mdx).
+
+```jsx
+import { produce } from "immer";
+
+function moveToLondon() {
+    const newUser = produce(user, (draft) => {
+        draft.address.city = "London";
+    });
+    setUser(newUser);
+}
+```
+
+## Common mistakes
+
+- **`push`, `splice` or `sort` on a state array.** They change the array in place. Use spread, `filter`, `map` or `toSorted`.
+- **Copying only the top level** of nested state, then changing a nested field. Copy every level you change, or use Immer.
+- **Changing an item inside `map`.** `todo.done = true; return todo;` makes a new array but mutates the old item. Return `{ ...todo, done: true }`.
+- **Forgetting the spread.** `setUser({ name: "Ben" })` replaces the whole object, and `email` is gone.
+- **Sorting during render with `todos.sort()`.** It reorders the state array itself. Use `todos.toSorted()`.
+
+## In the interview
+
+**Likely question:** "Why shouldn't you mutate state directly in React?"
+
+> "React decides whether state changed by comparing the old and new values with `Object.is`. For objects and arrays, that only checks if it's the same object. If I mutate an object and pass the same object to the setter, React sees no change and doesn't re-render. `React.memo` and effect dependencies use the same check, so they miss the change too. So I treat state as read-only and always pass a new object or array, made with spread, `map` or `filter`."
+
+**Likely follow-up:** "How do you update a nested object in state?"
+
+**Answer:** "I copy every level on the path to the change: `{ ...user, address: { ...user.address, city: "London" } }`. Spread is shallow, so copying only the top level would still share the nested object, and changing it would mutate the old state. For deep structures, Immer lets me change a draft and builds the new object for me."
+
+**Another follow-up:** "How do you remove or update one item of an array in state?"
+
+**Answer:** "To remove, I use `filter`, which returns a new array without the item. To update, I use `map`, returning a new object for the item that changes and the same object for the rest. I avoid `push`, `splice`, `sort` and `reverse`, which change the array in place; for sorting I use `toSorted`."
+
+<Callout title="Remember this" type="success">
+  - **Never mutate state.** React compares with **`Object.is`**: same object → **no re-render**.
+  - Objects: **`{ ...user, name: "Ben" }`**. Spread is **shallow**: copy **every level** you change.
+  - Arrays: add with **`[...todos, item]`**, remove with **`filter`**, change with **`map`**, sort with **`toSorted`**.
+  - Avoid **`push`, `splice`, `sort`, `reverse`** and `todos[i] = x` on state.
+  - The `useState` setter **replaces** the value; it **doesn't merge**.
+  - Deep nesting → **Immer**: "mutate" a draft, get a new object.
+</Callout>

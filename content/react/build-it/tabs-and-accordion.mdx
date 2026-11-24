@@ -1,10 +1,178 @@
 ---
 title: "Tabs and Accordion"
-description: "Show one panel at a time."
+description: "Tabs that show one panel at a time with the right ARIA roles, and an accordion that opens one section or many."
 icon: PanelsTopLeft
-planned: true
 ---
 
-- Tabs
-- Accordion
-- Accessibility basics
+## The task
+
+> "Build a Tabs component: clicking a tab shows its panel. Then build an Accordion: clicking a heading opens or closes its section."
+
+- **Tabs:** a row of tabs, with the first one active at the start.
+- Clicking a tab shows its panel and hides the others.
+- Screen readers must announce them as tabs, and know which one is selected.
+- **Accordion:** clicking a heading opens its section. Clicking it again closes it.
+- Only one section is open at a time.
+- Both take their content as data, so they can be reused.
+
+## Plan
+
+- **Tabs state:** one number, `activeIndex`. Which tab looks selected and which panel shows are **derived** from it, not stored.
+- **Accordion state:** `openIndex`: the open section's index, or `null` when all are closed.
+- **Why one number:** it can only hold one value, so "two tabs active at once" is impossible. To allow many open sections, you need a `Set` instead (see the follow-ups).
+- **Data:** both take an array of `{ id, title, content }`.
+- **Components:** `Tabs`, `Accordion`, and an `App` that uses both.
+
+## The code
+
+The tabs. Each tab is linked to its panel with ids, so screen readers know which tab controls which panel:
+
+```jsx
+import { useState, useId } from "react";
+
+function Tabs({ tabs }) {
+    const [activeIndex, setActiveIndex] = useState(0);
+    // A unique prefix, so the ids don't clash when a page has two Tabs.
+    const baseId = useId();
+
+    return (
+        <div>
+            <div role="tablist">
+                {tabs.map((tab, index) => (
+                    <button
+                        key={tab.id}
+                        type="button"
+                        role="tab"
+                        id={baseId + "-tab-" + index}
+                        aria-selected={index === activeIndex}
+                        aria-controls={baseId + "-panel-" + index}
+                        onClick={() => setActiveIndex(index)}
+                    >
+                        {tab.title}
+                    </button>
+                ))}
+            </div>
+            {tabs.map((tab, index) => (
+                <div
+                    key={tab.id}
+                    role="tabpanel"
+                    id={baseId + "-panel-" + index}
+                    aria-labelledby={baseId + "-tab-" + index}
+                    hidden={index !== activeIndex}
+                >
+                    {tab.content}
+                </div>
+            ))}
+        </div>
+    );
+}
+```
+
+The accordion, and an `App` that shows both:
+
+```jsx
+function Accordion({ items }) {
+    // The index of the open section, or null when all are closed.
+    const [openIndex, setOpenIndex] = useState(null);
+    const baseId = useId();
+
+    function handleToggle(index) {
+        if (openIndex === index) {
+            setOpenIndex(null);
+        } else {
+            setOpenIndex(index);
+        }
+    }
+
+    return (
+        <div>
+            {items.map((item, index) => {
+                const isOpen = index === openIndex;
+
+                return (
+                    <div key={item.id}>
+                        <h3>
+                            <button
+                                type="button"
+                                aria-expanded={isOpen}
+                                aria-controls={baseId + "-section-" + index}
+                                onClick={() => handleToggle(index)}
+                            >
+                                {item.title}
+                            </button>
+                        </h3>
+                        <div id={baseId + "-section-" + index} hidden={!isOpen}>
+                            {item.content}
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+const accountTabs = [
+    { id: "profile", title: "Profile", content: "Ana Lopez, ana@example.com" },
+    { id: "orders", title: "Orders", content: "3 orders this month" },
+    { id: "settings", title: "Settings", content: "Email and password" },
+];
+
+const faqs = [
+    { id: "shipping", title: "How long is shipping?", content: "3 to 5 days." },
+    { id: "returns", title: "Can I return a product?", content: "Yes, within 30 days." },
+];
+
+function App() {
+    return (
+        <div>
+            <Tabs tabs={accountTabs} />
+            <Accordion items={faqs} />
+        </div>
+    );
+}
+```
+
+## How it works
+
+- **One number drives everything.** Clicking a tab sets `activeIndex`. On the next render, each tab works out `aria-selected` and each panel works out `hidden` from it.
+- **The ARIA roles:** `role="tablist"` wraps the tabs, each tab has `role="tab"` and `aria-selected`, and each panel has `role="tabpanel"`. `aria-controls` points from a tab to its panel, and `aria-labelledby` points back.
+- **`useId`** gives each component a unique id prefix, so the ids still match up when the page shows two `Tabs`.
+- **Toggling the accordion:** clicking the open section sets `null`, so it closes. Clicking another one sets its index, and the old one closes by itself, because one number can't point at two sections.
+- **`aria-expanded`** on the accordion button tells screen readers whether its section is open.
+
+## What interviewers look for
+
+- **Real `<button type="button">` elements**, not `<div onClick>`. Buttons get Tab, Enter and Space for free.
+- **The right roles and attributes:** `tablist`, `tab` with `aria-selected`, `tabpanel`, and `aria-expanded` on accordion buttons.
+- **Minimal state.** One index, not an array of booleans like `[true, false, false]` that can get out of sync.
+- **Keys from the data** (`tab.id`), not the index.
+- **Hidden panels stay mounted.** With `hidden`, a half-filled form in another tab keeps its text. Showing only the active panel with `{index === activeIndex && ...}` renders less, but a panel's state is lost when you switch away.
+
+## Likely follow-ups
+
+- **Many sections open at once:** Store a `Set` of open indexes, and check `openIndexes.has(index)`. The tradeoff: an index makes "one at a time" automatic, while a Set allows any number but must be **copied** on every change. Changing the old Set in place and passing it back to the setter doesn't re-render: it's the same object.
+
+```jsx
+const [openIndexes, setOpenIndexes] = useState(new Set());
+
+function handleToggle(index) {
+    const next = new Set(openIndexes);
+    if (next.has(index)) {
+        next.delete(index);
+    } else {
+        next.add(index);
+    }
+    setOpenIndexes(next);
+}
+```
+
+- **Arrow keys between tabs:** Add `onKeyDown` to the tablist: ArrowRight goes to `(activeIndex + 1) % tabs.length`, ArrowLeft to the one before, and focus the new tab through a ref. Give only the active tab `tabIndex={0}` and the others `-1`, so one press of Tab leaves the row of tabs.
+- **The parent chooses the tab:** Make it controlled: take `activeIndex` and `onChange` as props instead of keeping the state inside, like an `<input value onChange>`.
+
+<Callout title="Remember this" type="success">
+  - **Tabs = one `activeIndex` in state.** The selected tab and the visible panel are **derived** from it.
+  - Roles: **`tablist`**, **`tab`** with **`aria-selected`**, **`tabpanel`**. Link them with `aria-controls` and `aria-labelledby`, using **`useId`** for the ids.
+  - **One section open:** `openIndex`, or `null` for none. Clicking the open one sets `null`.
+  - **Many open:** a **`Set`** of indexes. Copy it (`new Set(old)`) before changing, or React won't re-render.
+  - Use **real buttons**, **`aria-expanded`** on accordion headings, and **ids as keys**.
+</Callout>

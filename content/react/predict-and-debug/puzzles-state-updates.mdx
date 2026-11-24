@@ -1,10 +1,218 @@
 ---
 title: "Puzzles: State Updates"
-description: "What does the screen show after these updates?"
+description: "What does the screen show, and what logs, after these state updates?"
 icon: ToggleLeft
-planned: true
 ---
 
-- Calling setCount three times
-- The updater function
-- State after an await
+## How to solve these
+
+Two rules solve almost every puzzle here. **State is a snapshot**: `count` is a constant for the whole render, and a setter only changes what `useState` returns on the **next** render. And React **batches**: it queues the updates and renders **once**, after your code finishes. The puzzles run without Strict Mode. See [State with useState](../state-and-rendering/use-state.mdx).
+
+## The puzzles
+
+### 1. setCount three times
+
+```jsx
+function Counter() {
+    const [count, setCount] = useState(0);
+
+    function handleClick() {
+        setCount(count + 1);
+        setCount(count + 1);
+        setCount(count + 1);
+    }
+
+    return <button onClick={handleClick}>{count}</button>;
+}
+```
+
+**Question:** Click the button once. What does it show?
+
+<Accordions>
+<Accordion title="Answer">
+
+**1**, not 3.
+
+- In this render, `count` is `0`, and it stays `0` until the next render. So all three lines say `setCount(0 + 1)`.
+- Setting 1 three times is the same as setting it once.
+
+**The fix:** use the updater function, as in puzzle 2.
+
+</Accordion>
+</Accordions>
+
+### 2. The updater function
+
+```jsx
+function handleClick() {
+    setCount((current) => current + 1);
+    setCount((current) => current + 1);
+    setCount((current) => current + 1);
+}
+```
+
+**Question:** The same counter, with this click handler. Click once. What does it show?
+
+<Accordions>
+<Accordion title="Answer">
+
+**3.**
+
+- React puts the three functions in a queue. On the next render it runs them in order, each with the result of the one before: 0 → 1 → 2 → 3.
+- Use an updater whenever the new state is worked out from the old one.
+
+</Accordion>
+</Accordions>
+
+### 3. Logging right after setting
+
+```jsx
+function Counter() {
+    const [count, setCount] = useState(0);
+
+    function handleClick() {
+        setCount(count + 1);
+        console.log("now:", count);
+
+        setTimeout(() => {
+            console.log("1 second later:", count);
+        }, 1000);
+    }
+
+    return <button onClick={handleClick}>{count}</button>;
+}
+```
+
+**Question:** Click once. What do the two logs print, and what does the button show?
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+now: 0
+1 second later: 0
+```
+
+The button shows **1**.
+
+- The setter doesn't change `count`. It asks React for a new render, where `useState` returns `1`.
+- The timeout's function was made during the render where `count` is `0`, so it still sees `0`, even though the screen shows 1 by then. Code after an `await` sees the old value too.
+
+**The fix:** if you need the new value, keep it in a variable first.
+
+```jsx
+function handleClick() {
+    const nextCount = count + 1;
+    setCount(nextCount);
+    console.log("now:", nextCount); // now: 1
+}
+```
+
+</Accordion>
+</Accordions>
+
+### 4. Mixing a value and updaters
+
+```jsx
+function handleClick() {
+    setCount((current) => current + 1);
+    setCount(count + 5);
+    setCount((current) => current + 1);
+}
+```
+
+**Question:** The count starts at 0. Click once. What does the button show?
+
+<Accordions>
+<Accordion title="Answer">
+
+**6.** React runs the queue in order:
+
+| Queued | What it means | Result |
+| --- | --- | --- |
+| `(current) => current + 1` | Add 1 to the result so far | 0 + 1 = 1 |
+| `count + 5` | `0 + 5`, so "replace with 5" | 5 |
+| `(current) => current + 1` | Add 1 to the result so far | 5 + 1 = 6 |
+
+- A plain value **replaces** whatever came before it. It's `0 + 5`, because `count` is the snapshot.
+- An updater **builds on** the result just before it.
+
+</Accordion>
+</Accordions>
+
+### 5. Changing an object, then setting it
+
+```jsx
+function Profile() {
+    const [user, setUser] = useState({ name: "Ana" });
+
+    function handleClick() {
+        user.name = "Ben";
+        setUser(user);
+    }
+
+    return <button onClick={handleClick}>{user.name}</button>;
+}
+```
+
+**Question:** Click once. What does the button show?
+
+<Accordions>
+<Accordion title="Answer">
+
+Still **Ana**. The component doesn't re-render.
+
+- `user` is the **same object** as before. React compares the old and new state with `Object.is`, sees no change, and skips the render.
+- The object did change, so the next time something else re-renders this component, "Ben" suddenly appears. That makes this bug confusing.
+
+**The fix:** set a **new** object. See [Updating Objects and Arrays](../state-and-rendering/updating-objects-and-arrays.mdx).
+
+```jsx
+function handleClick() {
+    setUser({ ...user, name: "Ben" });
+}
+```
+
+</Accordion>
+</Accordions>
+
+### 6. Two setters in a setTimeout
+
+```jsx
+function SaveButton() {
+    const [count, setCount] = useState(0);
+    const [isSaved, setIsSaved] = useState(false);
+
+    console.log("render");
+
+    function handleClick() {
+        setTimeout(() => {
+            setCount(count + 1);
+            setIsSaved(true);
+        }, 1000);
+    }
+
+    return <button onClick={handleClick}>Saved {count} times</button>;
+}
+```
+
+**Question:** Click once. How many times does "render" log after the click?
+
+<Accordions>
+<Accordion title="Answer">
+
+**Once.**
+
+- Since React 18, React **batches** updates everywhere: in event handlers, timeouts, promises and after `await`. Both setters run, then React renders once with both changes. This is called **automatic batching**.
+- Before React 18, updates inside a `setTimeout` were not batched, so this logged "render" twice.
+
+</Accordion>
+</Accordions>
+
+<Callout title="Remember this" type="success">
+  - **State is a snapshot**: `setCount(count + 1)` three times adds **1**. The updater `setCount(c => c + 1)` three times adds **3**.
+  - A setter **doesn't change** the variable. A log right after it, in a timeout or after `await` shows the **old** value.
+  - The queue runs in order: a **plain value replaces**, an **updater builds** on the result before it.
+  - Changing an object **in place** and setting it → **no re-render**, because `Object.is` sees the same object. Set a **new** object.
+  - **Automatic batching** (React 18+): several setters in a handler, timeout or promise → **one** render.
+</Callout>

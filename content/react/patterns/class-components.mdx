@@ -1,11 +1,123 @@
 ---
 title: "Class Components and Lifecycle"
-description: "The older way to write components."
+description: "The older way to write components: this.state, setState, lifecycle methods, and how each maps to hooks."
 icon: History
-planned: true
 ---
 
-- Class components
-- this.state and setState
-- Lifecycle methods
-- Mapping them to hooks
+## The idea
+
+Before hooks arrived in **React 16.8**, only **class components** could have state or run code when they appeared on the page. New code uses function components and hooks, but you'll still meet classes in **older codebases**, and [error boundaries](./error-boundaries.mdx) still have to be classes. Interviewers ask how they work and how they map to hooks.
+
+Think of a **manual gearbox**. New cars are automatic, but plenty of manual cars are still on the road, and a good driver knows how to drive one.
+
+## The class syntax
+
+```jsx
+import { Component } from "react";
+
+class Counter extends Component {
+    constructor(props) {
+        super(props);
+        this.state = { count: 0 };
+        this.handleClick = this.handleClick.bind(this);
+    }
+
+    handleClick() {
+        this.setState({ count: this.state.count + 1 });
+    }
+
+    render() {
+        return (
+            <button onClick={this.handleClick}>
+                Clicked {this.state.count} times
+            </button>
+        );
+    }
+}
+```
+
+- The class **extends `Component`**, and **`render()`** returns the JSX.
+- Props are on **`this.props`**. State is **one object** on **`this.state`**, set first in the constructor.
+- **`super(props)`** must come first in the constructor: in JavaScript, a subclass can't use `this` before calling `super`.
+- **`.bind(this)`**: class methods lose `this` when passed as a callback. Without the bind, the click throws `Cannot read properties of undefined (reading 'setState')`. A class field arrow function, `handleClick = () => { ... }`, fixes it too. See [The this Keyword](../../javascript/functions/this-keyword.mdx).
+
+## this.setState
+
+You never change `this.state` directly. You call **`this.setState`**, which re-renders, like a `useState` setter.
+
+**It merges.** You pass only the keys that change, and React **merges** them into the state. The other keys stay:
+
+```jsx
+// this.state is { name: "Ana", age: 29 }
+this.setState({ age: 30 });
+// this.state becomes { name: "Ana", age: 30 }
+```
+
+The merge is **shallow**: a nested object is **replaced**, not merged. A `useState` setter **never** merges; it replaces the whole value.
+
+**The updater form.** `setState` is batched, and `this.state` doesn't change until the next render. So when the new state depends on the old, pass a **function**:
+
+```jsx
+// Adds 3. Three calls with { count: this.state.count + 1 } would add only 1.
+this.setState((prevState) => ({ count: prevState.count + 1 }));
+this.setState((prevState) => ({ count: prevState.count + 1 }));
+this.setState((prevState) => ({ count: prevState.count + 1 }));
+```
+
+To run code **after** the update, pass a callback as the second argument: `this.setState({ count: 5 }, () => console.log(this.state.count))`.
+
+## Lifecycle methods
+
+Every class component goes through three phases. React calls these methods at each step:
+
+| Phase | Methods, in order | Used for |
+| --- | --- | --- |
+| **Mounting** (first time on the page) | `constructor` → `render` → **`componentDidMount`** | Fetching data, timers, subscriptions |
+| **Updating** (new props or state) | **`shouldComponentUpdate`** → `render` → **`componentDidUpdate(prevProps, prevState)`** | Reacting to a change, like a new `userId` |
+| **Unmounting** (removed) | **`componentWillUnmount`** | Cleanup: clear timers, remove listeners |
+
+- **`shouldComponentUpdate(nextProps, nextState)`** returns `false` to **skip** a render. **`PureComponent`** does this for you with a shallow compare of props and state.
+- In `componentDidUpdate`, compare before acting: `if (prevProps.userId !== this.props.userId)`. Calling `setState` there without a check loops until React stops it with a "Maximum update depth exceeded" error.
+- A parent's `componentDidMount` runs **after** its children's: children mount first.
+- `componentWillMount`, `componentWillReceiveProps` and `componentWillUpdate` are old and unsafe. They were renamed with an `UNSAFE_` prefix; don't use them.
+
+## Mapping them to hooks
+
+| Class component | Function component |
+| --- | --- |
+| `this.state` and `this.setState` | **`useState`** (one per value, and no merging) |
+| `this.setState(prev => ...)` | `setCount(prev => ...)` |
+| `componentDidMount` | `useEffect(fn, [])` |
+| `componentDidUpdate` | `useEffect(fn, [a, b])` |
+| `componentWillUnmount` | The **cleanup** function returned by the effect |
+| `shouldComponentUpdate` / `PureComponent` | **`React.memo`** |
+| Instance fields like `this.timerId` | **`useRef`** |
+| `getDerivedStateFromError` / `componentDidCatch` | **No hook**: still a class |
+
+The mapping isn't one to one. One effect often replaces code split over `componentDidMount`, `componentDidUpdate` and `componentWillUnmount`, so think of effects as **"keep in sync with these values"**. See [useEffect](../hooks/use-effect.mdx).
+
+## Common mistakes
+
+- **Changing `this.state` directly**, like `this.state.count = 1`. Nothing re-renders. Call `this.setState`.
+- **Forgetting to bind** a method passed as a handler. `this` is `undefined` when it runs. Bind it in the constructor or use a class field arrow function.
+- **Reading `this.state` right after `setState`.** It's still the old value. Use the updater form, or the callback.
+- **`setState` in `componentDidUpdate` without comparing** props or state first. It loops until React throws "Maximum update depth exceeded".
+- **Forgetting cleanup in `componentWillUnmount`.** Timers and listeners keep running after the component is gone.
+
+## In the interview
+
+**Likely question:** "How do class lifecycle methods map to hooks?"
+
+> "`componentDidMount` becomes `useEffect` with an empty dependency array, `componentDidUpdate` becomes `useEffect` with the values it depends on, and `componentWillUnmount` becomes the cleanup function returned by the effect. State moves to `useState`, instance fields to `useRef`, and `shouldComponentUpdate` or `PureComponent` to `React.memo`. It's not one to one: a single effect usually replaces logic split across three lifecycle methods. The one thing hooks can't do is an error boundary, which still needs a class."
+
+**Likely follow-up:** "How is `this.setState` different from a `useState` setter?"
+
+**Answer:** "`this.setState` merges the object I pass into the existing state, shallowly, so I only pass the keys that change. A `useState` setter replaces the value completely, so for an object I spread the old one myself. Both are batched, and both have an updater form for when the new value depends on the old one. `this.setState` also takes a callback that runs after the update."
+
+<Callout title="Remember this" type="success">
+  - A class **extends `Component`**, has **`render()`**, reads **`this.props`** and **`this.state`**. Call **`super(props)`** first, and **bind** handlers (or use class field arrows).
+  - **`this.setState` merges** (shallowly) into the state; a **`useState` setter replaces**. Use the **updater form** when the new state depends on the old.
+  - Lifecycle: **`componentDidMount`** → **`componentDidUpdate(prevProps, prevState)`** → **`componentWillUnmount`**. Skip renders with **`shouldComponentUpdate`** or **`PureComponent`**.
+  - Hooks: didMount = **`useEffect(fn, [])`**, didUpdate = **`useEffect(fn, [deps])`**, willUnmount = **cleanup**, PureComponent = **`React.memo`**, fields = **`useRef`**.
+  - **Error boundaries** are the one thing that still needs a class.
+</Callout>

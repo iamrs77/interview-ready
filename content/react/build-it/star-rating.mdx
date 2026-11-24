@@ -1,10 +1,102 @@
 ---
 title: "Star Rating"
-description: "Hover and click to rate."
+description: "Five stars with a hover preview, click to set, and labels for screen readers."
 icon: Star
-planned: true
 ---
 
-- Hover preview
-- Click to set
-- Reusable props
+## The task
+
+> "Build a star rating component. It shows 5 stars. Hovering over a star lights it up with all the stars before it, and clicking sets the rating."
+
+- Show 5 stars by default. The number of stars is a prop.
+- Hovering over a star previews it: that star and all before it fill in.
+- When the mouse leaves, the saved rating shows again.
+- Clicking a star sets the rating, and the parent gets the new value.
+- It works with the keyboard and a screen reader.
+
+## Plan
+
+- **Props:** `value` (the rating) and `onChange`. The parent owns the rating, so this is a **controlled** component, like `<input value onChange>`.
+- **State:** only `hoverValue`: the star under the mouse, or `0` when there is none.
+- **Derived:** how many stars to fill. While hovering it's `hoverValue`, otherwise `value`. Not stored as state.
+- **Components:** `StarRating`, and an `App` that keeps the rating in state.
+
+## The code
+
+```jsx
+import { useState } from "react";
+
+function StarRating({ value, onChange, max = 5 }) {
+    // The star under the mouse, or 0 when the mouse isn't over a star.
+    const [hoverValue, setHoverValue] = useState(0);
+
+    // While hovering, preview the hovered star. Otherwise show the rating.
+    const filledCount = hoverValue > 0 ? hoverValue : value;
+
+    // [1, 2, 3, 4, 5] when max is 5.
+    const starValues = [];
+    for (let i = 1; i <= max; i++) {
+        starValues.push(i);
+    }
+
+    return (
+        <div onMouseLeave={() => setHoverValue(0)}>
+            {starValues.map((starValue) => (
+                <button
+                    key={starValue}
+                    type="button"
+                    aria-label={"Rate " + starValue + " out of " + max}
+                    aria-pressed={starValue === value}
+                    onMouseEnter={() => setHoverValue(starValue)}
+                    onClick={() => onChange(starValue)}
+                >
+                    {starValue <= filledCount ? "★" : "☆"}
+                </button>
+            ))}
+        </div>
+    );
+}
+
+function App() {
+    const [rating, setRating] = useState(0);
+
+    return (
+        <div>
+            <StarRating value={rating} onChange={setRating} />
+            <p>Your rating: {rating} out of 5</p>
+        </div>
+    );
+}
+```
+
+Hover over the 4th star: four stars fill in. Move the mouse away: the stars go back to the saved rating, 0. Click the 3rd star: three stars stay filled, and the text says "Your rating: 3 out of 5".
+
+## How it works
+
+- **`filledCount` is worked out on every render**: the hover wins, otherwise the saved rating. Each star is filled if its number is `<=` that count.
+- **`onMouseEnter` on each star** sets the preview. **One `onMouseLeave` on the wrapper** clears it, so the preview ends only when the mouse leaves all the stars, not in the small gaps between them.
+- **Clicking calls `onChange(starValue)`.** `StarRating` doesn't store the rating. The parent does, and passes it back as `value`.
+- **The star number is the key.** The list never changes order, so a number is a stable key.
+
+## What interviewers look for
+
+- **Hover state separate from the rating.** Hovering must not change the saved value. Only a click does.
+- **Derived, not synced.** No third state like `displayValue` kept up to date with an effect: it's one line computed during render.
+- **Real buttons with `type="button"`.** Tab moves between the stars, and Enter or Space picks one. Without `type="button"`, a button inside a `<form>` submits the form.
+- **An `aria-label` on each star.** On its own, "★" tells a screen reader user nothing. "Rate 3 out of 5" does. `aria-pressed` marks the chosen star.
+- **Reusable props:** `max` for the number of stars, and `value` / `onChange`, so two ratings can sit on one page and a form can read the value.
+
+## Likely follow-ups
+
+- **Click the same star again to clear:** In the click handler: if `starValue === value`, call `onChange(0)`, otherwise `onChange(starValue)`.
+- **A read-only rating, for a product list:** Render plain text with one label for the whole thing, and no handlers: `<span role="img" aria-label="Rated 4 out of 5">★★★★☆</span>`.
+- **Radio inputs instead of buttons:** Each star becomes a label holding an `<input type="radio" name="rating">`, hidden with a CSS class (not `display: none`, so it can still take focus). The browser then gives you arrow keys between the stars and announces which one is checked, with no ARIA needed.
+- **Half stars:** Give each star two hit areas. On the 3rd star, the left half is worth 2.5 and the right half 3. Draw a half-filled star for the half values.
+
+<Callout title="Remember this" type="success">
+  - **Controlled:** the parent owns the rating (`value`, `onChange`). The component's only state is **`hoverValue`**.
+  - **Filled stars are derived:** `hoverValue > 0 ? hoverValue : value`, then fill each star whose number is `<=` that.
+  - **`onMouseEnter` on each star, one `onMouseLeave` on the wrapper**, so the gaps don't reset the preview.
+  - **Real `<button type="button">`s** for keyboard support, with an **`aria-label`** like "Rate 3 out of 5".
+  - Clicking the same star to **clear**: `onChange(0)` when `starValue === value`.
+</Callout>

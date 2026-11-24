@@ -1,11 +1,203 @@
 ---
 title: "React with TypeScript"
-description: "Typing props, state, events and hooks."
+description: "Typing props, children, state, refs, events and custom hooks."
 icon: FileType
-planned: true
 ---
 
-- Typing props
-- Typing state and refs
-- Typing events
-- Typing custom hooks
+## The idea
+
+**TypeScript** adds **types** to JavaScript: you say what shape your data has, and the editor checks every use **before the code runs**. In React, you mostly type four things: **props**, **state**, **refs** and **events**. Everything else, TypeScript works out by itself.
+
+Think of a **form with labelled boxes**. A box marked "phone number" won't take letters, and a box marked "required" can't be left empty. Types are those labels for your components: pass the wrong prop, or forget one, and you hear about it right away.
+
+The `React.` types on this page, like `React.ReactNode`, work without importing React.
+
+## Typing props and children
+
+```tsx
+type CardProps = {
+    title: string;
+    // The ? makes it optional.
+    subtitle?: string;
+    // Anything React can show: text, numbers, elements, lists, null.
+    children: React.ReactNode;
+};
+
+function Card({ title, subtitle = "", children }: CardProps) {
+    return (
+        <section>
+            <h2>{title}</h2>
+            <p>{subtitle}</p>
+            {children}
+        </section>
+    );
+}
+```
+
+Write `<Card>Hello</Card>` without a `title`, and TypeScript stops you before the code runs:
+
+```text
+Property 'title' is missing in type '{ children: string; }' but required in type 'CardProps'.
+```
+
+`type` and `interface` both work for props. Pick one and stay consistent.
+
+## Typing state
+
+```tsx
+import { useState } from "react";
+
+type User = {
+    id: number;
+    name: string;
+};
+
+function Profile() {
+    // No user yet: say what it can be.
+    const [user, setUser] = useState<User | null>(null);
+
+    // An empty array needs its item type.
+    const [todos, setTodos] = useState<string[]>([]);
+
+    // Only these three strings are allowed.
+    const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
+
+    if (user === null) {
+        return <p>Please log in</p>;
+    }
+
+    return <p>Hello, {user.name}</p>;
+}
+```
+
+- **Simple starting values** need no type: `useState(0)` is a number, `useState("")` a string.
+- **`useState(null)`** without a type means the state can **only** ever be `null`. Then `setUser(ana)` is an error. Write `useState<User | null>(null)`.
+- **`useState([])`** without a type is a `never[]`: nothing can go in it. Write `useState<string[]>([])`.
+- With `User | null`, TypeScript makes you **check for `null`** before reading `user.name`.
+
+## Typing refs
+
+```tsx
+import { useRef } from "react";
+
+function SearchBar() {
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    function handleClick() {
+        // current is null until React has put the input on the page.
+        inputRef.current?.focus();
+    }
+
+    return (
+        <div>
+            <input ref={inputRef} />
+            <button onClick={handleClick}>Focus</button>
+        </div>
+    );
+}
+```
+
+Pass the **element type**, like `HTMLInputElement` or `HTMLDivElement`, and start with **`null`**. Since React 19's types, `useRef` always needs a starting value: `useRef<HTMLInputElement>()` is an error.
+
+## Typing events
+
+```tsx
+import { useState } from "react";
+
+function NameForm() {
+    const [name, setName] = useState("");
+
+    function handleChange(event: React.ChangeEvent<HTMLInputElement>) {
+        setName(event.target.value);
+    }
+
+    function handleSubmit(event: React.SubmitEvent<HTMLFormElement>) {
+        event.preventDefault();
+        console.log("Saving", name);
+    }
+
+    return (
+        <form onSubmit={handleSubmit}>
+            <input value={name} onChange={handleChange} />
+            <button type="submit">Save</button>
+        </form>
+    );
+}
+```
+
+| Event | Type |
+| --- | --- |
+| `onChange` on an input | `React.ChangeEvent<HTMLInputElement>` |
+| `onClick` on a button | `React.MouseEvent<HTMLButtonElement>` |
+| `onKeyDown` on an input | `React.KeyboardEvent<HTMLInputElement>` |
+| `onSubmit` on a form | `React.SubmitEvent<HTMLFormElement>` |
+
+- The type in `< >` is the **element** the handler is on. That's how `event.target.value` is known to be a string.
+- **Inline handlers need no types**: in `onChange={(event) => setName(event.target.value)}`, TypeScript already knows what `event` is.
+- Older code types submit with `React.FormEvent<HTMLFormElement>`. Current `@types/react` marks `FormEvent` as **deprecated**.
+
+## Typing custom hooks
+
+A hook that returns a pair, like `useState` does, needs a **return type**:
+
+```tsx
+import { useState } from "react";
+
+function useToggle(initialValue: boolean): [boolean, () => void] {
+    const [isOn, setIsOn] = useState(initialValue);
+
+    function toggle() {
+        setIsOn((current) => !current);
+    }
+
+    return [isOn, toggle];
+}
+```
+
+Without `: [boolean, () => void]`, TypeScript sees an **array** where every item could be either a boolean or a function: `(boolean | (() => void))[]`. Then calling `toggle()` is an error, because `toggle` might be a boolean. The return type makes it a **tuple**: a fixed list where each position has its own type. Writing `return [isOn, toggle] as const;` does the same. A hook that returns an **object** needs nothing extra.
+
+## Extending HTML props
+
+To build your own button that still takes **every** normal button prop, use **`React.ComponentProps<"button">`** and add yours:
+
+```tsx
+type ButtonProps = React.ComponentProps<"button"> & {
+    variant: "primary" | "secondary";
+};
+
+function Button({ variant, ...rest }: ButtonProps) {
+    return <button className={"button-" + variant} {...rest} />;
+}
+```
+
+Now `<Button variant="primary" type="submit" disabled>Save</Button>` type-checks: `type`, `disabled`, `onClick` and `children` all come from the normal button.
+
+## Common mistakes
+
+- **`any` for events and props.** It turns the checks off. Use `React.ChangeEvent<HTMLInputElement>` and a props type.
+- **`useState(null)` or `useState([])` without a type.** The state is stuck as `null` or `never[]`. Pass the type: `useState<User | null>(null)`.
+- **Reading `ref.current` without a check.** It's `null` before the element is on the page. Use `ref.current?.focus()`.
+- **A custom hook returning a pair without a return type.** You get a mixed array, not a tuple. Add the return type or `as const`.
+
+## In the interview
+
+**Likely question:** "How do you type a React component's props?"
+
+> "I write a `type` or `interface` for the props and annotate the destructured parameter, like `function Card({ title, children }: CardProps)`. Optional props get a `?`, and I give them a default in the destructuring. Children are typed as `React.ReactNode`, which covers anything React can show. To accept all the normal HTML props too, I combine my type with `React.ComponentProps<'button'>`."
+
+**Likely follow-up:** "How do you type an input's `onChange` handler?"
+
+**Answer:** "The event is a `React.ChangeEvent<HTMLInputElement>`. The element type tells TypeScript what `event.target` is, so `event.target.value` is a string. If I write the handler inline, I don't need a type at all, because TypeScript infers it from the `onChange` prop."
+
+**Another follow-up:** "Should you use `React.FC`?"
+
+**Answer:** "I usually don't. A plain function with a typed props parameter is simpler and does the same job. `React.FC` used to add `children` to every component's props automatically, which hid mistakes; React 18's types removed that. So today it's mostly a style choice, and most code just types the props."
+
+<Callout title="Remember this" type="success">
+  - **Props**: a `type` with `?` for optional props, then **`function Card({ title }: CardProps)`**. **Children**: **`React.ReactNode`**.
+  - **State**: simple values are inferred. **`useState<User | null>(null)`** and **`useState<string[]>([])`** need the type.
+  - **DOM refs**: **`useRef<HTMLInputElement>(null)`**, then **`ref.current?.focus()`**.
+  - **Events**: **`React.ChangeEvent<HTMLInputElement>`**, `React.MouseEvent<HTMLButtonElement>`, `React.SubmitEvent<HTMLFormElement>`. Inline handlers are inferred.
+  - A hook returning a pair needs a **tuple return type**, like **`[boolean, () => void]`**, or `as const`.
+  - **`React.ComponentProps<"button">`** gives every normal button prop, to extend with your own.
+</Callout>

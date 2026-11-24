@@ -1,11 +1,170 @@
 ---
 title: "Server State with TanStack Query"
-description: "Caching, refetching and loading states for you."
+description: "Fetching, caching and refetching server data with useQuery, and keeping it in sync after writes with useMutation."
 icon: Server
-planned: true
 ---
 
-- Server state vs client state
-- useQuery
-- useMutation and invalidation
-- Caching and stale data
+## The idea
+
+**Server state** is data that lives on a server, like users, products or todos. Your app only holds a **copy**, and the copy can go out of date at any time. **TanStack Query** (formerly React Query) manages that copy for you: it fetches, **caches**, shares, refetches and retries, and gives you loading and error states, all through one hook.
+
+Think of a **photo of a shop's price board**. It's much faster than walking to the shop, but the prices may have changed since you took it. TanStack Query keeps the photos in an album, shows you the one it has straight away, and takes a new one when the old one is too old.
+
+## Server state vs client state
+
+| | Client state | Server state |
+| --- | --- | --- |
+| Lives in | Your app only | A server. Your app has a copy |
+| Examples | Is the menu open? The text in a search box | The todo list, the user's profile |
+| Can go out of date? | No | Yes: other people and other tabs change it |
+| Tools | `useState`, context, Zustand, Redux | TanStack Query, RTK Query |
+
+The point interviewers look for: server data isn't state you manage by hand. It's a **cache** of the server. Keep it in `useState` or Redux, and you write the loading, error, caching and refetching yourself.
+
+## Setup
+
+```jsx
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+const queryClient = new QueryClient();
+
+function App() {
+    return (
+        <QueryClientProvider client={queryClient}>
+            <UserProfile userId={1} />
+        </QueryClientProvider>
+    );
+}
+```
+
+The **`QueryClient`** holds the cache. Create it **once**, outside the component, so it isn't made again on every render.
+
+## useQuery
+
+```jsx
+import { useQuery } from "@tanstack/react-query";
+
+async function fetchUser(userId) {
+    const response = await fetch("/api/users/" + userId);
+
+    // fetch doesn't throw on a 404 or a 500, so throw here.
+    if (!response.ok) {
+        throw new Error("Request failed with status " + response.status);
+    }
+
+    return response.json();
+}
+
+function UserProfile({ userId }) {
+    const { data, isPending, isError, error } = useQuery({
+        queryKey: ["user", userId],
+        queryFn: () => fetchUser(userId),
+    });
+
+    if (isPending) {
+        return <p>Loading...</p>;
+    }
+
+    if (isError) {
+        return <p>Something went wrong: {error.message}</p>;
+    }
+
+    return <h1>{data.name}</h1>;
+}
+```
+
+Compare it with the effect on [Fetching Data](./fetching-data.mdx): no `useState`, no `useEffect`, no cleanup.
+
+- **`queryKey`** names the data in the cache. It works like a dependency array: put **every value the `queryFn` uses** in it. A new `userId` means a new key, and a new fetch. Components that use the **same key** share **one request** and one cached copy.
+- **`queryFn`** fetches the data. It must **throw** when the request fails: that's how TanStack Query knows it failed.
+- A failed query is **retried 3 times**, with a growing delay, before `isError` becomes `true`.
+
+## isPending, isLoading and isFetching
+
+| Flag | `true` when |
+| --- | --- |
+| `isPending` | There's **no data yet** |
+| `isFetching` | A request is running, **including background refetches** |
+| `isLoading` | The **first** request is running: `isPending && isFetching` |
+
+Use `isPending` for the first loading screen, and `isFetching` for a small "updating" hint. In version 4, `isLoading` meant what `isPending` means now. Version 5 renamed it, and also renamed `cacheTime` to `gcTime`.
+
+## useMutation and invalidation
+
+Reads use `useQuery`. Writes, like adding a todo, use **`useMutation`**:
+
+```jsx
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+
+function AddTodoButton() {
+    const queryClient = useQueryClient();
+
+    const mutation = useMutation({
+        // addTodo POSTs the new todo, and throws if the request fails.
+        mutationFn: addTodo,
+        onSuccess: () => {
+            // The cached list is now out of date: mark it stale and refetch it.
+            queryClient.invalidateQueries({ queryKey: ["todos"] });
+        },
+    });
+
+    function handleClick() {
+        mutation.mutate({ title: "Buy milk" });
+    }
+
+    return (
+        <button onClick={handleClick} disabled={mutation.isPending}>
+            {mutation.isPending ? "Adding..." : "Add todo"}
+        </button>
+    );
+}
+```
+
+- A query runs **by itself**. A mutation runs only when you call **`mutate`**, usually from an event handler. Mutations aren't retried by default.
+- After the write, the cached todo list is out of date. **`invalidateQueries`** marks every query whose key **starts with** `["todos"]` as stale, and refetches the ones that are on screen.
+
+## staleTime vs gcTime
+
+The most asked TanStack Query question. There are two timers:
+
+| | `staleTime` | `gcTime` |
+| --- | --- | --- |
+| Decides | When to **refetch** | When to **delete** unused data |
+| Default | **`0`**: stale as soon as it arrives | **5 minutes** |
+| Counts from | When the data arrived | When the last component using it went away |
+
+- **Fresh** data is served from the cache, with **no request**.
+- **Stale** data is **still shown straight away**, and refetched in the background when a component using it **mounts**, when the window **gets focus again**, and when the network **reconnects**. This is called **stale-while-revalidate**.
+- After **`gcTime`** with no component using it, the data is deleted, and the next visit shows a loading state again.
+- For data that rarely changes, raise `staleTime`: with `staleTime: 60 * 1000` in the `useQuery` options, the data stays fresh for a minute, with no refetches.
+
+## Common mistakes
+
+- **Copying `data` into `useState`.** The copy doesn't change when the query refetches. Use `data` directly.
+- **Leaving a variable out of the `queryKey`.** With `queryKey: ["user"]`, every user id gets the first user, from the cache. Put every value the `queryFn` uses in the key.
+- **A `queryFn` that doesn't throw.** With plain `fetch`, a 404 counts as success. Check `response.ok` and throw.
+- **No invalidation after a mutation.** The list on screen doesn't show the new item. Call `invalidateQueries` in `onSuccess`.
+- **Mixing up `staleTime` and `gcTime`.** `staleTime` decides when to **refetch**. `gcTime` decides when to **delete**.
+
+## In the interview
+
+**Likely question:** "Why use TanStack Query instead of fetching in `useEffect`?"
+
+> "Fetching in an effect gets the data once, and I have to write the loading and error states, the race-condition cleanup and any caching myself. TanStack Query treats server data as a cache. Each query has a key, components with the same key share one request and one copy, and cached data shows instantly while it refetches in the background. It also retries failed requests and refetches when the window gets focus. For writes, I use `useMutation`, then invalidate the queries the write changed."
+
+**Likely follow-up:** "What's the difference between `staleTime` and `gcTime`?"
+
+**Answer:** "`staleTime` is how long data counts as fresh. While it's fresh, TanStack Query serves it from the cache without refetching. The default is 0, so data is stale right away and refetches in the background on mount, window focus and reconnect. `gcTime` is how long data stays in the cache after the last component using it unmounts. The default is 5 minutes, then it's deleted."
+
+**Another follow-up:** "How do you update the list after adding an item?"
+
+**Answer:** "I do the write with `useMutation`, and in its `onSuccess` I call `queryClient.invalidateQueries` with the list's key, like `['todos']`. That marks every query starting with that key as stale, and refetches the ones on screen. To show the new item before the server answers, I can write it into the cache with `queryClient.setQueryData`: that's an optimistic update."
+
+<Callout title="Remember this" type="success">
+  - **Server state** is a **cache** of data that lives on a server and can go out of date. **Client state** belongs to the app (`useState`, a store).
+  - **`useQuery({ queryKey, queryFn })`**: same key → **one request, one cached copy**. Put every value the `queryFn` uses in the **key**. The `queryFn` must **throw** on errors.
+  - **`isPending`**: no data yet. **`isFetching`**: any request running. **`isLoading`** = `isPending && isFetching`. Version 5 renamed `cacheTime` to **`gcTime`**.
+  - Writes: **`useMutation`**, run with **`mutate`**, then **`invalidateQueries({ queryKey })`** to refetch the stale data.
+  - **`staleTime`** (default **0**): when to **refetch**. **`gcTime`** (default **5 minutes**): when to **delete** unused data.
+  - Stale data is **shown instantly** and refetched on **mount, window focus and reconnect**. Failed queries **retry 3 times**.
+</Callout>

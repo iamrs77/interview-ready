@@ -1,10 +1,222 @@
 ---
 title: "Search with Autocomplete"
-description: "Debounced search with keyboard support."
+description: "A search box with suggestions: debounced requests, late answers ignored, and full keyboard support."
 icon: Search
-planned: true
 ---
 
-- Debouncing
-- Ignoring stale responses
-- Keyboard navigation
+## The task
+
+> "Build a search box. As I type, show matching suggestions from the server."
+
+- Don't send a request on every key. Wait until the user **stops typing** for 300 ms (this is called **debouncing**).
+- Show **Loading...** while waiting for an answer, and **No results** when nothing matches.
+- Answers can come back **out of order**. Never show results for old text.
+- **ArrowDown** and **ArrowUp** move the highlight, **Enter** picks the highlighted item, **Escape** closes the list.
+- Clicking a suggestion picks it too.
+
+## Plan
+
+- **State:** `query` (the input's text), `isOpen`, `activeIndex` (the highlighted row, `-1` for none), and `answer`: the last results **plus the text they're for**.
+- **Derived, not state:** `debouncedText` (from a `useDebounce` hook), `isLoading` (the answer is for older text), whether the list shows, and which suggestions to show.
+- **Pieces:** `fetchSuggestions` (a fake server), `useDebounce`, the `Autocomplete` component, and an `App` that uses it.
+
+## The code
+
+First the fake server and the debounce hook:
+
+```jsx
+import { useEffect, useState } from "react";
+
+const FRUITS = [
+    "Apple", "Apricot", "Avocado", "Banana", "Blackberry",
+    "Blueberry", "Cherry", "Grape", "Mango", "Orange",
+];
+
+// A fake server call. It answers after a random wait,
+// so a slow old answer can arrive after a fast new one.
+function fetchSuggestions(text) {
+    return new Promise((resolve) => {
+        const wait = 100 + Math.random() * 400;
+        setTimeout(() => {
+            const lower = text.toLowerCase();
+            const matches = FRUITS.filter((fruit) => fruit.toLowerCase().includes(lower));
+            resolve(matches);
+        }, wait);
+    });
+}
+
+// Gives back `value`, but only once it has stopped changing for `delay` ms.
+function useDebounce(value, delay) {
+    const [debouncedValue, setDebouncedValue] = useState(value);
+
+    useEffect(() => {
+        const timerId = setTimeout(() => {
+            setDebouncedValue(value);
+        }, delay);
+
+        // The value changed before the time was up: cancel the old timer.
+        return () => {
+            clearTimeout(timerId);
+        };
+    }, [value, delay]);
+
+    return debouncedValue;
+}
+```
+
+Then the component:
+
+```jsx
+import { useEffect, useId, useState } from "react";
+
+function Autocomplete({ onSelect }) {
+    const [query, setQuery] = useState("");
+    const [isOpen, setIsOpen] = useState(false);
+    const [activeIndex, setActiveIndex] = useState(-1);
+    // The last answer, and the text it belongs to.
+    const [answer, setAnswer] = useState({ text: "", items: [] });
+    const listId = useId();
+
+    const searchText = query.trim();
+    const debouncedText = useDebounce(searchText, 300);
+
+    useEffect(() => {
+        if (debouncedText === "") {
+            return;
+        }
+        let ignore = false;
+
+        async function search() {
+            const items = await fetchSuggestions(debouncedText);
+            // The text changed while we waited: this answer is out of date.
+            if (ignore) {
+                return;
+            }
+            setAnswer({ text: debouncedText, items: items });
+            setActiveIndex(-1);
+        }
+
+        search();
+
+        return () => {
+            ignore = true;
+        };
+    }, [debouncedText]);
+
+    // Derived values.
+    const showList = isOpen && searchText !== "" && debouncedText !== "";
+    const isLoading = showList && answer.text !== debouncedText;
+    let suggestions = [];
+    if (showList && !isLoading) {
+        suggestions = answer.items;
+    }
+
+    function handleChange(event) {
+        setQuery(event.target.value);
+        setIsOpen(true);
+        setActiveIndex(-1);
+    }
+
+    function choose(item) {
+        setQuery(item);
+        setIsOpen(false);
+        setActiveIndex(-1);
+        onSelect(item);
+    }
+
+    function handleKeyDown(event) {
+        if (event.key === "ArrowDown" && activeIndex < suggestions.length - 1) {
+            // Stop the cursor from jumping inside the input.
+            event.preventDefault();
+            setActiveIndex(activeIndex + 1);
+        }
+        if (event.key === "ArrowUp" && activeIndex > 0) {
+            event.preventDefault();
+            setActiveIndex(activeIndex - 1);
+        }
+        if (event.key === "Enter" && activeIndex >= 0) {
+            choose(suggestions[activeIndex]);
+        }
+        if (event.key === "Escape") {
+            setIsOpen(false);
+            setActiveIndex(-1);
+        }
+    }
+
+    const activeId = activeIndex >= 0 ? listId + "-" + activeIndex : undefined;
+
+    return (
+        <div>
+            <input
+                role="combobox"
+                aria-label="Search fruits"
+                aria-expanded={showList}
+                aria-controls={listId}
+                aria-activedescendant={activeId}
+                value={query}
+                onChange={handleChange}
+                onKeyDown={handleKeyDown}
+            />
+            {isLoading && <p>Loading...</p>}
+            {showList && !isLoading && suggestions.length === 0 && <p>No results</p>}
+            <ul role="listbox" id={listId}>
+                {suggestions.map((item, index) => (
+                    <li
+                        key={item}
+                        id={listId + "-" + index}
+                        role="option"
+                        aria-selected={index === activeIndex}
+                        onClick={() => choose(item)}
+                    >
+                        {item}
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+}
+
+function App() {
+    const [picked, setPicked] = useState("");
+
+    return (
+        <div>
+            <Autocomplete onSelect={setPicked} />
+            <p>Picked: {picked}</p>
+        </div>
+    );
+}
+```
+
+## How it works
+
+- **Debounce:** every key changes `searchText`, and `useDebounce` restarts its 300 ms timer (the cleanup clears the old one). `debouncedText` changes only when typing pauses, so "a", "ap", "app" typed quickly send **one** request, for "app". See [Write These Hooks](./write-these-hooks.mdx).
+- **One request per pause:** the effect depends on `debouncedText`, so it runs once each time the debounced text changes.
+- **Late answers are dropped:** each effect run has its own `ignore` flag. When the text changes, React runs the old run's cleanup, which sets its `ignore` to `true`. A slow answer for "ap" that lands after the answer for "apr" is thrown away. See [useEffect](../hooks/use-effect.mdx).
+- **Loading is derived:** the answer remembers which text it's for. If that isn't the current debounced text, a request is on its way.
+- **Keyboard:** the arrows move `activeIndex` and stop at the ends, Enter picks, Escape closes. Focus stays in the input, and `aria-activedescendant` tells screen readers which option is highlighted. Style the highlighted row in CSS with `[aria-selected="true"]`.
+
+## What interviewers look for
+
+- **A debounce with cleanup**, not one request per key, and no timer left running after the component goes away.
+- **The race condition.** "What if the answers come back in the wrong order?" is the classic follow-up. The `ignore` flag in the cleanup is the answer.
+- **Loading and empty states**, and the highlight reset when new results arrive.
+- **Keyboard edge cases:** the highlight doesn't go past the first or last item, Enter does nothing when nothing is highlighted, `preventDefault()` on the arrows.
+- **Accessibility:** `role="combobox"` on the input with `aria-expanded`, `aria-controls` and `aria-activedescendant`; `role="listbox"` and `role="option"` with `aria-selected` on the list; a label on the input.
+- **Trim the text**, and don't search for an empty string.
+
+## Likely follow-ups
+
+- **Cancel the request, not just ignore it:** create an `AbortController` in the effect, pass `controller.signal` to `fetch`, and call `controller.abort()` in the cleanup. The aborted `fetch` throws an `AbortError`, so catch it and do nothing.
+- **Cache answers:** keep a `Map` from text to results in a ref, `useRef(new Map())`, and check it before fetching. A data library like [TanStack Query](../data-and-state/tanstack-query.mdx) caches by query key for you.
+- **Close when the input loses focus:** add `onBlur={() => setIsOpen(false)}`. Then pick options on `onMouseDown` with `event.preventDefault()`, or the blur hides the list before the click lands.
+- **Errors:** wrap the `await` in `try`/`catch`, and save an answer like `{ text: debouncedText, items: [], failed: true }` so the list can say "Something went wrong" instead of loading forever.
+
+<Callout title="Remember this" type="success">
+  - **Debounce** the text, not the request: `useDebounce(value, 300)` restarts a timer on every change and **clears the old timer** in the cleanup.
+  - Fetch in an effect that depends on the **debounced** text. One pause, one request.
+  - **Out-of-order answers:** a local `ignore` flag, set to `true` in the **cleanup**, drops answers for old text.
+  - **Loading is derived:** store the results **with the text they're for**, and compare with the current text.
+  - **Keyboard:** ArrowDown and ArrowUp move `activeIndex` (with `preventDefault()`), Enter picks, Escape closes. Reset the highlight when results change.
+  - **Accessibility:** `role="combobox"`, `aria-expanded`, `aria-activedescendant`, and `role="listbox"` / `role="option"` with `aria-selected`.
+</Callout>

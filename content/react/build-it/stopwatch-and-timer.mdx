@@ -1,10 +1,190 @@
 ---
 title: "Stopwatch and Countdown Timer"
-description: "Intervals, cleanup and stale closures."
+description: "Start, pause and reset with the interval id in a ref and the time read from the clock, then a countdown that stops at 0."
 icon: Timer
-planned: true
 ---
 
-- setInterval in an effect
-- Start, stop and reset
-- The stale closure trap
+## The task
+
+> "Build a stopwatch with Start, Pause and Reset buttons. Then build a countdown timer that stops at 0."
+
+- **Stopwatch:** Start counts up. Pause freezes the time, and Start again continues from there.
+- Reset goes back to 0 and stops.
+- The time must stay correct, even when the browser runs the timer late.
+- **Countdown:** starts from a given number of seconds and counts down.
+- It stops by itself at 0, and never shows a negative number.
+- No timer keeps running after the component is removed from the page.
+
+## Plan
+
+- **State** (shown on screen): `elapsed` in milliseconds, and `isRunning`.
+- **Refs** (not shown): the **interval id**, and the **start time**. Changing them shouldn't re-render. See [useRef](../hooks/use-ref.mdx).
+- **Derived:** the seconds to show, and which button to show, Start or Pause.
+- **Components:** `Stopwatch`, `Countdown`, and an `App` that shows both.
+
+## The code
+
+The stopwatch:
+
+```jsx
+import { useState, useRef, useEffect } from "react";
+
+function Stopwatch() {
+    const [elapsed, setElapsed] = useState(0);
+    const [isRunning, setIsRunning] = useState(false);
+    const intervalRef = useRef(null);
+    const startTimeRef = useRef(0);
+
+    function handleStart() {
+        // Pretend we started "elapsed" ms ago, so Start after Pause continues.
+        startTimeRef.current = Date.now() - elapsed;
+        intervalRef.current = setInterval(() => {
+            setElapsed(Date.now() - startTimeRef.current);
+        }, 100);
+        setIsRunning(true);
+    }
+
+    function handlePause() {
+        clearInterval(intervalRef.current);
+        // Save the exact time, not the time of the last tick.
+        setElapsed(Date.now() - startTimeRef.current);
+        setIsRunning(false);
+    }
+
+    function handleReset() {
+        clearInterval(intervalRef.current);
+        setElapsed(0);
+        setIsRunning(false);
+    }
+
+    // Stop the interval if the stopwatch is removed while running.
+    useEffect(() => {
+        return () => {
+            clearInterval(intervalRef.current);
+        };
+    }, []);
+
+    const seconds = (elapsed / 1000).toFixed(1);
+
+    return (
+        <div>
+            <p>{seconds} s</p>
+            {isRunning ? (
+                <button onClick={handlePause}>Pause</button>
+            ) : (
+                <button onClick={handleStart}>Start</button>
+            )}
+            <button onClick={handleReset}>Reset</button>
+        </div>
+    );
+}
+```
+
+The countdown works the same way, with an **end time** instead of a start time. It has no Pause, to keep it short. Then an `App` that shows both:
+
+```jsx
+function Countdown({ startSeconds }) {
+    const [remaining, setRemaining] = useState(startSeconds * 1000);
+    const [isRunning, setIsRunning] = useState(false);
+    const intervalRef = useRef(null);
+    const endTimeRef = useRef(0);
+
+    function handleStart() {
+        endTimeRef.current = Date.now() + remaining;
+        intervalRef.current = setInterval(() => {
+            const left = endTimeRef.current - Date.now();
+            if (left <= 0) {
+                // Time's up: stop the interval and show exactly 0.
+                clearInterval(intervalRef.current);
+                setRemaining(0);
+                setIsRunning(false);
+            } else {
+                setRemaining(left);
+            }
+        }, 100);
+        setIsRunning(true);
+    }
+
+    function handleReset() {
+        clearInterval(intervalRef.current);
+        setRemaining(startSeconds * 1000);
+        setIsRunning(false);
+    }
+
+    useEffect(() => {
+        return () => {
+            clearInterval(intervalRef.current);
+        };
+    }, []);
+
+    // 2.3 seconds left shows as 3, like a kitchen timer.
+    const secondsLeft = Math.ceil(remaining / 1000);
+
+    return (
+        <div>
+            <p>{secondsLeft} s left</p>
+            <button onClick={handleStart} disabled={isRunning || remaining === 0}>
+                Start
+            </button>
+            <button onClick={handleReset}>Reset</button>
+        </div>
+    );
+}
+
+function App() {
+    return (
+        <div>
+            <Stopwatch />
+            <Countdown startSeconds={10} />
+        </div>
+    );
+}
+```
+
+Click Start on the stopwatch and wait 2 seconds: it shows `2.0 s`. Pause, wait as long as you like, and Start again: it goes on from `2.0 s`. The countdown goes 10, 9, 8 ... 0, then stops, and its Start button is disabled until Reset.
+
+## How it works
+
+- **The interval id lives in a ref.** Pause and Reset need it later, and the screen doesn't show it. A plain `let intervalId` would start over as `undefined` on the next render, so Pause couldn't stop the interval. State would work, but would re-render for nothing.
+- **The time comes from the clock, not from counting ticks.** The interval only says "update the screen now". `setElapsed((e) => e + 100)` on each tick would fall behind, because timers often run late, and browsers slow them down in background tabs.
+- **`Date.now() - elapsed`** is the resume trick: Start after Pause acts as if the stopwatch had started that long ago.
+- **No stale closure.** The interval callback reads only refs and `Date.now()`, never state. Writing `setElapsed(elapsed + 100)` instead would show `0.1 s` forever: the callback was created in the render where `elapsed` was 0, and it keeps seeing that 0. See [Puzzles: Stale Closures](../predict-and-debug/puzzles-stale-closures.mdx).
+- **Cleanup on unmount.** The effect with `[]` has no setup work; its cleanup runs when the component is removed and clears whatever interval is in the ref at that moment.
+- **The countdown stops itself.** When `left <= 0`, it clears its own interval and sets exactly `0`, so the screen never shows `-1`.
+
+## What interviewers look for
+
+- **Cleanup:** remove the component while it runs, and no timer should keep going.
+- **No double intervals.** Clicking Start twice must not start two timers. Here, Start turns into Pause, and the countdown's Start is disabled while it runs.
+- **Accurate time:** measured with `Date.now()`, not by counting ticks.
+- **Knowing the stale closure trap**, and why the callback avoids reading state.
+- **Edge cases:** the countdown stops at 0, Start is disabled at 0, and Reset works while running.
+
+## Likely follow-ups
+
+- **Minutes and seconds, like 1:05:** Minutes are `Math.floor(ms / 60000)`, seconds are `Math.floor(ms / 1000) % 60`, padded with `String(seconds).padStart(2, "0")`.
+- **Laps:** Keep `laps` in state, and on Lap add the current time: `setLaps([...laps, elapsed])`.
+- **Without the interval ref:** Start the interval in an effect that depends on `isRunning`. The buttons no longer touch the interval: they set `isRunning`, and Start still saves the start time. The effect's cleanup then handles both Pause and unmount:
+
+```jsx
+useEffect(() => {
+    if (!isRunning) {
+        return;
+    }
+    const intervalId = setInterval(() => {
+        setElapsed(Date.now() - startTimeRef.current);
+    }, 100);
+    return () => clearInterval(intervalId);
+}, [isRunning]);
+```
+
+- **Tell the parent when the countdown ends:** Take an `onFinish` prop, and call it in the `left <= 0` branch.
+
+<Callout title="Remember this" type="success">
+  - Keep the **interval id in a ref**: Pause, Reset and cleanup need it, and the screen doesn't.
+  - **Measure with `Date.now()`**, don't count ticks: timers run late, and background tabs slow them down.
+  - Resume trick: **`startTime = Date.now() - elapsed`**.
+  - **Clean up on unmount**: `useEffect(() => () => clearInterval(intervalRef.current), [])`.
+  - **Stale closure:** `setElapsed(elapsed + 100)` inside the interval sees the old `elapsed` forever. Read refs and `Date.now()` instead.
+  - The countdown **clears its own interval at 0** and sets exactly 0. Disable Start while running.
+</Callout>

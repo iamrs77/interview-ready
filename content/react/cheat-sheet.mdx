@@ -1,11 +1,147 @@
 ---
 title: "Cheat Sheet"
-description: "The React rules and templates to review before an interview."
+description: "The React rules, hooks and one-line answers to review right before an interview."
 icon: ScrollText
-planned: true
 ---
 
-- Hooks at a glance
-- Rendering rules
-- Effect dependency rules
-- Common component templates
+## Hooks at a glance
+
+| Hook | Use it for | Remember |
+| --- | --- | --- |
+| `useState` | Data the screen shows | State is a **snapshot**. New value from old → `setX(prev => ...)` |
+| `useReducer` | Related values, many kinds of updates | Pure reducer, `dispatch({ type })` |
+| `useEffect` | Syncing with something **outside** React | Runs after render. Cleanup. Dependency array |
+| `useLayoutEffect` | Measuring the DOM before paint | Blocks painting: only to stop a flicker |
+| `useRef` | A value the screen doesn't show, or a DOM node | Changing `.current` **doesn't** re-render |
+| `useContext` | Reading the nearest provider's value | Every reader re-renders when the value changes |
+| `useMemo` | Caching a slow calculation or an object | Recalculates when a dependency changes |
+| `useCallback` | A stable function for a `memo` child or a dependency | Useless without `memo` or a dependency array |
+| `useId` | Ids for `htmlFor` and `aria-*` | Not for list keys |
+| `useTransition` | Marking an update as non-urgent | `[isPending, startTransition]` |
+| `useDeferredValue` | A lagging copy of a value for slow UI | Pair it with `memo` on the slow child |
+| `useActionState`, `useOptimistic`, `use` | Form actions, instant UI, reading promises and context | React 19 |
+| `useEffectEvent` | Latest values inside an effect, without a dependency | React 19.2. Call only from effects |
+
+**Rules of Hooks:** call them at the **top level** only (no `if`, loops or early `return` before them), and only in **components** and **custom hooks**. React matches hooks by **call order**. See [Rules of Hooks](./hooks/rules-of-hooks.mdx).
+
+## State updates
+
+| You write | Result |
+| --- | --- |
+| `setCount(count + 1)` three times | **+1**: `count` is the same snapshot each time |
+| `setCount(c => c + 1)` three times | **+3**: updaters are queued |
+| `console.log(count)` right after `setCount` | The **old** value |
+| `user.name = "Ben"; setUser(user)` | **No re-render**: same object |
+| Several setters in one handler, timeout or promise | **One** render (batching) |
+
+Never change state in place. Make copies:
+
+| Task | Write |
+| --- | --- |
+| Add to an array | `[...items, newItem]` |
+| Remove | `items.filter((item) => item.id !== id)` |
+| Update one | `items.map((item) => item.id === id ? { ...item, done: true } : item)` |
+| Sort | `items.toSorted(compare)` or `[...items].sort(compare)` |
+| Change a field | `{ ...user, name: "Ben" }` |
+| Nested field | Copy **every** level: `{ ...user, address: { ...user.address, city: "Oslo" } }` |
+
+## Rendering rules
+
+- A component re-renders when **its state changes**, **its parent re-renders**, or **a context it reads changes**.
+- Rendering = calling your function. It must be **pure**. Strict Mode calls it **twice** in development.
+- **Same type in the same position** keeps state. A different type, or a different **key**, resets it.
+- Keys: **stable, unique ids** from the data. Index keys break when items move. Never `Math.random()`.
+- `{count && <Badge />}` shows **0** when `count` is 0. Write `count > 0 &&`.
+- `React.memo` skips a render when every prop is equal by `Object.is`. A new object, function or `children` breaks it.
+- Never define a component **inside** another component: its state resets every render.
+
+See [Rendering and the Virtual DOM](./state-and-rendering/how-rendering-works.mdx).
+
+## Effect rules
+
+| Dependency array | The effect runs |
+| --- | --- |
+| None | After **every** render |
+| `[]` | **Once**, after the first render |
+| `[a, b]` | After the first render, then when `a` or `b` changes |
+
+- **Cleanup** runs before the next run and on unmount: clear timers, remove listeners, abort requests.
+- **Strict Mode** (dev only): setup → cleanup → setup, to expose a missing cleanup.
+- List **every** value the effect uses. Missing ones → **stale closures** (an interval stuck at 1 → use `setX(prev => ...)`).
+- An object or function made during render as a dependency → the effect runs **every render**.
+- The effect function **can't be `async`**: define an async function inside and call it.
+- **No effect needed** for values you can compute (compute while rendering), user actions (use the handler), or resetting state when a prop changes (use a `key`).
+
+## Templates
+
+A controlled input:
+
+```jsx
+function NameField() {
+    const [name, setName] = useState("");
+
+    return <input value={name} onChange={(event) => setName(event.target.value)} />;
+}
+```
+
+Fetching in an effect, with a cancel on cleanup:
+
+```jsx
+useEffect(() => {
+    const controller = new AbortController();
+
+    async function load() {
+        try {
+            const response = await fetch("/api/users/" + userId, { signal: controller.signal });
+
+            if (!response.ok) {
+                throw new Error("Request failed with status " + response.status);
+            }
+
+            setUser(await response.json());
+        } catch (err) {
+            if (err.name !== "AbortError") {
+                setError(err.message);
+            }
+        }
+    }
+
+    load();
+
+    return () => controller.abort();
+}, [userId]);
+```
+
+A context with a safe custom hook:
+
+```jsx
+const UserContext = createContext(null);
+
+function useUser() {
+    const value = useContext(UserContext);
+
+    if (value === null) {
+        throw new Error("useUser must be used inside <UserProvider>");
+    }
+
+    return value;
+}
+```
+
+## One-line answers
+
+| Question | Answer |
+| --- | --- |
+| Virtual DOM? | The tree of plain objects your components return. React compares the new tree with the old one and changes only what differs in the real DOM. |
+| Reconciliation? | That comparison. Different type → rebuild. Same type → update props. Lists are matched by **key**. |
+| Props vs state? | Props come from the parent and are read-only. State is owned by the component and changed with its setter. |
+| Controlled vs uncontrolled? | Controlled: React state holds the value (`value` + `onChange`). Uncontrolled: the DOM holds it (`defaultValue`, read with a ref or `FormData`). |
+| useMemo vs useCallback? | `useMemo` caches a value, `useCallback` caches a function. Both matter mainly with `memo` children and dependency arrays. |
+| Context vs Redux? | Context passes a value down, and all readers re-render. Redux is a store: components subscribe to slices, plus DevTools and middleware. |
+| Server state? | Data from an API. Use TanStack Query (or RTK Query) for caching, refetching and loading states. |
+| CSR vs SSR vs SSG? | Built in the browser vs on the server per request vs once at build time. |
+| Hydration? | React attaches event handlers to server-rendered HTML. Server and client output must match. |
+| Server Components? | Run only on the server and can read data directly; their code is not sent to the browser. Add `"use client"` for state, effects and events. |
+| HOC vs custom hook? | Both share logic. Hooks have no wrapper layers, hidden props or name clashes, so prefer them. |
+| Error boundaries? | Class components that catch errors thrown while **rendering** (and in effects) below them. Not event handlers or async code. |
+| Why keys? | So React can match list items between renders and keep each item's state with it. |

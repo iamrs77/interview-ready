@@ -72,6 +72,42 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - Same value (`Object.is`) → no re-render. **Never change objects or arrays in place**: replace them.
 - Slow starting value → **`useState(() => compute())`**.
 
+**[Rendering and the Virtual DOM](./state-and-rendering/how-rendering-works.mdx)**
+
+- **Trigger → render → commit.** Render = React **calls your components**; commit = React **changes the real DOM**, only where something differs.
+- A component re-renders when **its state changes**, **its parent re-renders**, or **a context it reads changes**. Same props don't stop it; **`React.memo`** does.
+- The **virtual DOM** is a tree of plain objects (React elements). Comparing the new tree with the old one is **reconciliation**.
+- **Different type → rebuild**, state lost. **Same type, same place → keep**, state kept. **Keys** match list items.
+- State belongs to a **position in the tree**. Never define a component **inside** another one.
+- **Strict Mode** renders twice, in **development only**, to catch impure components.
+
+**[Updating Objects and Arrays](./state-and-rendering/updating-objects-and-arrays.mdx)**
+
+- **Never mutate state.** React compares with **`Object.is`**: same object → **no re-render**.
+- Objects: **`{ ...user, name: "Ben" }`**. Spread is **shallow**: copy **every level** you change.
+- Arrays: add with **`[...todos, item]`**, remove with **`filter`**, change with **`map`**, sort with **`toSorted`**.
+- Avoid **`push`, `splice`, `sort`, `reverse`** and `todos[i] = x` on state.
+- The `useState` setter **replaces** the value; it **doesn't merge**.
+- Deep nesting → **Immer**: "mutate" a draft, get a new object.
+
+**[Lifting State Up](./state-and-rendering/lifting-state-up.mdx)**
+
+- Two components need the same changing data → **lift the state** to their **closest common parent**.
+- The parent passes the **value down as a prop**, and a **function to change it**. Data goes down, changes go up.
+- **Single source of truth**: one owner per piece of state. No copies kept in sync with effects.
+- **Calculate derived data** during render instead of storing it in state.
+- Lift to the **lowest** common parent: everything below the owner re-renders when it changes.
+- **Prop drilling** → try **composition** (`children`) first, then **context**, then a **store**.
+
+**[Forms: Controlled vs Uncontrolled](./state-and-rendering/forms.mdx)**
+
+- **Controlled**: `value` + `onChange`, the value lives in **React state**. **Uncontrolled**: `defaultValue`, the value lives in the **DOM**.
+- React's **`onChange` fires on every keystroke**, not on blur.
+- Read uncontrolled values on submit with **`new FormData(event.target)`**, or with a **ref**.
+- Checkbox → **`checked`**, not `value`. `<select>` and `<textarea>` take **`value`**.
+- Many fields → **one object**, one handler, **`[event.target.name]`**.
+- **No `value` without `onChange`**, start with **`""`** not `undefined`, never both `value` and `defaultValue`.
+
 ## 3. Hooks
 
 **[useEffect](./hooks/use-effect.mdx)**
@@ -151,6 +187,14 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 
 ## 4. Component Patterns
 
+**[Composition and Children](./patterns/composition-and-children.mdx)**
+
+- **Composition**: build components by **putting components inside** others. React components **never extend** each other.
+- **`children`** = whatever is between the tags. The component decides **where** it goes, not **what** it is.
+- **Slots**: other props that take JSX, like `header={<SearchBar />}`, when one hole isn't enough.
+- Building the deep child higher up and passing it as **`children`** can fix **prop drilling** without context.
+- **Compound components** (`Tabs`, `Tab`, `TabPanel`) share state through **context**, like `<select>` and `<option>`.
+
 **[Higher-Order Components and Render Props](./patterns/hoc-and-render-props.mdx)**
 
 - **HOC** = a function: **component in, new component out**. Named **`withSomething`**. It **wraps**, never changes, the original.
@@ -160,9 +204,61 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - **Hooks replaced both** for sharing logic: no wrapper hell, no hidden props, no name clashes.
 - Still used: **wrapping rendering** (`withErrorBoundary`, `withAuth`) and **`renderItem`**-style props.
 
+**[Error Boundaries](./patterns/error-boundaries.mdx)**
+
+- An **error boundary** catches errors while **rendering** its children, and in their **effects** and lifecycle methods, and shows a **fallback**.
+- No boundary → React **removes the whole app**: a blank page.
+- Must be a **class**: **`getDerivedStateFromError`** shows the fallback, **`componentDidCatch`** logs. Or use **react-error-boundary**.
+- **Not caught**: **event handlers**, **async code** (timers, promises), **server rendering**, and the **boundary itself**.
+- For those, use **`try...catch`**. To show the fallback anyway, **put the error in state and throw it during render**.
+- One boundary at the **top**, more around **independent parts**. A new **`key`** resets one.
+
+**[Portals](./patterns/portals.mdx)**
+
+- **`createPortal(jsx, domNode)`** from **`react-dom`** renders into another DOM node, usually **`document.body`**.
+- Use it for **modals, tooltips and dropdowns**, to escape a parent's **`overflow: hidden`** and **`z-index`**.
+- Only the **DOM position** changes. In the **React tree** the portal stays put: same **props, state and context**.
+- **React events bubble through the React tree**: a click in the modal reaches its React parents' `onClick`. Stop it with **`stopPropagation()`**.
+- Real-DOM code (`addEventListener`, `contains`) goes by the **DOM**, so it sees portal content as **outside** the parent.
+
+**[Class Components and Lifecycle](./patterns/class-components.mdx)**
+
+- A class **extends `Component`**, has **`render()`**, reads **`this.props`** and **`this.state`**. Call **`super(props)`** first, and **bind** handlers (or use class field arrows).
+- **`this.setState` merges** (shallowly) into the state; a **`useState` setter replaces**. Use the **updater form** when the new state depends on the old.
+- Lifecycle: **`componentDidMount`** → **`componentDidUpdate(prevProps, prevState)`** → **`componentWillUnmount`**. Skip renders with **`shouldComponentUpdate`** or **`PureComponent`**.
+- Hooks: didMount = **`useEffect(fn, [])`**, didUpdate = **`useEffect(fn, [deps])`**, willUnmount = **cleanup**, PureComponent = **`React.memo`**, fields = **`useRef`**.
+- **Error boundaries** are the one thing that still needs a class.
+
 ## 5. Performance
 
+**[Making React Apps Fast](./performance/making-react-fast.mdx)**
+
+- **Measure first** with the **React DevTools Profiler**, on a **production build** with profiling turned on.
+- Needless re-renders → **move state down**, then **`React.memo`** with stable props from **`useCallback`** and **`useMemo`**.
+- Long lists → **virtualization**: render only the **visible rows** (react-window, TanStack Virtual).
+- Slow work on every key press → **debounce**: run it once the user **stops typing**.
+- Big bundle → **`lazy(() => import("./Page.jsx"))`** inside **`<Suspense fallback>`**, usually **per route**. Call `lazy` at the **top level**.
+- The **React Compiler** (stable **1.0** since **October 2025**) adds memoization **automatically** at build time.
+
 ## 6. Data and State Management
+
+**[Fetching Data](./data-and-state/fetching-data.mdx)**
+
+- Fetching needs **three states**: **loading**, **error** and **data**. Show exactly one.
+- Fetch in **`useEffect`** with the inputs, like **`[userId]`**, as dependencies. The effect function **can't be async**: put an async function inside.
+- **`fetch` doesn't reject on 404 or 500**. Check **`response.ok`** and throw.
+- **Race condition**: an old, slow answer overwrites a newer one. Fix it in the **cleanup**: **`controller.abort()`**, or an **ignore flag**. Skip the **`AbortError`** in the `catch`.
+- **Strict Mode** in development: **two requests**, the first cancelled. Production sends one.
+- Real apps use **TanStack Query** or **RTK Query** for caching, sharing, refetching and retries.
+
+**[Choosing Where State Lives](./data-and-state/where-state-lives.mdx)**
+
+- **Keep state as close as possible** to where it's used. Move it out only for a reason.
+- **One component** → local `useState`. **A few nearby** → **lift** to the closest common parent.
+- **Server data** → a **server cache** (TanStack Query, RTK Query), not `useState` or Redux.
+- **Survives a refresh, shareable** (search, filters, page) → **the URL**.
+- **App-wide, rarely changes** (user, theme) → **context**. **Shared and changes often** → a **store** like **Zustand** or Redux.
+- **Can be computed** → don't store it. Work it out while rendering.
 
 **[Redux and Redux Toolkit](./data-and-state/redux.mdx)**
 
@@ -173,7 +269,52 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - **`useSelector`** re-renders when its result changes by **`===`**. Never return a **new object** from a selector.
 - Async → **`createAsyncThunk`** (pending / fulfilled / rejected). Server data → **RTK Query** or TanStack Query. Small apps: `useState` and context.
 
+**[Server State with TanStack Query](./data-and-state/tanstack-query.mdx)**
+
+- **Server state** is a **cache** of data that lives on a server and can go out of date. **Client state** belongs to the app (`useState`, a store).
+- **`useQuery({ queryKey, queryFn })`**: same key → **one request, one cached copy**. Put every value the `queryFn` uses in the **key**. The `queryFn` must **throw** on errors.
+- **`isPending`**: no data yet. **`isFetching`**: any request running. **`isLoading`** = `isPending && isFetching`. Version 5 renamed `cacheTime` to **`gcTime`**.
+- Writes: **`useMutation`**, run with **`mutate`**, then **`invalidateQueries({ queryKey })`** to refetch the stale data.
+- **`staleTime`** (default **0**): when to **refetch**. **`gcTime`** (default **5 minutes**): when to **delete** unused data.
+- Stale data is **shown instantly** and refetched on **mount, window focus and reconnect**. Failed queries **retry 3 times**.
+
 ## 7. Modern React
+
+**[Concurrent Rendering and Transitions](./modern-react/concurrent-rendering.mdx)**
+
+- **Urgent** updates (typing, clicks) must show at once. **Non-urgent** ones (a slow list, a heavy tab) can wait.
+- A **transition** render can be **paused** for urgent updates and **dropped** if it's out of date. The page stays responsive.
+- **`const [isPending, startTransition] = useTransition()`**: wrap the **setter** in `startTransition`. Never the input's own state.
+- **`useDeferredValue(value)`**: an older copy of a **value** while the new one renders. The slow child needs **`memo`**.
+- Transitions don't make code faster, and they're **not debouncing**: no fixed delay, and no fewer requests.
+- **Automatic batching**: several updates, **one render**, everywhere since **React 18**.
+
+**[SSR, SSG and Hydration](./modern-react/ssr-and-hydration.mdx)**
+
+- **CSR**: HTML built in the browser. **SSR**: on every request. **SSG**: once at build time. **ISR**: SSG plus a **rebuild in the background** every N seconds.
+- **Hydration**: React renders again in the browser, **reuses the server's DOM** and **attaches event handlers**. Use **`hydrateRoot`**, not `createRoot`.
+- SSR shows content sooner, but the page is **not interactive until hydration**.
+- **Mismatch** causes: `Date.now()`, `Math.random()`, `typeof window`, `localStorage`, locale dates, invalid HTML nesting. React **re-renders that part** on the client.
+- Fix: **same output on both sides first**, browser-only values in **`useEffect`**, **`useId`** for ids, **`suppressHydrationWarning`** only for timestamps.
+- **Streaming**: the shell and `<Suspense>` fallbacks go first, each part's HTML follows when ready, and each part **hydrates separately**.
+
+**[Server Components](./modern-react/server-components.mdx)**
+
+- **Server Components** run **only on the server**: they can be **`async`**, read the **database** and use **secrets**, and add **no JS**. The **default** in the Next.js App Router.
+- **Client Components**: **`"use client"`** at the **top of the file**. Needed for **state, effects, events and browser APIs**. The file and its imports go to the browser.
+- Server to Client props must be **serializable**: data and JSX, **not functions**.
+- A Client Component **can't import** a Server Component, but can render one passed as **`children`**.
+- **`"use server"`** marks **Server Functions**: async functions the browser can call (a **POST** request in Next.js). Always **check the user** inside.
+- **Not the same as SSR**: SSR makes HTML and still **hydrates**. Server Components are **never hydrated**.
+
+**[What's New in React 19](./modern-react/react-19.mdx)**
+
+- **Actions**: async functions in **`startTransition`** or a form's **`action`**. A form action gets **`FormData`** and **resets the form** when done.
+- **`useActionState(action, initialState)`** → `[state, formAction, isPending]`. The action gets **`(previousState, formData)`**.
+- **`useFormStatus`** (from **`react-dom`**) gives `pending` for the form **around** it: call it in a **child** like `<SubmitButton />`.
+- **`useOptimistic`** shows a change **at once**, inside an Action. When the action ends, it goes back to the **real state**, so a failed save that didn't update it **just disappears**.
+- **`use`** reads a **promise** (with Suspense) or a **context**, and **can** be called in `if`. Don't create the promise in render.
+- **`ref` is a prop**, **`<Context value>`** is the provider, **`<title>`** works anywhere. **19.2**: **`<Activity>`** keeps hidden state; **`useEffectEvent`** reads the latest values without being a dependency.
 
 ## 8. Routing, Testing and TypeScript
 
@@ -186,6 +327,127 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - **Protected route**: render `<Outlet />` or `<Navigate to="/login" replace />`. The **server** must still check.
 - Refresh 404 → the server must **fall back to `index.html`**. Import from **`react-router`** (`react-router-dom` is the old name).
 
+**[Testing React Components](./ecosystem/testing-react.mdx)**
+
+- **Test like a user**: find what's on the screen, act with **user-event**, check what's on the screen. Not state or props.
+- The runner is **Vitest** or **Jest**. **RTL** gives **`render`** and **`screen`**. **jest-dom** adds matchers like **`toBeInTheDocument()`**.
+- **`getBy`** throws when missing. **`queryBy`** returns **`null`**: use it for "not there". **`findBy`** returns a **promise** and waits (1 second by default): use it for async UI.
+- Search by **`getByRole`** first, with `name`. Then `getByLabelText`, then `getByText`. **`getByTestId`** last.
+- **`await`** every `user.click`, `user.type` and `findBy`.
+- Mock `fetch` in one line: **`vi.spyOn(globalThis, "fetch").mockResolvedValue(...)`**.
+
+**[React with TypeScript](./ecosystem/react-with-typescript.mdx)**
+
+- **Props**: a `type` with `?` for optional props, then **`function Card({ title }: CardProps)`**. **Children**: **`React.ReactNode`**.
+- **State**: simple values are inferred. **`useState<User | null>(null)`** and **`useState<string[]>([])`** need the type.
+- **DOM refs**: **`useRef<HTMLInputElement>(null)`**, then **`ref.current?.focus()`**.
+- **Events**: **`React.ChangeEvent<HTMLInputElement>`**, `React.MouseEvent<HTMLButtonElement>`, `React.SubmitEvent<HTMLFormElement>`. Inline handlers are inferred.
+- A hook returning a pair needs a **tuple return type**, like **`[boolean, () => void]`**, or `as const`.
+- **`React.ComponentProps<"button">`** gives every normal button prop, to extend with your own.
+
 ## 9. Build It
 
+**[Todo List](./build-it/todo-list.mdx)**
+
+- **State:** `todos` (array of `{ id, text, done }`), the input's `text`, and the `filter`. The visible list and the count are **derived**, not state.
+- **Add** through a form's **`onSubmit`** with `preventDefault()`. `trim()` the text and ignore blanks.
+- **New arrays only:** add `[...todos, newTodo]`, toggle with **`map`** and `{ ...todo, done: !todo.done }`, delete with **`filter`**.
+- **Ids are made once**, when the todo is created, and used as **keys**. Never the index.
+- Count what's left from **`todos`**, not from the filtered list.
+- **Accessibility:** labelled input, real checkbox in a `<label>`, Delete buttons named per todo, **`aria-pressed`** on the filters.
+
+**[Search with Autocomplete](./build-it/autocomplete.mdx)**
+
+- **Debounce** the text, not the request: `useDebounce(value, 300)` restarts a timer on every change and **clears the old timer** in the cleanup.
+- Fetch in an effect that depends on the **debounced** text. One pause, one request.
+- **Out-of-order answers:** a local `ignore` flag, set to `true` in the **cleanup**, drops answers for old text.
+- **Loading is derived:** store the results **with the text they're for**, and compare with the current text.
+- **Keyboard:** ArrowDown and ArrowUp move `activeIndex` (with `preventDefault()`), Enter picks, Escape closes. Reset the highlight when results change.
+- **Accessibility:** `role="combobox"`, `aria-expanded`, `aria-activedescendant`, and `role="listbox"` / `role="option"` with `aria-selected`.
+
+**[Pagination and Infinite Scroll](./build-it/pagination-and-infinite-scroll.mdx)**
+
+- **Pagination:** only **`page`** is state. `totalPages`, the **`slice`** and the page numbers are derived.
+- **Previous and Next** are **disabled** at the ends. Mark the current page with **`aria-current="page"`**.
+- **Infinite scroll:** an empty **sentinel** `<div>` after the list, watched by an **`IntersectionObserver`**. On screen → `setPage(current + 1)`.
+- Load in an effect on **`[page]`**, **append** with the updater form, and drop late answers with an **`ignore`** flag.
+- Watch only while **not loading** and **`hasMore`**. **`observer.disconnect()`** in the cleanup.
+- Very long lists → **virtualization**. Start loading early → **`rootMargin`**.
+
+**[Modal Dialog](./build-it/modal.mdx)**
+
+- **`createPortal(jsx, document.body)`**: the DOM goes into `<body>` so nothing clips it, but it stays in the **React tree** (context and events still flow through it).
+- **Mount only when open** (`{isOpen && <Modal />}`), so effects run on open and **cleanups** run on close.
+- **Escape:** `document.addEventListener("keydown", ...)` in an effect, **removed in the cleanup**.
+- **Backdrop click:** close only when **`event.target === event.currentTarget`**.
+- **Focus:** save `document.activeElement`, focus the dialog (`tabIndex={-1}`), and **give focus back** in the cleanup. Keep it in its own effect with `[]`.
+- **ARIA:** `role="dialog"`, **`aria-modal="true"`**, `aria-labelledby` the title. Native **`<dialog>`** with `showModal()` gives much of this for free.
+
+**[Tabs and Accordion](./build-it/tabs-and-accordion.mdx)**
+
+- **Tabs = one `activeIndex` in state.** The selected tab and the visible panel are **derived** from it.
+- Roles: **`tablist`**, **`tab`** with **`aria-selected`**, **`tabpanel`**. Link them with `aria-controls` and `aria-labelledby`, using **`useId`** for the ids.
+- **One section open:** `openIndex`, or `null` for none. Clicking the open one sets `null`.
+- **Many open:** a **`Set`** of indexes. Copy it (`new Set(old)`) before changing, or React won't re-render.
+- Use **real buttons**, **`aria-expanded`** on accordion headings, and **ids as keys**.
+
+**[Star Rating](./build-it/star-rating.mdx)**
+
+- **Controlled:** the parent owns the rating (`value`, `onChange`). The component's only state is **`hoverValue`**.
+- **Filled stars are derived:** `hoverValue > 0 ? hoverValue : value`, then fill each star whose number is `<=` that.
+- **`onMouseEnter` on each star, one `onMouseLeave` on the wrapper**, so the gaps don't reset the preview.
+- **Real `<button type="button">`s** for keyboard support, with an **`aria-label`** like "Rate 3 out of 5".
+- Clicking the same star to **clear**: `onChange(0)` when `starValue === value`.
+
+**[Stopwatch and Countdown Timer](./build-it/stopwatch-and-timer.mdx)**
+
+- Keep the **interval id in a ref**: Pause, Reset and cleanup need it, and the screen doesn't.
+- **Measure with `Date.now()`**, don't count ticks: timers run late, and background tabs slow them down.
+- Resume trick: **`startTime = Date.now() - elapsed`**.
+- **Clean up on unmount**: `useEffect(() => () => clearInterval(intervalRef.current), [])`.
+- **Stale closure:** `setElapsed(elapsed + 100)` inside the interval sees the old `elapsed` forever. Read refs and `Date.now()` instead.
+- The countdown **clears its own interval at 0** and sets exactly 0. Disable Start while running.
+
+**[Write These Hooks](./build-it/write-these-hooks.mdx)**
+
+- **useDebounce:** `setTimeout` in an effect, **`clearTimeout` in the cleanup**. The cleanup is what debounces.
+- **usePrevious:** the effect writes the ref **after** render, so during render the ref still holds the **last render's** value. It's per render, not per change; the **state** version fixes that.
+- **useLocalStorage:** a **lazy initial value** (`useState(() => ...)`), a **`null` check**, and **`try` / `catch` around `JSON.parse`**. An effect saves each change.
+- **useFetch:** an **`AbortController`**, aborted in the cleanup, stops old answers from overwriting new ones. **Ignore `AbortError`**, and check **`response.ok`**: `fetch` doesn't throw on 404.
+- **Debounce** runs once after the changes stop. **Throttle** runs at most once every N ms.
+
 ## 10. Predict and Debug
+
+**[Puzzles: State Updates](./predict-and-debug/puzzles-state-updates.mdx)**
+
+- **State is a snapshot**: `setCount(count + 1)` three times adds **1**. The updater `setCount(c => c + 1)` three times adds **3**.
+- A setter **doesn't change** the variable. A log right after it, in a timeout or after `await` shows the **old** value.
+- The queue runs in order: a **plain value replaces**, an **updater builds** on the result before it.
+- Changing an object **in place** and setting it → **no re-render**, because `Object.is` sees the same object. Set a **new** object.
+- **Automatic batching** (React 18+): several setters in a handler, timeout or promise → **one** render.
+
+**[Puzzles: Effects and Render Order](./predict-and-debug/puzzles-effects.mdx)**
+
+- Order: **render (parent → child)** → DOM update → **layout effects** → **effects (child → parent)**.
+- A `console.log` in the component body runs **during render**, before any effect.
+- On an update: **all cleanups first**, then the new effects. A cleanup sees the **old** values.
+- **Strict Mode** (development only): **setup → cleanup → setup**, and each component renders **twice**.
+- An **object or function made during render** is a new dependency every render. If the effect sets state, it **loops forever**. Depend on **plain values**.
+
+**[Puzzles: Stale Closures](./predict-and-debug/puzzles-stale-closures.mdx)**
+
+- A function **remembers the values of the render that made it**. Run later, it can see **old** values: a **stale closure**.
+- Classic cases: an **interval** or **listener** set up once with `[]`, a **timeout**, an **async** handler, a **`useCallback`** with missing dependencies.
+- Fix 1: the **updater**, `setCount(c => c + 1)`, when the new state comes from the old one.
+- Fix 2: put the value in the **dependency array**. The cleanup removes the old timer or listener, and the effect adds a fresh one.
+- Fix 3: a **ref** (`ref.current`) for the latest value, or **`useEffectEvent`** inside effects (React 19.2).
+- An old value is sometimes **right**: the timeout uses the value from when you clicked.
+
+**[Puzzles: Keys and Identity](./predict-and-debug/puzzles-keys-and-identity.mdx)**
+
+- React keeps state while the **same type** stays at the **same position** with the **same key**. Change one, and the state is **reset**.
+- **Index keys**: insert at the top, and the state stays at the **position**, on the wrong item. Use **ids**.
+- **`Math.random()` keys**: every render makes all-new items, so **all their state is lost** and their DOM is rebuilt.
+- A component **defined inside** another is a **new type every render**: it's rebuilt and loses state and focus. Define components at the **top level**.
+- `cond ? <A /> : <A />` is **one spot**: state is kept. Two `&&` lines are **two spots**: state resets.
+- A **new `key`** resets a component on purpose: `<EditName key={user.id} />`.

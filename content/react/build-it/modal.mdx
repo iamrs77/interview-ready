@@ -1,10 +1,137 @@
 ---
 title: "Modal Dialog"
-description: "A popup with a portal, Escape and focus."
+description: "A popup over the page: a portal, closing on Escape and on the backdrop, and focus that goes in and comes back."
 icon: PanelTop
-planned: true
 ---
 
-- Open and close
-- Portal
-- Escape key and focus
+## The task
+
+> "Build a reusable modal. A button opens it, and there are a few ways to close it."
+
+- A button **opens** the modal; a **Close** button inside closes it.
+- **Escape** closes it.
+- A click on the dark **backdrop** closes it. A click **inside** the box doesn't.
+- It's rendered into **`document.body`** with a **portal**, so no parent can clip it or cover it.
+- **Focus** moves into the modal when it opens, and goes **back** to the button that opened it when it closes.
+- Screen readers know it's a dialog: `role="dialog"`, `aria-modal="true"`, and a label from its title.
+
+## Plan
+
+- **State:** one boolean, `isOpen`, in the **parent**. The modal only shows when it's open: `{isOpen && <Modal ... />}`.
+- **Props:** `title`, `children` (the content) and `onClose`. The modal never closes itself; it asks the parent with `onClose()`.
+- **Because the modal mounts on open and unmounts on close**, its effects run on open and their cleanups run on close. That's where focus and the Escape listener go.
+
+## The code
+
+```jsx
+import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+
+function Modal({ title, onClose, children }) {
+    const dialogRef = useRef(null);
+    const titleId = useId();
+
+    // On open: remember what had focus, and move focus into the modal.
+    // On close: give focus back.
+    useEffect(() => {
+        const opener = document.activeElement;
+        dialogRef.current.focus();
+
+        return () => {
+            opener.focus();
+        };
+    }, []);
+
+    // Escape closes the modal. The cleanup removes the listener.
+    useEffect(() => {
+        function handleKeyDown(event) {
+            if (event.key === "Escape") {
+                onClose();
+            }
+        }
+
+        document.addEventListener("keydown", handleKeyDown);
+
+        return () => {
+            document.removeEventListener("keydown", handleKeyDown);
+        };
+    }, [onClose]);
+
+    function handleBackdropClick(event) {
+        // Close only for a click on the backdrop itself, not on the box inside it.
+        if (event.target === event.currentTarget) {
+            onClose();
+        }
+    }
+
+    return createPortal(
+        <div
+            className="backdrop"
+            style={{ position: "fixed", inset: 0 }}
+            onClick={handleBackdropClick}
+        >
+            <div
+                className="modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={titleId}
+                tabIndex={-1}
+                ref={dialogRef}
+            >
+                <h2 id={titleId}>{title}</h2>
+                {children}
+                <button onClick={onClose}>Close</button>
+            </div>
+        </div>,
+        document.body
+    );
+}
+
+function App() {
+    const [isOpen, setIsOpen] = useState(false);
+
+    return (
+        <div>
+            <button onClick={() => setIsOpen(true)}>Show terms</button>
+            {isOpen && (
+                <Modal title="Terms" onClose={() => setIsOpen(false)}>
+                    <p>Be kind to other users.</p>
+                </Modal>
+            )}
+        </div>
+    );
+}
+```
+
+## How it works
+
+- **The portal:** `createPortal(jsx, document.body)` puts the modal's DOM at the end of `<body>`, outside the app's own `<div>`. A parent's `overflow: hidden` or `z-index` can't clip it or cover it. It's still part of the React tree, so props, state and context work as normal. See [Portals](../patterns/portals.mdx).
+- **The backdrop** covers the whole screen (`position: fixed; inset: 0`), with the box inside it. A click inside the box **bubbles up** to the backdrop, so the handler checks `event.target === event.currentTarget`: true only when the click landed on the backdrop itself.
+- **Escape** uses a `keydown` listener on `document`, added in an effect and **removed in the cleanup**, so a closed modal leaves nothing behind.
+- **Focus:** the first effect saves `document.activeElement` (the button that opened the modal), then focuses the dialog. `tabIndex={-1}` lets a `<div>` take focus from code. The cleanup runs when the modal closes and puts focus back on that button.
+- **Two separate effects on purpose:** the parent passes a new `onClose` function on every render. If focus were in the same effect as the listener, every parent render would re-run it, and focus would jump back to the dialog while the user is typing inside.
+
+## What interviewers look for
+
+- **A portal**, and knowing why: clipping and stacking, not looks.
+- **Cleanup:** the keydown listener is removed when the modal closes. A leaked listener keeps calling `onClose` after the modal is gone.
+- **Backdrop clicks vs inside clicks:** `event.target === event.currentTarget` (or `stopPropagation()` on the box).
+- **Focus management:** into the modal on open, back to the opener on close. Keyboard and screen reader users get lost otherwise.
+- **ARIA:** `role="dialog"`, `aria-modal="true"`, `aria-labelledby` pointing at the title (with `useId`), and a real `<button>` to close.
+- **A reusable API:** `title`, `children` and `onClose` props, with the open state owned by the parent.
+
+## Likely follow-ups
+
+- **Trap focus inside:** Tab must not reach the page behind. On Tab from the last focusable element, focus the first one (and the other way round for Shift+Tab), or set the `inert` attribute on the rest of the page.
+- **Stop the page behind from scrolling:** in an effect, set `document.body.style.overflow = "hidden"`, and set it back to `""` in the cleanup.
+- **Why not the native `<dialog>`?** It's a good choice in a real app: `dialogRef.current.showModal()` gives you Escape to close, a `::backdrop` and an inert page behind it for free. Building it by hand shows you know what each of those features is for.
+- **Events from a portal:** a click inside the modal still bubbles to the modal's **React** parents (like `App`'s `<div>`), even though in the DOM it lives in `<body>`.
+
+<Callout title="Remember this" type="success">
+  - **`createPortal(jsx, document.body)`**: the DOM goes into `<body>` so nothing clips it, but it stays in the **React tree** (context and events still flow through it).
+  - **Mount only when open** (`{isOpen && <Modal />}`), so effects run on open and **cleanups** run on close.
+  - **Escape:** `document.addEventListener("keydown", ...)` in an effect, **removed in the cleanup**.
+  - **Backdrop click:** close only when **`event.target === event.currentTarget`**.
+  - **Focus:** save `document.activeElement`, focus the dialog (`tabIndex={-1}`), and **give focus back** in the cleanup. Keep it in its own effect with `[]`.
+  - **ARIA:** `role="dialog"`, **`aria-modal="true"`**, `aria-labelledby` the title. Native **`<dialog>`** with `showModal()` gives much of this for free.
+</Callout>

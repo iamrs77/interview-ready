@@ -1,10 +1,128 @@
 ---
 title: "Portals"
-description: "Rendering outside the parent's DOM."
+description: "Rendering a component into a different DOM node, like document.body, while it stays in the same place in the React tree."
 icon: AppWindow
-planned: true
 ---
 
-- createPortal
-- Modals and tooltips
-- Events still bubble through React
+## The idea
+
+A **portal** renders a component's output into a **different DOM node**, usually `document.body`, instead of inside its parent's DOM element. In the **React tree**, though, it stays exactly where you wrote it: it keeps its parent's **context**, and its **events bubble** up to its React parents.
+
+Think of an **extension cord**. The lamp stands across the room, but it still runs on the socket it's plugged into. A modal in a portal sits at the end of `<body>`, but it still gets its props, state and context from the component that rendered it.
+
+## Why modals and tooltips need it
+
+A modal or tooltip written inside a small component is also **inside its parent's DOM element**, and it can inherit that element's CSS problems:
+
+- A parent with **`overflow: hidden`** cuts off the part of the tooltip that sticks out.
+- A parent's **`z-index`** stacking can put the modal **behind** other parts of the page.
+
+Rendering it straight into `document.body` escapes both, while your code keeps the modal next to the button that opens it.
+
+## createPortal
+
+`createPortal(jsx, domNode)` comes from **`react-dom`**. A component returns it like normal JSX:
+
+```jsx
+import { createPortal } from "react-dom";
+
+function Modal({ children, onClose }) {
+    return createPortal(
+        <div className="backdrop">
+            <div className="modal">
+                {children}
+                <button onClick={onClose}>Close</button>
+            </div>
+        </div>,
+        document.body
+    );
+}
+```
+
+Using it, like any other component:
+
+```jsx
+import { useState } from "react";
+
+function ProductCard() {
+    const [isOpen, setIsOpen] = useState(false);
+
+    return (
+        <div className="card">
+            <button onClick={() => setIsOpen(true)}>Show details</button>
+            {isOpen && (
+                <Modal onClose={() => setIsOpen(false)}>Made of cotton.</Modal>
+            )}
+        </div>
+    );
+}
+```
+
+After clicking "Show details", the modal is **not** inside the card in the DOM. It's at the end of `<body>`:
+
+```html
+<body>
+    <div id="root">
+        <div class="card"><button>Show details</button></div>
+    </div>
+    <div class="backdrop">
+        <div class="modal">Made of cotton.<button>Close</button></div>
+    </div>
+</body>
+```
+
+The `Close` button still works: `onClose` is a normal prop, and `setIsOpen` lives in `ProductCard`. When `isOpen` goes back to `false`, React removes the modal from `<body>`.
+
+A real modal also needs the **Escape** key and **focus** handling. See [Build It: Modal Dialog](../build-it/modal.mdx).
+
+## Events bubble through the React tree
+
+This is the part interviewers ask about. A click inside a portal bubbles to its **React** parents, even though they aren't its **DOM** parents:
+
+```jsx
+function Page() {
+    function handleClick() {
+        console.log("Page saw a click");
+    }
+
+    return (
+        <div onClick={handleClick}>
+            <Modal onClose={() => {}}>Hello</Modal>
+        </div>
+    );
+}
+// Click the Close button inside the modal:
+// Page saw a click
+```
+
+In the DOM, the modal is not inside that `<div>`. React still calls the `<div>`'s `onClick`, because React's events follow the **component tree**. **Context** works the same way: the modal reads context from the providers above `Page`.
+
+Two traps come from this:
+
+- A parent's `onClick`, like "close the menu", also fires for clicks **inside** the modal. Call `event.stopPropagation()` in the modal if that's not wanted. See [Handling Events](../react-basics/handling-events.mdx).
+- Code that uses the **real DOM** goes by the DOM: a listener added with `addEventListener` on the `<div>` does **not** see the click, and `div.contains(modalButton)` is `false`. So a "click outside to close" check built on `contains` thinks clicks inside a portal are **outside**.
+
+## Common mistakes
+
+- **Forgetting where to import it from.** `createPortal` comes from **`react-dom`**, not `react`.
+- **Thinking a portal leaves the React tree.** Props, state, context and event bubbling all still follow the component tree.
+- **Being surprised by a parent's `onClick`** firing for clicks inside the modal. Stop the event in the modal.
+- **Calling `createPortal` during server rendering.** There is no `document` on the server, and the server renderer doesn't support portals. Only render the portal in the browser, for example after the user opens it.
+
+## In the interview
+
+**Likely question:** "What is a portal, and when would you use one?"
+
+> "A portal, made with `createPortal` from `react-dom`, renders a component's output into a different DOM node, usually `document.body`, instead of inside its parent element. I use it for modals, tooltips and dropdowns, so a parent's `overflow: hidden` or `z-index` can't cut them off or hide them. Only the DOM position changes. In the React tree the portal stays where I wrote it, so it keeps its props, state and context."
+
+**Likely follow-up:** "If the modal is in `document.body`, does a click inside it reach the parent component's `onClick`?"
+
+**Answer:** "Yes. React events bubble through the React component tree, not the DOM tree, so the parent's `onClick` fires. If I don't want that, I call `event.stopPropagation()` inside the modal. Native listeners added with `addEventListener` do follow the DOM, so they don't see it."
+
+<Callout title="Remember this" type="success">
+  - **`createPortal(jsx, domNode)`** from **`react-dom`** renders into another DOM node, usually **`document.body`**.
+  - Use it for **modals, tooltips and dropdowns**, to escape a parent's **`overflow: hidden`** and **`z-index`**.
+  - Only the **DOM position** changes. In the **React tree** the portal stays put: same **props, state and context**.
+  - **React events bubble through the React tree**: a click in the modal reaches its React parents' `onClick`. Stop it with **`stopPropagation()`**.
+  - Real-DOM code (`addEventListener`, `contains`) goes by the **DOM**, so it sees portal content as **outside** the parent.
+</Callout>

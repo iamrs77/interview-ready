@@ -1,11 +1,147 @@
 ---
 title: "Testing React Components"
-description: "React Testing Library and user-like tests."
+description: "Testing components the way a user uses them, with React Testing Library, user-event and jest-dom."
 icon: FlaskConical
-planned: true
 ---
 
-- Test what the user sees
-- render, screen and queries
-- Simulating users
-- Testing async UI
+## The idea
+
+**React Testing Library** (RTL) tests a component **the way a user uses it**: find things on the screen by what they say and what they are, click and type, then check what the screen shows. It doesn't look at state, props or hooks. Those are **implementation details**: you can change them without the user noticing, and a good test keeps passing.
+
+Think of a **food inspector** who orders the meal and tastes it, instead of reading the recipe. If the chef changes the recipe and the meal tastes the same, the inspector is still happy.
+
+## The tools
+
+| Tool | Its job |
+| --- | --- |
+| **Vitest** or **Jest** | The **test runner**: finds the test files, runs them, and gives you `test` and `expect` |
+| **jsdom** | A fake browser page inside Node, so components render without a real browser |
+| **React Testing Library** | `render` puts a component on the page, and `screen` finds things on it |
+| **user-event** | Acts like a real user: clicks, typing, tabbing |
+| **jest-dom** | Extra checks for the page, like `toBeInTheDocument()`, `toBeDisabled()` and `toHaveValue()` |
+
+jest-dom is set up once, in the runner's setup file. With Vitest, that's one line: `import "@testing-library/jest-dom/vitest";`.
+
+## A first test
+
+The component:
+
+```jsx
+import { useState } from "react";
+
+function Counter() {
+    const [count, setCount] = useState(0);
+
+    return (
+        <div>
+            <p>Count: {count}</p>
+            <button onClick={() => setCount(count + 1)}>Add one</button>
+        </div>
+    );
+}
+```
+
+The test:
+
+```jsx
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { test, expect } from "vitest";
+
+test("adds one when the button is clicked", async () => {
+    const user = userEvent.setup();
+    render(<Counter />);
+
+    const button = screen.getByRole("button", { name: "Add one" });
+    await user.click(button);
+
+    expect(screen.getByText("Count: 1")).toBeInTheDocument();
+});
+```
+
+- **`render`** puts the component on the fake page.
+- **`screen`** holds the queries, which search the whole page.
+- **`getByRole("button", { name: "Add one" })`** finds the button by its **role** and its **accessible name**: here, its text.
+- The test never reads `count`. It checks the text a user would see.
+
+## Queries: getBy, queryBy and findBy
+
+| Query | When nothing matches | Use it for |
+| --- | --- | --- |
+| `getBy...` | **Throws** an error | Things that should be on the screen **now** |
+| `queryBy...` | Returns **`null`** | Checking that something is **not** there |
+| `findBy...` | Returns a **promise** that waits, 1 second by default, then rejects | Things that appear **later**, like after a fetch |
+
+All three **fail with an error** if they find **more than one** match. For several matches, use `getAllBy`, `queryAllBy` or `findAllBy`, which return arrays.
+
+Which one to search by, in order:
+
+1. **`getByRole`**, with the `name` option: buttons, links, headings, checkboxes.
+2. **`getByLabelText`**: form fields, by their label.
+3. **`getByText`**: text that isn't a control, like a paragraph.
+4. **`getByTestId`**: last, only when nothing else works. Users can't see test ids.
+
+Roles and labels are how users and screen readers find things, so these queries also check that the page is **accessible**.
+
+## Simulating the user
+
+**`user-event`** acts like a real user. `const user = userEvent.setup()`, then `await user.click(element)`, `await user.type(input, "Ana")` or `await user.keyboard("{Enter}")`. Every call returns a promise, so always **`await`** it.
+
+RTL also has **`fireEvent`**, which fires **one** DOM event. A real user does more: typing one letter into a field with `user.type` clicks the field first, then fires `keydown`, `keypress`, `beforeinput`, `input` and `keyup`. `fireEvent.change` fires only `change`. `user-event` is closer to real use, so it catches more bugs.
+
+## Testing async UI
+
+Here's a test for the `UserProfile` component from [Fetching Data](../data-and-state/fetching-data.mdx), with `fetch` mocked in one line:
+
+```jsx
+import { render, screen } from "@testing-library/react";
+import { test, expect, vi } from "vitest";
+
+test("shows the user's name after loading", async () => {
+    // Mock fetch: it answers { name: "Ana" } without a network.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ name: "Ana" }));
+
+    render(<UserProfile userId={1} />);
+
+    expect(screen.getByText("Loading...")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Ana" })).toBeInTheDocument();
+    expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+});
+```
+
+- **`getByText`**: the loading message is there **right away**.
+- **`findByRole`**: the name appears **later**, so `await` it. It keeps checking until the heading shows up.
+- **`queryByText`**: the loading message is **gone**. `getByText` would throw here.
+
+Jest has the same mock functions on `jest` instead of `vi`. Bigger projects often use **MSW** (Mock Service Worker), which answers requests at the network level, so the code under test doesn't change.
+
+## Common mistakes
+
+- **`getBy` to check that something is gone.** It throws before `expect` runs. Use **`queryBy`** with `.not.toBeInTheDocument()`.
+- **Forgetting `await`** on `user.click`, `user.type` or `findBy`. The test checks the screen before it has updated.
+- **Testing implementation details**, like state values or which function was called inside. The test breaks on refactors users never notice. Check the screen.
+- **`getByTestId` everywhere.** Prefer `getByRole` and `getByLabelText`: they test what users see, and accessibility too.
+- **`fireEvent` for user actions.** It fires one event, and a real click or key press fires several. Use `user-event`.
+
+## In the interview
+
+**Likely question:** "How do you test React components?"
+
+> "I use React Testing Library with Vitest or Jest as the runner. I test the component the way a user uses it: render it, find elements by role or label, interact with `user-event`, and check what's on the screen with jest-dom matchers like `toBeInTheDocument`. I don't test state or internal functions, so refactoring doesn't break the tests. For data, I mock `fetch` or the API module, and use `findBy` queries to wait for the result."
+
+**Likely follow-up:** "What's the difference between `getBy`, `queryBy` and `findBy`?"
+
+**Answer:** "`getBy` returns the element, or throws if it's missing, so I use it for things that should be there now. `queryBy` returns `null` instead of throwing, so I use it to check that something is not there. `findBy` returns a promise that keeps looking, for one second by default, so I use it for things that appear after async work like a fetch."
+
+**Another follow-up:** "Why `user-event` instead of `fireEvent`?"
+
+**Answer:** "`fireEvent` fires one DOM event. A real user typing a letter causes several: a click to focus the field, then keydown, keypress, input and keyup. `user-event` fires that whole sequence, like a browser would, so the test is closer to real use and catches more bugs."
+
+<Callout title="Remember this" type="success">
+  - **Test like a user**: find what's on the screen, act with **user-event**, check what's on the screen. Not state or props.
+  - The runner is **Vitest** or **Jest**. **RTL** gives **`render`** and **`screen`**. **jest-dom** adds matchers like **`toBeInTheDocument()`**.
+  - **`getBy`** throws when missing. **`queryBy`** returns **`null`**: use it for "not there". **`findBy`** returns a **promise** and waits (1 second by default): use it for async UI.
+  - Search by **`getByRole`** first, with `name`. Then `getByLabelText`, then `getByText`. **`getByTestId`** last.
+  - **`await`** every `user.click`, `user.type` and `findBy`.
+  - Mock `fetch` in one line: **`vi.spyOn(globalThis, "fetch").mockResolvedValue(...)`**.
+</Callout>

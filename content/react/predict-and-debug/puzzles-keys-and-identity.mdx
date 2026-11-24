@@ -1,10 +1,280 @@
 ---
 title: "Puzzles: Keys and Identity"
-description: "When state sticks around, and when it resets."
+description: "When React keeps a component's state, and when it throws it away and starts fresh."
 icon: Key
-planned: true
 ---
 
-- Index keys and reordering
-- Same position, same state
-- Components defined inside components
+## How to solve these
+
+React keeps a component's state as long as the **same type** of component stays at the **same position** in the tree, with the **same key**. Change any of the three, and React removes the old component, with its state, and creates a new one. The puzzles run without Strict Mode. See [Lists and Keys](../react-basics/lists-and-keys.mdx) and [Rendering and the Virtual DOM](../state-and-rendering/how-rendering-works.mdx).
+
+## The puzzles
+
+### 1. Index keys and a new item at the top
+
+```jsx
+function TodoItem({ text }) {
+    const [note, setNote] = useState("");
+
+    return (
+        <li>
+            {text} <input value={note} onChange={(event) => setNote(event.target.value)} />
+        </li>
+    );
+}
+
+function TodoList() {
+    const [todos, setTodos] = useState(["Milk", "Eggs"]);
+
+    function handleAdd() {
+        setTodos(["Bread", ...todos]);
+    }
+
+    return (
+        <div>
+            <button onClick={handleAdd}>Add Bread</button>
+            <ul>
+                {todos.map((todo, index) => (
+                    <TodoItem key={index} text={todo} />
+                ))}
+            </ul>
+        </div>
+    );
+}
+```
+
+**Question:** Ana types "2 litres" next to Milk. Then she clicks "Add Bread". Which item has the note now?
+
+<Accordions>
+<Accordion title="Answer">
+
+**Bread.** The list now shows Bread "2 litres", Milk (empty), Eggs (empty).
+
+- The first row has key `0` before and after. React thinks it's the **same item** whose text changed from Milk to Bread, so it keeps that row's state: the note.
+- The state follows the **position**, not the item.
+
+**The fix:** give each todo a stable id when it's created, and use it as the key.
+
+```jsx
+<ul>
+    {todos.map((todo) => (
+        <TodoItem key={todo.id} text={todo.text} />
+    ))}
+</ul>
+```
+
+</Accordion>
+</Accordions>
+
+### 2. Math.random() as the key
+
+```jsx
+function TodoList() {
+    const [todos, setTodos] = useState([
+        { id: 1, text: "Milk" },
+        { id: 2, text: "Eggs" },
+    ]);
+
+    function handleAdd() {
+        setTodos([...todos, { id: 3, text: "Bread" }]);
+    }
+
+    return (
+        <div>
+            <button onClick={handleAdd}>Add Bread</button>
+            <ul>
+                {todos.map((todo) => (
+                    <TodoItem key={Math.random()} text={todo.text} />
+                ))}
+            </ul>
+        </div>
+    );
+}
+```
+
+**Question:** `TodoItem` is the one from puzzle 1. Ana types a note next to Milk, then clicks "Add Bread". What happens to her note?
+
+<Accordions>
+<Accordion title="Answer">
+
+**It's gone.** Every note is empty.
+
+- `Math.random()` gives every item a **new key on every render**. React sees only new items, so it removes every old `TodoItem`, with its state, and creates new ones, with new `<input>` elements.
+- This happens on **every** render of `TodoList`, not only when an item is added. It's also slow, because every row's DOM is rebuilt.
+
+**The fix:** `key={todo.id}`.
+
+</Accordion>
+</Accordions>
+
+### 3. A component defined inside a component
+
+```jsx
+function SearchPage() {
+    const [query, setQuery] = useState("");
+
+    function SearchBox() {
+        return <input value={query} onChange={(event) => setQuery(event.target.value)} />;
+    }
+
+    return (
+        <div>
+            <SearchBox />
+            <p>Results for: {query}</p>
+        </div>
+    );
+}
+```
+
+**Question:** Click into the box and type "react". What happens?
+
+<Accordions>
+<Accordion title="Answer">
+
+Only **"r"** gets in. After every letter, the input **loses focus**, so you have to click it again.
+
+- Each render of `SearchPage` creates a **new** `SearchBox` function. To React, a new function is a **new component type**. A different type at the same spot means React removes the old `<input>` and creates a new one, which isn't focused.
+- Any state inside `SearchBox` would reset on every render too.
+
+**The fix:** define every component at the **top level** of the file, and pass what it needs as props.
+
+```jsx
+function SearchBox({ query, onQueryChange }) {
+    return <input value={query} onChange={(event) => onQueryChange(event.target.value)} />;
+}
+
+function SearchPage() {
+    const [query, setQuery] = useState("");
+
+    return (
+        <div>
+            <SearchBox query={query} onQueryChange={setQuery} />
+            <p>Results for: {query}</p>
+        </div>
+    );
+}
+```
+
+</Accordion>
+</Accordions>
+
+### 4. Ana's score, Ben's turn
+
+```jsx
+function Counter({ person }) {
+    const [score, setScore] = useState(0);
+
+    return (
+        <div>
+            <h2>{person}: {score}</h2>
+            <button onClick={() => setScore(score + 1)}>Add one</button>
+        </div>
+    );
+}
+
+function Scoreboard() {
+    const [isAnaTurn, setIsAnaTurn] = useState(true);
+
+    return (
+        <div>
+            {isAnaTurn ? <Counter person="Ana" /> : <Counter person="Ben" />}
+            <button onClick={() => setIsAnaTurn(!isAnaTurn)}>Next player</button>
+        </div>
+    );
+}
+```
+
+**Question:** Click "Add one" three times for Ana. Then click "Next player". What does the heading show?
+
+<Accordions>
+<Accordion title="Answer">
+
+**Ben: 3.** Ben gets Ana's score.
+
+- Both sides of the `? :` put a `Counter` in the **same spot**. Same type, same position, so React sees the **same component** with a new `person` prop, and keeps its state.
+
+**The fix:** give each one its own key. A different key means a different component, so Ben starts at 0. Switching back to Ana also starts at 0, because her `Counter` was removed.
+
+```jsx
+{isAnaTurn ? <Counter key="Ana" person="Ana" /> : <Counter key="Ben" person="Ben" />}
+```
+
+</Accordion>
+</Accordions>
+
+### 5. The same thing with two && lines
+
+```jsx
+function Scoreboard() {
+    const [isAnaTurn, setIsAnaTurn] = useState(true);
+
+    return (
+        <div>
+            {isAnaTurn && <Counter person="Ana" />}
+            {!isAnaTurn && <Counter person="Ben" />}
+            <button onClick={() => setIsAnaTurn(!isAnaTurn)}>Next player</button>
+        </div>
+    );
+}
+```
+
+**Question:** The same `Counter` as in puzzle 4. Click "Add one" three times for Ana, then "Next player". What does the heading show?
+
+<Accordions>
+<Accordion title="Answer">
+
+**Ben: 0.**
+
+- Each `{...}` is its **own spot** in the `<div>`, even when it shows nothing. Ana's `Counter` is in the first spot and Ben's in the second.
+- Different spots mean different components, so Ana's is removed with its state, and Ben's starts fresh.
+
+</Accordion>
+</Accordions>
+
+### 6. A prop copied into state
+
+```jsx
+function EditName({ user }) {
+    const [name, setName] = useState(user.name);
+
+    return <input value={name} onChange={(event) => setName(event.target.value)} />;
+}
+
+function App() {
+    const [user, setUser] = useState({ id: 1, name: "Ana" });
+
+    return (
+        <div>
+            <EditName user={user} />
+            <button onClick={() => setUser({ id: 2, name: "Ben" })}>Edit Ben</button>
+        </div>
+    );
+}
+```
+
+**Question:** Click "Edit Ben". What does the input show?
+
+<Accordions>
+<Accordion title="Answer">
+
+Still **Ana**.
+
+- `useState(user.name)` uses its starting value only on the **first** render. `EditName` stays in the same spot with the same type, so React keeps its state and ignores the new prop.
+
+**The fix:** a key. A new key makes a new `EditName`, and its `useState` starts from "Ben".
+
+```jsx
+<EditName key={user.id} user={user} />
+```
+
+</Accordion>
+</Accordions>
+
+<Callout title="Remember this" type="success">
+  - React keeps state while the **same type** stays at the **same position** with the **same key**. Change one, and the state is **reset**.
+  - **Index keys**: insert at the top, and the state stays at the **position**, on the wrong item. Use **ids**.
+  - **`Math.random()` keys**: every render makes all-new items, so **all their state is lost** and their DOM is rebuilt.
+  - A component **defined inside** another is a **new type every render**: it's rebuilt and loses state and focus. Define components at the **top level**.
+  - `cond ? <A /> : <A />` is **one spot**: state is kept. Two `&&` lines are **two spots**: state resets.
+  - A **new `key`** resets a component on purpose: `<EditName key={user.id} />`.
+</Callout>

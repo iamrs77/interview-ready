@@ -1,12 +1,218 @@
 ---
 title: "What's New in React 19"
-description: "Actions, use, ref as a prop and more."
+description: "Actions and form actions, useActionState, useOptimistic, useFormStatus, use, ref as a prop, Activity and useEffectEvent."
 icon: Rocket
-planned: true
 ---
 
-- Actions and form actions
-- useActionState and useOptimistic
-- use
-- ref as a prop
-- Activity and useEffectEvent
+## The idea
+
+React 19 is mostly about **Actions**: async functions that handle a form submit or a data change. React tracks them for you and gives you the **pending** state, the **result** and **optimistic** updates, which you used to wire by hand with several `useState` calls and a `try`/`finally`. It also removes some boilerplate: `ref` is a normal prop, and a context is its own provider.
+
+Think of a café that gives you a **buzzer** with your order. You don't keep asking "is it ready?": the buzzer tells you. Actions are that buzzer for your forms.
+
+## Actions and form actions
+
+In React 19, the function you pass to `startTransition` can be **async**. React calls it an **Action**, and `isPending` stays `true` until it finishes.
+
+A `<form>` can take a **function** as its `action`. When the form is submitted, React calls it with the form's **`FormData`**, runs it as an Action, and **resets the form** when it's done. You don't need `onSubmit`, `event.preventDefault()` or a state per input:
+
+```jsx
+function AddTodo() {
+    async function addTodo(formData) {
+        const title = formData.get("title");
+        await saveTodo(title);
+    }
+
+    return (
+        <form action={addTodo}>
+            <input name="title" />
+            <button type="submit">Add</button>
+        </form>
+    );
+}
+```
+
+In Next.js, `addTodo` can also be a **Server Function** that runs on the server. See [Server Components](./server-components.mdx).
+
+## useActionState
+
+**`useActionState`** keeps the **result** of the last Action, like an error message:
+
+```jsx
+import { useActionState } from "react";
+
+async function signUp(previousState, formData) {
+    const email = formData.get("email");
+    if (!email.includes("@")) {
+        return { error: "Enter a valid email." };
+    }
+
+    await createAccount(email);
+    return { error: null };
+}
+
+function SignUpForm() {
+    const [state, formAction, isPending] = useActionState(signUp, { error: null });
+
+    return (
+        <form action={formAction}>
+            <input name="email" />
+            <button disabled={isPending}>Sign up</button>
+            {state.error && <p>{state.error}</p>}
+        </form>
+    );
+}
+```
+
+You pass it your action and a **starting state**. You get back the **current state** (what the action last returned), a **`formAction`** to put on the form, and **`isPending`**. Your action gets the **previous state** first, then the `FormData`.
+
+## useFormStatus
+
+**`useFormStatus`** comes from **`react-dom`**. It tells a component whether the `<form>` **around it** is being submitted:
+
+```jsx
+import { useFormStatus } from "react-dom";
+
+function SubmitButton() {
+    const { pending } = useFormStatus();
+
+    return <button disabled={pending}>{pending ? "Saving..." : "Save"}</button>;
+}
+```
+
+Put `<SubmitButton />` inside any form, and it disables itself while that form's action runs, with no props. It must be called in a component **inside** the `<form>`. In the component that renders the form, `pending` is always `false`.
+
+## useOptimistic
+
+An **optimistic update** shows the result **before** the server confirms it, so the app feels instant:
+
+```jsx
+import { useState, useOptimistic } from "react";
+
+function TodoList() {
+    const [todos, setTodos] = useState([]);
+    const [optimisticTodos, addOptimisticTodo] = useOptimistic(
+        todos,
+        (currentTodos, newTodo) => [...currentTodos, newTodo]
+    );
+
+    async function addTodo(formData) {
+        const title = formData.get("title");
+        // Shows up at once, while the save is running.
+        addOptimisticTodo({ id: "temp", title: title + " (saving...)" });
+
+        const savedTodo = await saveTodo(title);
+        setTodos((current) => [...current, savedTodo]);
+    }
+
+    return (
+        <form action={addTodo}>
+            <input name="title" />
+            <button type="submit">Add</button>
+            <ul>
+                {optimisticTodos.map((todo) => (
+                    <li key={todo.id}>{todo.title}</li>
+                ))}
+            </ul>
+        </form>
+    );
+}
+```
+
+If Ben adds "Milk", the list shows "Milk (saving...)" at once, while the save runs. When it finishes, React goes back to the real `todos`, which now have the saved todo. If the save **fails** and you catch the error without updating `todos`, the optimistic item simply disappears: there's nothing to roll back. (An error you don't catch goes to the nearest [error boundary](../patterns/error-boundaries.mdx).) Call the update function only **inside an Action** or `startTransition`.
+
+## use
+
+**`use`** reads a **promise** or a **context**. With a promise, the component **suspends** until the promise resolves: React shows the nearest `<Suspense>` fallback, like "Loading...", in its place.
+
+```jsx
+import { use } from "react";
+
+function UserName({ userPromise }) {
+    const user = use(userPromise);
+    return <p>{user.name}</p>;
+}
+```
+
+Unlike other hooks, `use` **can** be called inside `if` and loops. Don't create the promise **during render**, like `use(fetchUser())`: every render makes a new promise, and the component keeps suspending. Pass it in from a Server Component, or use a data library.
+
+## Smaller changes
+
+- **`ref` is a normal prop** on function components: `function MyInput({ ref })`. No more `forwardRef`. See [useRef](../hooks/use-ref.mdx).
+- **A context is its own provider**: `<ThemeContext value="dark">` instead of `<ThemeContext.Provider>`. See [useContext](../hooks/use-context.mdx).
+- **Metadata tags anywhere**: a `<title>`, `<meta>` or `<link>` rendered in any component is moved into the page's `<head>`, and removed when the component unmounts.
+
+## Activity
+
+**`<Activity>`** (React 19.2) hides part of the page **without unmounting** it. With `mode="hidden"`, React hides the children with `display: none`, **keeps their state**, and runs their effect cleanups. When it's `"visible"` again, the effects run again:
+
+```jsx
+import { Activity } from "react";
+
+function TabPanel({ tab }) {
+    return (
+        <Activity mode={tab === "posts" ? "visible" : "hidden"}>
+            <Posts />
+        </Activity>
+    );
+}
+```
+
+With `{tab === "posts" && <Posts />}`, switching tabs unmounts `Posts`, and its state, like a half-typed comment, is lost. With `Activity`, it's still there when Ana comes back.
+
+## useEffectEvent
+
+**`useEffectEvent`** (React 19.2) creates a function for your effects that always sees the **latest** props and state, but is **not a dependency**:
+
+```jsx
+import { useEffect, useEffectEvent } from "react";
+
+function ChatRoom({ roomId, theme }) {
+    const onConnected = useEffectEvent(() => {
+        showNotification("Connected!", theme);
+    });
+
+    useEffect(() => {
+        const connection = createConnection(roomId);
+        connection.on("connected", () => {
+            onConnected();
+        });
+        connection.connect();
+        return () => connection.disconnect();
+    }, [roomId]);
+
+    return <h1>Welcome to {roomId}</h1>;
+}
+```
+
+Changing `roomId` reconnects. Changing `theme` doesn't, but the next notification still uses the new theme. Call `onConnected` only from **inside effects**. See [useLayoutEffect, useId and More](../hooks/more-hooks.mdx).
+
+## Common mistakes
+
+- **`useFormStatus` in the component that renders the form.** It reads the form **around** it, so `pending` stays `false`. Move it into a child, like `<SubmitButton />`. And import it from **`react-dom`**, not `react`.
+- **Calling the `useOptimistic` setter outside an Action.** React warns, and the change is undone right away. Call it inside a form action or `startTransition`.
+- **Creating the promise in render for `use`.** A new promise every render means it never stops loading. Create it outside render.
+- **Forgetting the first argument of a `useActionState` action.** It's `(previousState, formData)`, not `(formData)`.
+
+## In the interview
+
+**Likely question:** "What's new in React 19?"
+
+> "The biggest change is Actions: async functions passed to `startTransition` or to a form's `action` prop. React tracks their pending state, and a form action gets the `FormData` and resets the form when it's done. New hooks build on that: `useActionState` for the action's result, `useFormStatus` for a submit button's pending state, and `useOptimistic` to show a change before the server confirms it. There's also `use` to read a promise or a context, even inside an `if`. And some boilerplate is gone: `ref` is a normal prop, so no `forwardRef`, and a context is its own provider."
+
+**Likely follow-up:** "How does `useOptimistic` work?"
+
+**Answer:** "I give it the real state and a function that adds a change to it. Inside an action, I call the update function to show the change right away, then await the server. When the action finishes, React switches back to the real state, which I've updated by then. If the request fails, I catch the error and don't update the real state, so the optimistic change just disappears. I don't have to roll it back myself."
+
+**Another follow-up:** "What did React 19.2 add?"
+
+**Answer:** "`<Activity>`, which hides part of the page while keeping its state, instead of unmounting it, and cleans up its effects while it's hidden. And `useEffectEvent`, which lets an effect read the latest props and state without adding them to the dependencies, so a theme change doesn't reconnect a chat."
+
+<Callout title="Remember this" type="success">
+  - **Actions**: async functions in **`startTransition`** or a form's **`action`**. A form action gets **`FormData`** and **resets the form** when done.
+  - **`useActionState(action, initialState)`** → `[state, formAction, isPending]`. The action gets **`(previousState, formData)`**.
+  - **`useFormStatus`** (from **`react-dom`**) gives `pending` for the form **around** it: call it in a **child** like `<SubmitButton />`.
+  - **`useOptimistic`** shows a change **at once**, inside an Action. When the action ends, it goes back to the **real state**, so a failed save that didn't update it **just disappears**.
+  - **`use`** reads a **promise** (with Suspense) or a **context**, and **can** be called in `if`. Don't create the promise in render.
+  - **`ref` is a prop**, **`<Context value>`** is the provider, **`<title>`** works anywhere. **19.2**: **`<Activity>`** keeps hidden state; **`useEffectEvent`** reads the latest values without being a dependency.
+</Callout>

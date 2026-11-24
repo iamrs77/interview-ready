@@ -1,10 +1,265 @@
 ---
 title: "Puzzles: Stale Closures"
-description: "Why the old value shows up."
+description: "Why a timer, a listener or a callback sees an old value, and the four ways to fix it."
 icon: Clock3
-planned: true
 ---
 
-- setInterval that stops counting
-- Old values in event handlers
-- The fixes
+## How to solve these
+
+Every render has its own props and state, and every function made during a render **remembers that render's values**. A function that runs later, like a timer, a listener or a memoized callback, still sees the values from the render that made it. That's a **stale closure** (stale means out of date). The puzzles run without Strict Mode. See [useEffect](../hooks/use-effect.mdx) and [useRef](../hooks/use-ref.mdx).
+
+## The puzzles
+
+### 1. The interval that stops at 1
+
+```jsx
+function Timer() {
+    const [seconds, setSeconds] = useState(0);
+
+    useEffect(() => {
+        const intervalId = setInterval(() => {
+            setSeconds(seconds + 1);
+        }, 1000);
+
+        return () => clearInterval(intervalId);
+    }, []);
+
+    return <p>{seconds}</p>;
+}
+```
+
+**Question:** What does the screen show after 5 seconds?
+
+<Accordions>
+<Accordion title="Answer">
+
+**1.**
+
+- The effect ran **once**, after the first render, so the interval's function remembers that render's `seconds`, which is `0`.
+- Every tick calls `setSeconds(0 + 1)`. After the first tick, nothing changes.
+
+**The fix:** use the updater function. It gets the current value from React, so it doesn't need `seconds` at all.
+
+```jsx
+const intervalId = setInterval(() => {
+    setSeconds((current) => current + 1);
+}, 1000);
+```
+
+</Accordion>
+</Accordions>
+
+### 2. Adding seconds to the dependencies
+
+```jsx
+useEffect(() => {
+    const intervalId = setInterval(() => {
+        setSeconds(seconds + 1);
+    }, 1000);
+
+    return () => clearInterval(intervalId);
+}, [seconds]);
+```
+
+**Question:** The same timer, but `seconds` is now in the dependency array. Does it count? What happens to the interval?
+
+<Accordions>
+<Accordion title="Answer">
+
+It counts: **1, 2, 3...**
+
+- Every second, `seconds` changes, so React runs the cleanup (stopping the interval) and the effect again (starting a new one with the new `seconds`).
+- It works, but it creates a new interval every second. The updater from puzzle 1 keeps **one** interval the whole time.
+
+</Accordion>
+</Accordions>
+
+### 3. Two quick clicks
+
+```jsx
+function LikeButton() {
+    const [likes, setLikes] = useState(0);
+
+    async function handleClick() {
+        await saveLike();
+        setLikes(likes + 1);
+    }
+
+    return <button onClick={handleClick}>Likes: {likes}</button>;
+}
+```
+
+**Question:** `saveLike()` takes one second. Ana clicks twice, quickly. What does the button show when both saves are done?
+
+<Accordions>
+<Accordion title="Answer">
+
+**Likes: 1.**
+
+- Both clicks happen before the first save finishes, so before any re-render. Both run the `handleClick` from the render where `likes` is `0`.
+- After the `await`, both call `setLikes(0 + 1)`.
+
+**The fix:** the updater function.
+
+```jsx
+async function handleClick() {
+    await saveLike();
+    setLikes((current) => current + 1);
+}
+```
+
+</Accordion>
+</Accordions>
+
+### 4. A timeout that logs later
+
+```jsx
+function Counter() {
+    const [count, setCount] = useState(0);
+
+    function handleShowClick() {
+        setTimeout(() => {
+            console.log("Count: " + count);
+        }, 3000);
+    }
+
+    return (
+        <div>
+            <button onClick={() => setCount(count + 1)}>Add one</button>
+            <button onClick={handleShowClick}>Show in 3 seconds</button>
+        </div>
+    );
+}
+```
+
+**Question:** Click "Add one" twice. Click "Show in 3 seconds". Then quickly click "Add one" three more times. What logs?
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+Count: 2
+```
+
+- The timeout's function was made in the render where `count` was `2`. The later clicks make new renders, each with a new `count`, but this function still holds the old one.
+- Often that's what you want. For example, a delayed "Send" should go to the person who was selected **when you clicked**, even if someone else is selected by the time it runs.
+
+**The fix**, if you need the **latest** value: keep it in a ref. A ref is **one** box shared by all renders. Now it logs `Count: 5`.
+
+```jsx
+const countRef = useRef(count);
+
+useEffect(() => {
+    countRef.current = count;
+}, [count]);
+
+function handleShowClick() {
+    setTimeout(() => {
+        console.log("Count: " + countRef.current);
+    }, 3000);
+}
+```
+
+</Accordion>
+</Accordions>
+
+### 5. A listener added once
+
+```jsx
+function KeyCounter() {
+    const [count, setCount] = useState(0);
+
+    useEffect(() => {
+        function handleKeyDown() {
+            console.log("Count: " + count);
+        }
+
+        window.addEventListener("keydown", handleKeyDown);
+
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, []);
+
+    return <button onClick={() => setCount(count + 1)}>{count}</button>;
+}
+```
+
+**Question:** Click the button three times. Then press a key. What logs?
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+Count: 0
+```
+
+- The listener was added once, after the first render. So it's that render's `handleKeyDown`, which remembers `count` as `0`. The button shows 3, but the listener never sees it.
+
+**Fix 1:** add `count` to the dependency array. On every change, the cleanup removes the old listener and the effect adds a new one with the new `count`.
+
+**Fix 2:** keep one listener, and read the latest `count` through **`useEffectEvent`** (React 19.2). The function it returns always sees the latest values, and it is **not** a dependency. See [useEffectEvent](../hooks/more-hooks.mdx).
+
+```jsx
+const logCount = useEffectEvent(() => {
+    console.log("Count: " + count);
+});
+
+useEffect(() => {
+    function handleKeyDown() {
+        logCount();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => window.removeEventListener("keydown", handleKeyDown);
+}, []);
+```
+
+</Accordion>
+</Accordions>
+
+### 6. useCallback with empty dependencies
+
+```jsx
+function NoteEditor() {
+    const [text, setText] = useState("");
+
+    const handleSave = useCallback(() => {
+        console.log("Saving: " + text);
+    }, []);
+
+    return (
+        <div>
+            <input value={text} onChange={(event) => setText(event.target.value)} />
+            <button onClick={handleSave}>Save</button>
+        </div>
+    );
+}
+```
+
+**Question:** Type "Hello", then click Save. What logs?
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+Saving:
+```
+
+Nothing after "Saving:". The text is **empty**.
+
+- With `[]`, `useCallback` keeps the function from the **first** render, where `text` was `""`. Typing re-renders, but `handleSave` stays the old function.
+- The lint rule `react-hooks/exhaustive-deps` warns about this.
+
+**The fix:** list what the function uses: `}, [text]);`. See [useMemo and useCallback](../hooks/use-memo-and-use-callback.mdx).
+
+</Accordion>
+</Accordions>
+
+<Callout title="Remember this" type="success">
+  - A function **remembers the values of the render that made it**. Run later, it can see **old** values: a **stale closure**.
+  - Classic cases: an **interval** or **listener** set up once with `[]`, a **timeout**, an **async** handler, a **`useCallback`** with missing dependencies.
+  - Fix 1: the **updater**, `setCount(c => c + 1)`, when the new state comes from the old one.
+  - Fix 2: put the value in the **dependency array**. The cleanup removes the old timer or listener, and the effect adds a fresh one.
+  - Fix 3: a **ref** (`ref.current`) for the latest value, or **`useEffectEvent`** inside effects (React 19.2).
+  - An old value is sometimes **right**: the timeout uses the value from when you clicked.
+</Callout>

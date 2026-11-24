@@ -1,10 +1,302 @@
 ---
 title: "Puzzles: Effects and Render Order"
-description: "What logs, and in what order?"
+description: "What logs, and in what order: render, layout effects, effects and cleanups."
 icon: RefreshCw
-planned: true
 ---
 
-- Render vs effect order
-- Parent and child effects
-- Cleanup order
+## How to solve these
+
+React first **renders** (calls your components, parent before child), then updates the DOM, then runs the **layout effects**, then the **effects**. Effects run **child before parent**. Before an effect runs again, its **cleanup** runs, with the **old** values. The puzzles run without Strict Mode, except puzzle 6. See [useEffect](../hooks/use-effect.mdx).
+
+## The puzzles
+
+### 1. A log in render vs a log in an effect
+
+```jsx
+function App() {
+    console.log("A");
+
+    useEffect(() => {
+        console.log("B");
+    });
+
+    console.log("C");
+
+    return <h1>Hello</h1>;
+}
+```
+
+**Question:** What logs when the page loads?
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+A
+C
+B
+```
+
+- `useEffect` doesn't run the function. It only **hands it to React** for later.
+- The rest of the component runs first (`C`). React updates the DOM, and only **then** runs the effect (`B`).
+
+</Accordion>
+</Accordions>
+
+### 2. useLayoutEffect vs useEffect
+
+```jsx
+function App() {
+    useEffect(() => {
+        console.log("effect");
+    });
+
+    useLayoutEffect(() => {
+        console.log("layout effect");
+    });
+
+    console.log("render");
+
+    return <h1>Hello</h1>;
+}
+```
+
+**Question:** What logs when the page loads?
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+render
+layout effect
+effect
+```
+
+- The order in the code doesn't matter. Both effects wait until the render is done.
+- `useLayoutEffect` runs right after the DOM update, **before the browser paints**. `useEffect` runs after that, usually after the paint. See [useLayoutEffect](../hooks/more-hooks.mdx).
+
+</Accordion>
+</Accordions>
+
+### 3. Parent and child
+
+```jsx
+function Child() {
+    console.log("Child render");
+
+    useEffect(() => {
+        console.log("Child effect");
+    });
+
+    return <p>Child</p>;
+}
+
+function Parent() {
+    console.log("Parent render");
+
+    useEffect(() => {
+        console.log("Parent effect");
+    });
+
+    return <Child />;
+}
+```
+
+**Question:** What logs when the page loads?
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+Parent render
+Child render
+Child effect
+Parent effect
+```
+
+- **Rendering goes down**: React has to call `Parent` to find out that it shows a `Child`.
+- **Effects go up**: when the parent's effect runs, its children are on the page and their effects have already run. Layout effects follow the same order.
+
+</Accordion>
+</Accordions>
+
+### 4. Which count does the cleanup see?
+
+```jsx
+function Counter() {
+    const [count, setCount] = useState(0);
+
+    console.log("render", count);
+
+    useEffect(() => {
+        console.log("effect", count);
+
+        return () => {
+            console.log("cleanup", count);
+        };
+    }, [count]);
+
+    return <button onClick={() => setCount(count + 1)}>{count}</button>;
+}
+```
+
+**Question:** What logs when the page loads? And then after one click?
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+render 0
+effect 0
+render 1
+cleanup 0
+effect 1
+```
+
+- The cleanup runs **after** the new render, right **before** the new effect.
+- It belongs to the **old** effect, made in the render where `count` was `0`, so it logs `0`.
+
+</Accordion>
+</Accordions>
+
+### 5. Parent and child cleanups
+
+```jsx
+function Child({ count }) {
+    useEffect(() => {
+        console.log("Child effect", count);
+
+        return () => {
+            console.log("Child cleanup", count);
+        };
+    }, [count]);
+
+    return <p>{count}</p>;
+}
+
+function Parent() {
+    const [count, setCount] = useState(0);
+
+    useEffect(() => {
+        console.log("Parent effect", count);
+
+        return () => {
+            console.log("Parent cleanup", count);
+        };
+    }, [count]);
+
+    return (
+        <div>
+            <button onClick={() => setCount(count + 1)}>Add one</button>
+            <Child count={count} />
+        </div>
+    );
+}
+```
+
+**Question:** The page has loaded. Click "Add one". What logs?
+
+<Accordions>
+<Accordion title="Answer">
+
+```text
+Child cleanup 0
+Parent cleanup 0
+Child effect 1
+Parent effect 1
+```
+
+- React runs **all the cleanups first**, then **all the new effects**.
+- In each group, the child goes before the parent.
+
+</Accordion>
+</Accordions>
+
+### 6. Strict Mode
+
+```jsx
+function ChatRoom() {
+    useEffect(() => {
+        console.log("connect");
+
+        return () => {
+            console.log("disconnect");
+        };
+    }, []);
+
+    return <h1>Chat</h1>;
+}
+
+const root = createRoot(document.getElementById("root"));
+root.render(
+    <StrictMode>
+        <ChatRoom />
+    </StrictMode>
+);
+```
+
+**Question:** What logs when the page loads in development? And in production?
+
+<Accordions>
+<Accordion title="Answer">
+
+In development:
+
+```text
+connect
+disconnect
+connect
+```
+
+In production: only `connect`.
+
+- In development, Strict Mode acts as if each component were removed and added back once, so every effect runs **setup, cleanup, setup** when the component first appears. It also calls each component function **twice**.
+- It's a test of your cleanup. If the app breaks or two connections stay open, the cleanup is missing. Fix the cleanup, don't block the second run.
+
+</Accordion>
+</Accordions>
+
+### 7. An object as a dependency
+
+```jsx
+function ProductList({ category }) {
+    const [products, setProducts] = useState([]);
+    const options = { category: category, limit: 10 };
+
+    useEffect(() => {
+        fetchProducts(options).then((data) => setProducts(data));
+    }, [options]);
+
+    return <p>{products.length} products</p>;
+}
+```
+
+**Question:** How many times does `fetchProducts` run?
+
+<Accordions>
+<Accordion title="Answer">
+
+**Forever.** Every answer starts a new request.
+
+- `options` is a **new object** on every render, and two different objects are never `Object.is` equal. So React sees a changed dependency after **every** render.
+- The loop: the effect fetches → `setProducts` gets a new array → re-render → new `options` → the effect runs again.
+
+**The fix:** make the object **inside** the effect, and depend on the plain value.
+
+```jsx
+useEffect(() => {
+    const options = { category: category, limit: 10 };
+    fetchProducts(options).then((data) => setProducts(data));
+}, [category]);
+```
+
+</Accordion>
+</Accordions>
+
+<Callout title="Remember this" type="success">
+  - Order: **render (parent → child)** → DOM update → **layout effects** → **effects (child → parent)**.
+  - A `console.log` in the component body runs **during render**, before any effect.
+  - On an update: **all cleanups first**, then the new effects. A cleanup sees the **old** values.
+  - **Strict Mode** (development only): **setup → cleanup → setup**, and each component renders **twice**.
+  - An **object or function made during render** is a new dependency every render. If the effect sets state, it **loops forever**. Depend on **plain values**.
+</Callout>

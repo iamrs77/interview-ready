@@ -1,10 +1,138 @@
 ---
 title: "Error Boundaries"
-description: "Catching errors so one part can't crash the page."
+description: "Catching rendering errors so one broken part shows a fallback instead of blanking the whole page."
 icon: ShieldAlert
-planned: true
 ---
 
-- What an error boundary catches
-- Writing one
-- What it doesn't catch
+## The idea
+
+If a component **throws an error while rendering** and nothing catches it, React removes the **whole app** from the screen: the user sees a blank page. An **error boundary** is a component that catches errors from the components **inside it** and shows a **fallback** UI instead, so the rest of the page keeps working.
+
+Think of the **fuses** in a house. A fault in the kitchen blows the kitchen fuse, and the lights in every other room stay on.
+
+## Writing one
+
+An error boundary must be a **class component**: there is no hook for it. It uses two class methods:
+
+```jsx
+import { Component } from "react";
+
+class ErrorBoundary extends Component {
+    constructor(props) {
+        super(props);
+        this.state = { hasError: false };
+    }
+
+    // A child threw: return the new state, so the next render shows the fallback.
+    static getDerivedStateFromError(error) {
+        return { hasError: true };
+    }
+
+    // Runs after the error is caught: the place to log it.
+    componentDidCatch(error, info) {
+        logError(error, info.componentStack);
+    }
+
+    render() {
+        if (this.state.hasError) {
+            return this.props.fallback;
+        }
+
+        return this.props.children;
+    }
+}
+```
+
+- **`static getDerivedStateFromError(error)`** runs when a child throws. It returns new **state**, here `hasError: true`.
+- **`componentDidCatch(error, info)`** is for **side effects**, like sending the error to a logging service. `info.componentStack` lists the components the error came through.
+
+Wrap the parts that can fail:
+
+```jsx
+function ProductPage() {
+    return (
+        <div>
+            <ProductDetails />
+            <ErrorBoundary fallback={<p>Reviews could not be loaded.</p>}>
+                <Reviews />
+            </ErrorBoundary>
+        </div>
+    );
+}
+```
+
+If `Reviews`, or anything inside it at any depth, throws while rendering, only that area shows the message. `ProductDetails` stays on the screen.
+
+Put one boundary near the **top** of the app as a last safety net, and smaller ones around **independent parts**: a sidebar, a widget, each page. A boundary keeps showing its fallback until it's reset. The simplest reset is a new **`key`**, like `<ErrorBoundary key={pathname}>`: going to another page creates a fresh boundary.
+
+## What it catches, and what it doesn't
+
+| Error thrown in... | Caught? |
+| --- | --- |
+| **Rendering** a child component | Yes |
+| A child's **effects** and class **lifecycle methods** | Yes |
+| **Event handlers**, like `onClick` | No |
+| **Async code**: `setTimeout`, promises, `fetch(...).then(...)` | No |
+| **Server-side rendering** | No |
+| The error boundary **itself**, including its fallback | No: the next boundary **above** catches it |
+
+Event handlers and async callbacks run **outside rendering**. When they throw, the screen isn't half drawn, so React doesn't need a boundary to recover. Handle those errors with a normal **`try...catch`**.
+
+## Sending an async error to a boundary
+
+If an error from a handler or a request **should** show the fallback, catch it, put it in **state**, and **throw it during render**:
+
+```jsx
+import { useState } from "react";
+
+function SaveButton() {
+    const [error, setError] = useState(null);
+
+    // Throwing during render: now the boundary catches it.
+    if (error) {
+        throw error;
+    }
+
+    async function handleClick() {
+        try {
+            await saveTodo();
+        } catch (err) {
+            setError(err);
+        }
+    }
+
+    return <button onClick={handleClick}>Save</button>;
+}
+```
+
+Most apps don't write the class themselves: the **react-error-boundary** package gives a ready-made `<ErrorBoundary>` with a fallback, a reset, and a `showBoundary` function that does the trick above.
+
+## Common mistakes
+
+- **Expecting a boundary to catch errors in `onClick` or `fetch`.** Use `try...catch`, and set state if the fallback should show.
+- **Writing it as a function component.** There's no hook for it. Write the class once, or use react-error-boundary.
+- **Only one boundary, around the whole app.** Any error then replaces the **entire page** with the fallback. Add boundaries around independent parts.
+- **A fallback that can throw.** A boundary can't catch its own errors; they go to the next boundary up. Keep fallbacks simple.
+
+## In the interview
+
+**Likely question:** "What is an error boundary, and what doesn't it catch?"
+
+> "An error boundary is a component that catches errors thrown while rendering the components below it, and in their effects and lifecycle methods. It shows a fallback UI instead of letting React remove the whole app. It has to be a class with `getDerivedStateFromError`, to switch to the fallback, and usually `componentDidCatch`, to log the error. It doesn't catch errors in event handlers, in async code like timers and promises, during server rendering, or in the boundary itself. For those I use `try...catch`, and if I want the fallback, I put the error in state and throw it during render."
+
+**Likely follow-up:** "Why does it have to be a class component?"
+
+**Answer:** "Because the two methods it needs, `getDerivedStateFromError` and `componentDidCatch`, only exist on class components, and React has no hook that does the same. So I write the class once, or use the react-error-boundary package, and wrap my function components with it."
+
+**Another follow-up:** "What happens if no boundary catches the error?"
+
+**Answer:** "React unmounts the whole component tree, so the page goes blank. That's on purpose: a broken, half-updated screen, like a checkout showing the wrong total, can be worse than no screen. That's why apps keep at least one boundary near the top."
+
+<Callout title="Remember this" type="success">
+  - An **error boundary** catches errors while **rendering** its children, and in their **effects** and lifecycle methods, and shows a **fallback**.
+  - No boundary → React **removes the whole app**: a blank page.
+  - Must be a **class**: **`getDerivedStateFromError`** shows the fallback, **`componentDidCatch`** logs. Or use **react-error-boundary**.
+  - **Not caught**: **event handlers**, **async code** (timers, promises), **server rendering**, and the **boundary itself**.
+  - For those, use **`try...catch`**. To show the fallback anyway, **put the error in state and throw it during render**.
+  - One boundary at the **top**, more around **independent parts**. A new **`key`** resets one.
+</Callout>

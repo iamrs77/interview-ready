@@ -1,10 +1,169 @@
 ---
 title: "Composition and Children"
-description: "Building components out of other components."
+description: "Building components by putting other components inside them, with children, slot props and compound components."
 icon: Blocks
-planned: true
 ---
 
-- Composition vs inheritance
-- children and slots
-- Compound components
+## The idea
+
+**Composition** means building a component by **putting other components inside it**, instead of copying or extending its code. A component gets the pieces it shows through props: the **`children`** prop, or other props that take JSX.
+
+Think of a **picture frame**. The frame doesn't care what goes inside: a photo, a painting, a child's drawing. One frame works for all of them. A component that renders `children` is that frame.
+
+## Composition, not inheritance
+
+In many languages you reuse code with **inheritance**: `class SpecialButton extends Button`. React components **never extend each other**. A more specific component **renders** a general one and passes it props:
+
+```jsx
+function Dialog({ title, children }) {
+    return (
+        <div className="dialog">
+            <h2>{title}</h2>
+            {children}
+        </div>
+    );
+}
+
+// A specific dialog: it renders Dialog, it doesn't extend it.
+function DeleteDialog({ onConfirm }) {
+    return (
+        <Dialog title="Delete this todo?">
+            <button onClick={onConfirm}>Delete</button>
+        </Dialog>
+    );
+}
+```
+
+Because props can hold **any JSX**, one general component covers many cases, and you see everything a component shows **where it's used**, not spread over a chain of parent classes. To share **logic** without any UI, write a [custom hook](../hooks/custom-hooks.mdx).
+
+## children and slots
+
+Whatever goes between a component's tags arrives as the **`children`** prop (see [Components and Props](../react-basics/components-and-props.mdx)). The component decides **where** it goes, without knowing **what** it is.
+
+`children` is one "hole". When you need **several** holes, pass JSX through other props. These props are often called **slots**:
+
+```jsx
+function PageLayout({ header, sidebar, children }) {
+    return (
+        <div className="page">
+            <header>{header}</header>
+            <aside>{sidebar}</aside>
+            <main>{children}</main>
+        </div>
+    );
+}
+
+function ShopPage() {
+    return (
+        <PageLayout header={<SearchBar />} sidebar={<CategoryList />}>
+            <ProductGrid />
+        </PageLayout>
+    );
+}
+```
+
+JSX is just a value, so it can go in **any** prop. `PageLayout` owns the **layout**; `ShopPage` owns the **content**.
+
+## Composition fixes prop drilling
+
+**Prop drilling** is passing a prop through components that don't use it, only to reach a deep child. Often the top component can build that child **itself** and pass it down as `children`:
+
+```jsx
+function App({ user }) {
+    // App builds UserMenu, so Header never needs to know about user.
+    return (
+        <Header>
+            <UserMenu user={user} />
+        </Header>
+    );
+}
+
+function Header({ children }) {
+    return <nav className="header">{children}</nav>;
+}
+```
+
+`Header` just places whatever it gets. Try this **before** reaching for [context](../hooks/use-context.mdx).
+
+## Compound components
+
+**Compound components** are a group of components that **work together** and share state behind the scenes, like HTML's `<select>` and `<option>`. The parent holds the state and shares it through **context**, and each part reads it:
+
+```jsx
+import { createContext, useContext, useState } from "react";
+
+const TabsContext = createContext(null);
+
+function Tabs({ defaultTab, children }) {
+    const [activeTab, setActiveTab] = useState(defaultTab);
+
+    return (
+        <TabsContext value={{ activeTab, setActiveTab }}>
+            {children}
+        </TabsContext>
+    );
+}
+
+function Tab({ id, children }) {
+    const { setActiveTab } = useContext(TabsContext);
+
+    return <button onClick={() => setActiveTab(id)}>{children}</button>;
+}
+
+function TabPanel({ id, children }) {
+    const { activeTab } = useContext(TabsContext);
+
+    if (activeTab !== id) {
+        return null;
+    }
+
+    return <div>{children}</div>;
+}
+```
+
+Using it:
+
+```jsx
+function ProductPage() {
+    return (
+        <Tabs defaultTab="details">
+            <Tab id="details">Details</Tab>
+            <Tab id="reviews">Reviews</Tab>
+
+            <TabPanel id="details">Made of cotton.</TabPanel>
+            <TabPanel id="reviews">Ana gave it 5 stars.</TabPanel>
+        </Tabs>
+    );
+}
+```
+
+Clicking "Reviews" shows the reviews panel. The page using `Tabs` chooses the **order and markup**; `Tabs` only manages **which tab is active**. Because the parts use context, they work at **any depth**, even wrapped in other `<div>`s. Libraries often attach the parts to the parent, as in `<Tabs.Panel>`.
+
+## Common mistakes
+
+- **Using `extends` to reuse a component.** Render the general component and pass it props or `children`.
+- **A long list of config props**, like `showButton`, `buttonText`, `buttonColor`. Pass the button itself as JSX in a slot.
+- **Passing a prop through layers that don't use it.** Build the deep child higher up and pass it as `children`, or use context if many components need it.
+- **Using a compound part outside its parent.** `<Tab>` without `<Tabs>` reads `null` from context and crashes. Throw a clear error when the context is missing.
+
+## In the interview
+
+**Likely question:** "Why does React prefer composition over inheritance?"
+
+> "In React I reuse UI by putting components inside each other, not by extending them. A general component like `Dialog` takes `children` or slot props, and a specific one like `DeleteDialog` renders it with its own content. Because props can hold any JSX, one component covers many cases without a class hierarchy, and it's easy to see what a component shows. To share logic without UI, I write a custom hook."
+
+**Likely follow-up:** "What are compound components?"
+
+**Answer:** "A set of components that work together, like `Tabs`, `Tab` and `TabPanel`. The parent holds the shared state and provides it through context, and each part reads it. The user decides the order and markup, the way `<select>` and `<option>` work in HTML."
+
+**Another follow-up:** "How can composition avoid prop drilling?"
+
+**Answer:** "If the middle components only pass a prop along, the top component can create the deep child itself and pass it down as `children` or a slot prop. Then the middle layers never see the data. I try that before adding context."
+
+<Callout title="Remember this" type="success">
+  - **Composition**: build components by **putting components inside** others. React components **never extend** each other.
+  - **`children`** = whatever is between the tags. The component decides **where** it goes, not **what** it is.
+  - **Slots**: other props that take JSX, like `header={<SearchBar />}`, when one hole isn't enough.
+  - Building the deep child higher up and passing it as **`children`** can fix **prop drilling** without context.
+  - **Compound components** (`Tabs`, `Tab`, `TabPanel`) share state through **context**, like `<select>` and `<option>`.
+</Callout>

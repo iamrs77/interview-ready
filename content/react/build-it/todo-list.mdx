@@ -1,10 +1,169 @@
 ---
 title: "Todo List"
-description: "Add, toggle, delete and filter."
+description: "The classic warm-up: add, toggle, delete and filter todos, with a count of the todos left."
 icon: ListTodo
-planned: true
 ---
 
-- State shape
-- Add, toggle and delete
-- Filters
+## The task
+
+> "Build a todo list. I can add a todo, tick it off, delete it, and filter the list."
+
+- Type a todo and press **Enter** or click **Add**. Empty text is ignored.
+- A **checkbox** marks a todo done or not done.
+- A **Delete** button removes a todo.
+- Three filters: **All**, **Active** and **Done**.
+- Show how many todos are **left** (not done yet).
+
+## Plan
+
+- **State:** `todos`, an array of `{ id, text, done }` objects; `text`, what's in the input; `filter`, one of `"All"`, `"Active"` or `"Done"`.
+- **Derived, not state:** the todos to show and the count left. Work them out from `todos` and `filter` on every render. Storing them in state means keeping two copies in sync, and that's where bugs come from.
+- **Components:** `TodoList` owns all the state. `TodoItem` shows one row and tells the parent "toggle this id" or "delete this id".
+
+## The code
+
+```jsx
+import { useState } from "react";
+
+const FILTERS = ["All", "Active", "Done"];
+
+function TodoItem({ todo, onToggle, onDelete }) {
+    return (
+        <li>
+            <label>
+                <input
+                    type="checkbox"
+                    checked={todo.done}
+                    onChange={() => onToggle(todo.id)}
+                />
+                {todo.text}
+            </label>
+            <button aria-label={"Delete " + todo.text} onClick={() => onDelete(todo.id)}>
+                Delete
+            </button>
+        </li>
+    );
+}
+
+function TodoList() {
+    const [todos, setTodos] = useState([]);
+    const [text, setText] = useState("");
+    const [filter, setFilter] = useState("All");
+
+    function handleSubmit(event) {
+        event.preventDefault();
+        const trimmed = text.trim();
+        if (trimmed === "") {
+            return;
+        }
+        const newTodo = { id: crypto.randomUUID(), text: trimmed, done: false };
+        setTodos([...todos, newTodo]);
+        setText("");
+    }
+
+    function handleToggle(id) {
+        const updated = todos.map((todo) => {
+            if (todo.id !== id) {
+                return todo;
+            }
+            return { ...todo, done: !todo.done };
+        });
+        setTodos(updated);
+    }
+
+    function handleDelete(id) {
+        const remaining = todos.filter((todo) => todo.id !== id);
+        setTodos(remaining);
+    }
+
+    // Derived values: worked out on every render, never stored in state.
+    let visibleTodos = todos;
+    if (filter === "Active") {
+        visibleTodos = todos.filter((todo) => !todo.done);
+    }
+    if (filter === "Done") {
+        visibleTodos = todos.filter((todo) => todo.done);
+    }
+    const itemsLeft = todos.filter((todo) => !todo.done).length;
+    const word = itemsLeft === 1 ? "item" : "items";
+
+    return (
+        <div>
+            <form onSubmit={handleSubmit}>
+                <input
+                    aria-label="New todo"
+                    value={text}
+                    onChange={(event) => setText(event.target.value)}
+                />
+                <button type="submit">Add</button>
+            </form>
+
+            <ul>
+                {visibleTodos.map((todo) => (
+                    <TodoItem
+                        key={todo.id}
+                        todo={todo}
+                        onToggle={handleToggle}
+                        onDelete={handleDelete}
+                    />
+                ))}
+            </ul>
+            {visibleTodos.length === 0 && <p>Nothing here.</p>}
+
+            <p>{itemsLeft} {word} left</p>
+            {FILTERS.map((name) => (
+                <button
+                    key={name}
+                    aria-pressed={filter === name}
+                    onClick={() => setFilter(name)}
+                >
+                    {name}
+                </button>
+            ))}
+        </div>
+    );
+}
+
+function App() {
+    return <TodoList />;
+}
+```
+
+## How it works
+
+- **Adding** goes through the form's `onSubmit`, so both Enter and the Add button work. `preventDefault()` stops the page from reloading, and text that is empty after `trim()` is ignored. See [Forms](../state-and-rendering/forms.mdx).
+- **Ids are made once**, when a todo is created, with `crypto.randomUUID()`. The id is the `key`, and it's how toggle and delete find the right todo.
+- **Every update makes a new array**: add with spread, toggle with `map` (and a copy of the one todo that changed), delete with `filter`. React sees a new array and re-renders. See [Updating Objects and Arrays](../state-and-rendering/updating-objects-and-arrays.mdx).
+- **The filtered list and the count** are plain variables, worked out from `todos` and `filter` during render.
+- **`TodoItem` has no state.** It gets a todo and two callbacks: the state lives in the parent, and the child calls up with an id. See [Lifting State Up](../state-and-rendering/lifting-state-up.mdx).
+
+## What interviewers look for
+
+- **No derived state.** Keeping `visibleTodos` or `itemsLeft` in `useState` (and syncing it with an effect) is the most common mistake on this task.
+- **No mutation.** `todos.push(newTodo)` then `setTodos(todos)` passes the **same** array, so React skips the re-render and the new todo doesn't appear.
+- **Stable keys.** `key={todo.id}`, not the index: deleting and filtering change the positions. See [Lists and Keys](../react-basics/lists-and-keys.mdx).
+- **Edge cases:** blank input, clearing the input after adding, and a count that stays right under every filter (count from `todos`, not from `visibleTodos`).
+- **Accessibility:** a real `<form>`, a labelled input, a real checkbox inside a `<label>`, Delete buttons named per todo ("Delete Buy milk"), and `aria-pressed` on the filter buttons.
+
+## Likely follow-ups
+
+- **Edit a todo on double-click:** add `editingId` state, show an input for that row, and on Enter save the new text with a `map`, like toggle.
+- **Clear completed:** keep only the open ones, `setTodos(todos.filter((todo) => !todo.done))`.
+- **Keep todos after a refresh:** read them once with lazy initial state, `useState(readSavedTodos)` (see [useState](../state-and-rendering/use-state.mdx)), and save them when they change:
+
+```jsx
+useEffect(() => {
+    localStorage.setItem("todos", JSON.stringify(todos));
+}, [todos]);
+```
+
+- **More actions, more code:** move the updates into a reducer with actions like `"added"`, `"toggled"` and `"deleted"`. See [useReducer](../hooks/use-reducer.mdx).
+
+<Callout title="Remember this" type="success">
+  - **State:** `todos` (array of `{ id, text, done }`), the input's `text`, and the `filter`. The visible list and the count are **derived**, not state.
+  - **Add** through a form's **`onSubmit`** with `preventDefault()`. `trim()` the text and ignore blanks.
+  - **New arrays only:** add `[...todos, newTodo]`, toggle with **`map`** and `{ ...todo, done: !todo.done }`, delete with **`filter`**.
+  - **Ids are made once**, when the todo is created, and used as **keys**. Never the index.
+  - Count what's left from **`todos`**, not from the filtered list.
+  - **Accessibility:** labelled input, real checkbox in a `<label>`, Delete buttons named per todo, **`aria-pressed`** on the filters.
+</Callout>

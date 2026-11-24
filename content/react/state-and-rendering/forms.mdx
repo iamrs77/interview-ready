@@ -1,11 +1,161 @@
 ---
 title: "Forms: Controlled vs Uncontrolled"
-description: "Inputs owned by React, or by the DOM."
+description: "Inputs whose value lives in React state or in the DOM, and when to use each."
 icon: TextCursorInput
-planned: true
 ---
 
-- Controlled inputs
-- Uncontrolled inputs and refs
-- Checkboxes, selects and many fields
-- Validation
+## The idea
+
+A form input can keep its value in one of two places. In a **controlled** input, **React state** holds the value, and the input shows whatever the state says. In an **uncontrolled** input, the **DOM** holds the value, and you read it when you need it, usually on submit.
+
+Think of **dictation versus a paper form**. With dictation, every word goes through you before it's written down: that's controlled. With a paper form, the person fills it in alone, and you read it when they hand it in: that's uncontrolled.
+
+## Controlled inputs
+
+Give the input a **`value`** from state, and an **`onChange`** that updates the state:
+
+```jsx
+import { useState } from "react";
+
+function NameForm() {
+    const [name, setName] = useState("");
+
+    function handleChange(event) {
+        setName(event.target.value);
+    }
+
+    return (
+        <div>
+            <input value={name} onChange={handleChange} />
+            <p>Hello, {name}</p>
+        </div>
+    );
+}
+```
+
+On each keystroke, `onChange` runs, `setName` stores the new text, React re-renders, and the input shows `name`. React's `onChange` fires on **every keystroke**, not when the input loses focus like the browser's own `change` event.
+
+The value is always in state, so you can check it while the user types, change it (to uppercase, say), disable a button, or clear the input with `setName("")`.
+
+Two rules:
+
+- **`value` needs `onChange`.** Without it, the input is read-only and React warns: "You provided a `value` prop to a form field without an `onChange` handler".
+- **Start with `""`, not `undefined`.** With `useState()`, the input starts uncontrolled. When a value arrives, React warns: "A component is changing an uncontrolled input to be controlled".
+
+## Uncontrolled inputs: FormData or a ref
+
+Leave out `value`. Set the starting value with **`defaultValue`** (`defaultChecked` for a checkbox), and read the values on submit with **`FormData`**, the browser's built-in way to collect every named field of a form:
+
+```jsx
+function SignupForm() {
+    function handleSubmit(event) {
+        // Stop the browser from reloading the page.
+        event.preventDefault();
+
+        const formData = new FormData(event.target);
+        const name = formData.get("name");
+        console.log(name); // Ana
+    }
+
+    return (
+        <form onSubmit={handleSubmit}>
+            <input name="name" defaultValue="Ana" />
+            <input name="email" type="email" />
+            <button type="submit">Sign up</button>
+        </form>
+    );
+}
+```
+
+Typing doesn't re-render anything: React doesn't know about the text until you read it. For a single input, a ref works too: `<input ref={inputRef} defaultValue="Ana" />`, then `inputRef.current.value` in a handler. See [useRef](../hooks/use-ref.mdx).
+
+In React 19, `<form action={saveUser}>` calls `saveUser` with the form's `FormData` on submit, with no `preventDefault` needed, and resets the uncontrolled fields afterwards. See [What's New in React 19](../modern-react/react-19.mdx).
+
+## Checkboxes, selects and many fields
+
+| Element | Control it with | Read the new value from |
+| --- | --- | --- |
+| `<input>`, `<textarea>` | `value` | `event.target.value` |
+| `<input type="checkbox">` | `checked` | `event.target.checked` |
+| `<select>` | `value` on the `<select>` | `event.target.value` |
+
+A checkbox's `event.target.value` is the string `"on"`, not `true` or `false`: read `checked`. For many fields, keep **one state object** and **one handler**, and give each input a `name` that matches a key:
+
+```jsx
+import { useState } from "react";
+
+function ProfileForm() {
+    const [form, setForm] = useState({ name: "", plan: "free", subscribed: false });
+
+    function handleChange(event) {
+        const field = event.target.name;
+        let newValue = event.target.value;
+        if (event.target.type === "checkbox") {
+            newValue = event.target.checked;
+        }
+        setForm({ ...form, [field]: newValue });
+    }
+
+    return (
+        <form>
+            <input name="name" value={form.name} onChange={handleChange} />
+            <select name="plan" value={form.plan} onChange={handleChange}>
+                <option value="free">Free</option>
+                <option value="pro">Pro</option>
+            </select>
+            <input name="subscribed" type="checkbox" checked={form.subscribed} onChange={handleChange} />
+        </form>
+    );
+}
+```
+
+`[field]: newValue` is a **computed property name**: it sets the key whose name is stored in `field`. See [Updating Objects and Arrays](./updating-objects-and-arrays.mdx).
+
+## Validation
+
+With controlled inputs, work out errors **during render** from the state, like `const isEmailValid = email.includes("@");`. Then show a message, or set `disabled={!isEmailValid}` on the submit button. No extra state or effect is needed.
+
+The browser's own checks also work on any form: `required`, `type="email"`, `minLength`. For big forms, many teams use **React Hook Form**, which uses uncontrolled inputs so typing doesn't re-render the whole form.
+
+## Controlled vs uncontrolled
+
+| | Controlled | Uncontrolled |
+| --- | --- | --- |
+| The value lives in | React state | The DOM |
+| Starting value | `value` | `defaultValue`, `defaultChecked` |
+| Reading the value | From state, any time | On submit with `FormData`, or with a ref |
+| Re-renders while typing | Yes, on every keystroke | No |
+| Best for | Checking or formatting while typing, fields that depend on each other | Simple forms read on submit, file inputs |
+
+A **file input**, `<input type="file">`, is always uncontrolled: read the chosen file with `FormData` or a ref.
+
+## Common mistakes
+
+- **`value` without `onChange`.** The input is read-only, and React warns. Add `onChange`, or use `defaultValue`.
+- **Starting with `undefined` or `null`.** The input switches from uncontrolled to controlled, and React warns. Start with `""`.
+- **Both `value` and `defaultValue` on one input.** React warns: an input must be either controlled or uncontrolled. Pick one.
+- **Forgetting `event.preventDefault()`** in `onSubmit`. The browser sends the form and reloads the page.
+- **Reading `event.target.value` on a checkbox.** It's `"on"`. Use `event.target.checked`.
+
+## In the interview
+
+**Likely question:** "What's the difference between controlled and uncontrolled components?"
+
+> "In a controlled input, React state is the single source of truth: I pass `value` from state and update the state in `onChange`, so the input always shows what the state says. In an uncontrolled input, the DOM keeps the value: I set the starting value with `defaultValue` and read it when I need it, with `FormData` on submit or with a ref. Controlled inputs re-render on every keystroke, but let me validate, format or react to the value as the user types. Uncontrolled inputs are simpler when I only need the values on submit."
+
+**Likely follow-up:** "Which one would you use?"
+
+**Answer:** "Controlled when the UI depends on the value while typing: live validation, a disabled submit button, a search that filters as you type, or fields that depend on each other. Uncontrolled for simple forms I only read on submit, and for file inputs, which are always uncontrolled. For big forms, I'd use React Hook Form, which uses uncontrolled inputs to avoid re-rendering on every keystroke."
+
+**Another follow-up:** "How do you handle a form with many fields?"
+
+**Answer:** "One state object and one `onChange` handler. Each input has a `name` that matches a key in the object, and the handler updates that key with `setForm({ ...form, [event.target.name]: newValue })`, reading `checked` instead of `value` for checkboxes."
+
+<Callout title="Remember this" type="success">
+  - **Controlled**: `value` + `onChange`, the value lives in **React state**. **Uncontrolled**: `defaultValue`, the value lives in the **DOM**.
+  - React's **`onChange` fires on every keystroke**, not on blur.
+  - Read uncontrolled values on submit with **`new FormData(event.target)`**, or with a **ref**.
+  - Checkbox → **`checked`**, not `value`. `<select>` and `<textarea>` take **`value`**.
+  - Many fields → **one object**, one handler, **`[event.target.name]`**.
+  - **No `value` without `onChange`**, start with **`""`** not `undefined`, never both `value` and `defaultValue`.
+</Callout>
