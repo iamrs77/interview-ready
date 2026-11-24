@@ -303,12 +303,154 @@ With no prerequisites at all, every course is ready at the start, so any order w
 
 **Time:** O(V + E) · **Space:** O(V + E). The same as problem 1.
 
+### 3. Alien Dictionary (Hard)
+
+**Problem:** an alien language uses the English lowercase letters, but in a different order. You get a list of words **sorted in the alien order**. Return a string of all the letters that appear, in an order that fits. If no order fits, return `""`. Any valid order is accepted. (On LeetCode it is a premium problem.)
+
+`["wrt", "wrf", "er", "ett", "rftt"]` gives `"wertf"`.
+
+**Idea:** compare each word with the **next** one. The first place where they differ gives one rule: the letter in the first word comes before the letter in the second. Every rule is an arrow, the letters are nodes, and the order is a topological sort.
+
+| Pair | First difference | Rule |
+| --- | --- | --- |
+| wrt, wrf | t, f | t → f |
+| wrf, er | w, e | w → e |
+| er, ett | r, t | r → t |
+| ett, rftt | e, r | e → r |
+
+The rules chain up as w → e → r → t → f.
+
+Two traps:
+
+- **Only the first difference counts.** In "wrt" and "wrf", the letters after t and f tell you nothing.
+- **A word followed by its own prefix** ("abc" before "ab") can't happen in any order. Return `""`.
+
+**Step 1: every letter that appears is a node,** even letters with no rules.
+
+```js
+function buildLetterGraph(words) {
+    // letter -> the Set of letters that come after it.
+    const after = new Map();
+    // letter -> how many letters must come before it.
+    const indegree = new Map();
+
+    for (const word of words) {
+        for (const letter of word) {
+            if (!after.has(letter)) {
+                after.set(letter, new Set());
+                indegree.set(letter, 0);
+            }
+        }
+    }
+
+    return { after, indegree };
+}
+```
+
+**Step 2: read the rule from one pair of neighboring words.** It returns `false` for the impossible prefix case.
+
+```js
+function addRule(first, second, after, indegree) {
+    const shorter = Math.min(first.length, second.length);
+
+    for (let i = 0; i < shorter; i++) {
+        const letterA = first[i];
+        const letterB = second[i];
+
+        if (letterA !== letterB) {
+            // The first difference: letterA comes before letterB.
+            // Count each rule once, even if two pairs give the same one.
+            if (!after.get(letterA).has(letterB)) {
+                after.get(letterA).add(letterB);
+                indegree.set(letterB, indegree.get(letterB) + 1);
+            }
+
+            // Letters after the first difference tell us nothing.
+            return true;
+        }
+    }
+
+    // No difference: the shorter word must come first.
+    return first.length <= second.length;
+}
+```
+
+**Step 3: Kahn's algorithm,** with letters instead of numbers.
+
+```js
+function sortLetters(after, indegree) {
+    const queue = [];
+    for (const [letter, count] of indegree) {
+        if (count === 0) {
+            queue.push(letter);
+        }
+    }
+
+    let order = "";
+    let head = 0;
+
+    while (head < queue.length) {
+        const letter = queue[head];
+        head++;
+        order = order + letter;
+
+        for (const nextLetter of after.get(letter)) {
+            indegree.set(nextLetter, indegree.get(nextLetter) - 1);
+
+            if (indegree.get(nextLetter) === 0) {
+                queue.push(nextLetter);
+            }
+        }
+    }
+
+    return order;
+}
+```
+
+**Step 4: put it together.** If some letters are missing from the order, the rules have a loop.
+
+```js
+function alienOrder(words) {
+    const { after, indegree } = buildLetterGraph(words);
+
+    for (let i = 0; i + 1 < words.length; i++) {
+        const possible = addRule(words[i], words[i + 1], after, indegree);
+
+        if (!possible) {
+            return "";
+        }
+    }
+
+    const order = sortLetters(after, indegree);
+
+    // Some letters never got ready: a loop.
+    if (order.length < indegree.size) {
+        return "";
+    }
+
+    return order;
+}
+
+console.log(alienOrder(["wrt", "wrf", "er", "ett", "rftt"])); // wertf
+console.log(alienOrder(["z", "x"])); // zx
+
+// z before x, then x before z: a loop.
+console.log(alienOrder(["z", "x", "z"]) === ""); // true
+
+// "abc" before "ab": impossible.
+console.log(alienOrder(["abc", "ab"]) === ""); // true
+```
+
+**Time:** O(C), where C is the total number of letters in all the words. Each pair of neighbors is compared once, letter by letter, and the sort itself is tiny. **Space:** O(1) extra: at most 26 letters and 26 × 25 rules, whatever the input size.
+
+Comparing neighbors is enough. If the list is sorted, any rule you'd get from comparing word 1 with word 3 already follows from the neighbor pairs.
+
 ## How to spot it
 
 - **"Prerequisites", "depends on", "must come before", "build order", "install order"**: tasks with rules about what comes first.
 - **"Is it possible to finish all ...?"** → Kahn's algorithm, and check that every node made it (a loop check).
 - **"Return an order"** → Kahn's algorithm, return the list.
-- **"Find the order of letters in an alien language"** from a sorted word list (Alien Dictionary): each pair of neighboring words gives one "this letter comes before that letter" arrow.
+- **"Find the order of letters in an alien language"** from a sorted word list ([Alien Dictionary](#3-alien-dictionary-hard)): each pair of neighboring words gives one "this letter comes before that letter" arrow.
 - **"Minimum number of semesters / rounds"** when you can do many tasks at once → Kahn's algorithm, one level of the queue at a time.
 
 ## Common mistakes
@@ -316,6 +458,7 @@ With no prerequisites at all, every course is ready at the start, so any order w
 - **Arrows the wrong way.** In Course Schedule, `[a, b]` means "a needs b", so the arrow is `b → a`. Read the problem twice, and test with the tiny example.
 - **Forgetting nodes with no edges.** Find the ready nodes by looping over **all** n nodes, not only the ones in the pairs.
 - **Returning a partial order when there's a loop.** Always check `order.length < n`.
+- **Alien Dictionary: reading past the first difference,** or missing the prefix case (`"abc"` before `"ab"`).
 - **Thinking there is only one right answer.** Many orders can be valid, and LeetCode accepts any of them.
 - **Adding a node to the queue before its in-degree reaches 0.** Lower the count first, then add it only when it hits exactly 0.
 - **`queue.shift()`.** It's O(n) per call. Use a head index.

@@ -462,11 +462,86 @@ console.log(containsAnagram("ab", "eidboaoo")); // false
 
 **Find All Anagrams in a String** is the same loop. Instead of returning `true` on a match, save the window's start, `right - size + 1` (or 0 for the first window), and return the list at the end.
 
+### 5. Longest Repeating Character Replacement
+
+**Problem:** `text` holds uppercase letters. You may change **at most `k`** letters into any other letter. Return the length of the longest substring that can be made of one repeated letter. `"ABAB"` with k = 2 gives 4 (change both B's). `"AABABBA"` with k = 1 gives 4 (change the B in `"AABA"` to get `"AAAA"`).
+
+**Idea:** to make a window all one letter, keep its **most common letter** and change all the others. So a window is fine when:
+
+`window length - count of its most common letter <= k`
+
+That's a variable-size window: grow on the right, and **while** the window needs more than k changes, shrink from the left. Keep the letter counts in an array of 26, as in Permutation in String.
+
+**Step 1: how many changes a window needs.**
+
+```js
+// Keep the most common letter, change all the others.
+function changesNeeded(counts, windowLength) {
+    let mostCommon = 0;
+
+    for (const count of counts) {
+        mostCommon = Math.max(mostCommon, count);
+    }
+
+    return windowLength - mostCommon;
+}
+```
+
+**Step 2: slide the window.**
+
+```js
+function characterReplacement(text, k) {
+    // Letter counts in the window: slot 0 is "A", slot 25 is "Z".
+    const counts = new Array(26).fill(0);
+    let left = 0;
+    let best = 0;
+
+    for (let right = 0; right < text.length; right++) {
+        // 1. Grow: the new letter joins the window.
+        const comingIn = text.charCodeAt(right) - 65;
+        counts[comingIn]++;
+
+        // 2. Shrink while the window needs more than k changes.
+        while (changesNeeded(counts, right - left + 1) > k) {
+            const goingOut = text.charCodeAt(left) - 65;
+            counts[goingOut]--;
+            left++;
+        }
+
+        // 3. Measure.
+        const windowLength = right - left + 1;
+        best = Math.max(best, windowLength);
+    }
+
+    return best;
+}
+
+console.log(characterReplacement("ABAB", 2)); // 4
+console.log(characterReplacement("AABABBA", 1)); // 4
+```
+
+How it runs on `"AABABBA"` with k = 1:
+
+| right | Letter in | Shrink | Window | Changes needed | best |
+| --- | --- | --- | --- | --- | --- |
+| 0 | A | | `A` | 0 | 1 |
+| 1 | A | | `AA` | 0 | 2 |
+| 2 | B | | `AAB` | 1 | 3 |
+| 3 | A | | `AABA` | 1 | **4** |
+| 4 | B | drop A, drop A | `BAB` | 1 | 4 |
+| 5 | B | | `BABB` | 1 | 4 |
+| 6 | A | drop B, drop A | `BBA` | 1 | 4 |
+
+**Time:** O(n) · **Space:** O(1). `changesNeeded` looks at 26 counts, which is a constant, and `left` and `right` each move at most n times.
+
+You may see a shortcut that keeps the biggest count seen so far and **never lowers it** while shrinking. It is also correct, because the answer can only grow when some letter beats that record. The version above is easier to explain.
+
 ## How to spot it
 
 - The answer is a **subarray or substring**: items **in a row**, "contiguous", "consecutive".
 - The question says **longest**, **shortest**, **maximum sum**, **at most K**, **at least K**, or **contains all of**.
 - "**Of size k**" or "every k items in a row": a fixed-size window.
+- "**Change at most k**", "flip at most k zeros" (Longest Repeating Character Replacement, Max Consecutive Ones III): a variable window that is fine while it needs at most k fixes.
 - For sums: the numbers are **never negative**.
 - Not a window: "**subsequence**" (items don't have to be next to each other) usually means [dynamic programming](../dynamic-programming/dp-basics.mdx). An exact sum with **negative numbers** means [prefix sum](../arrays-hashing/prefix-sum.mdx).
 
@@ -494,6 +569,7 @@ Say why it's a window and why it's O(n):
   - **Fixed size:** add the item coming in, subtract the item going out. O(n) instead of O(n · k).
   - **Anagram of a pattern inside a text:** a fixed window of `pattern.length`, with two arrays of 26 letter counts.
   - **Variable size:** grow with `right` every step, and shrink with `left` **while** the rule is broken.
+  - **At most k changes:** a window is fine while `length - mostCommonCount <= k`.
   - `left` only moves forward, so the loop inside a loop is still **O(n)**.
   - **Longest** → measure after shrinking. **Shortest** → measure while the window is good, then shrink.
   - Sum windows need **non-negative numbers**. With negatives, use a prefix sum and a hash map.

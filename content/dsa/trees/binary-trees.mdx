@@ -717,6 +717,285 @@ For 5 and 4, the call on node 5 returns 5 straight away without looking below it
 
 This trusts the promise that both nodes are in the tree. If one might be missing, the function would wrongly return the other one, so you would also have to check that both were really found. In a [binary search tree](./binary-search-trees.mdx#3-lowest-common-ancestor-of-a-bst) there is a faster way: the order rule tells you which side to go.
 
+### 9. Subtree of Another Tree
+
+**Problem:** given two trees, `root` and `subRoot`, return `true` if some node in `root` starts a subtree that is **exactly** `subRoot`: the same shape and values, all the way down to the leaves. `[3, 4, 5, 1, 2]` and `[4, 1, 2]` → `true`. `[3, 4, 5, 1, 2, null, null, null, null, 0]` and `[4, 1, 2]` → `false`.
+
+**Each call returns:** `true` if `subRoot` matches the subtree at this node, or somewhere below it.
+
+**Idea:** try every node of `root` as a starting point, and compare from there with `isSameTree` from problem 3.
+
+```js
+// Returns: true if subRoot appears somewhere in the subtree under node.
+function isSubtree(node, subRoot) {
+    // Ran out of tree without a match.
+    if (node === null) {
+        return false;
+    }
+
+    // Does the subtree that starts here match exactly?
+    if (isSameTree(node, subRoot)) {
+        return true;
+    }
+
+    // If not, look further down: first the left side, then the right.
+    if (isSubtree(node.left, subRoot)) {
+        return true;
+    }
+
+    return isSubtree(node.right, subRoot);
+}
+```
+
+In the second example, the 4 has the same values, but node 2 below it has an extra child, 0. "Exactly" means down to the leaves, so it doesn't count.
+
+```js
+const bigTree = buildTree([3, 4, 5, 1, 2]);
+const smallTree = buildTree([4, 1, 2]);
+const extraTree = buildTree([3, 4, 5, 1, 2, null, null, null, null, 0]);
+
+console.log(isSubtree(bigTree, smallTree)); // true
+console.log(isSubtree(extraTree, smallTree)); // false
+```
+
+**Time:** O(n × m), where n is the size of `root` and m the size of `subRoot`: from each of the n nodes, `isSameTree` can compare up to m nodes. **Space:** O(h) for the call stack.
+
+A faster O(n + m) way exists: write both trees as text with a marker for every empty spot, as in problem 12, put a comma in front of every value (so `2` can't match the end of `12`), and check whether one text contains the other with a linear-time string search (KMP). The simple version is what most interviewers expect; mention the faster one.
+
+### 10. Binary Tree Maximum Path Sum (Hard)
+
+**Problem:** a **path** goes from node to node along the edges and never visits a node twice. It has at least one node, and it does not have to pass through the root. Return the biggest sum of values on any path. Values can be **negative**. `[1, 2, 3]` → `6` (2 → 1 → 3). `[-10, 9, 20, null, null, 15, 7]` → `42`.
+
+```mermaid
+graph TD
+  A(("-10")):::service --> B((9)):::service
+  A --> C((20)):::storage
+  C --> D((15)):::storage
+  C --> E((7)):::storage
+```
+
+The green path, 15 → 20 → 7, adds up to 42. It leaves out the root: going on to -10 would only lower the sum.
+
+**Each call returns:** the biggest sum of a path that **starts at this node and goes down one side**. That is what the parent can add to its own path. The best answer is tracked **outside**, in a variable.
+
+**Idea:** this is [Diameter](#6-diameter-of-binary-tree) again, with sums instead of lengths. At each node, the best path that bends here is the node's value plus the best branch on the left plus the best branch on the right. Two changes from Diameter:
+
+- A branch that adds up to **less than 0** only lowers the sum, so leave it out: count it as 0.
+- The parent can continue down only **one** side, because a path can't split. So return the node's value plus the better branch.
+
+```js
+function maxPathSum(root) {
+    // Start below any real answer: every value may be negative.
+    let best = -Infinity;
+
+    // Returns: the biggest sum of a path that starts at node and goes
+    // down one side. On the way, it updates best.
+    function bestBranch(node) {
+        if (node === null) {
+            return 0;
+        }
+
+        const leftBranch = bestBranch(node.left);
+        const rightBranch = bestBranch(node.right);
+
+        // A branch below 0 only lowers the sum. Leave it out (count it as 0).
+        const leftGain = Math.max(0, leftBranch);
+        const rightGain = Math.max(0, rightBranch);
+
+        // The best path that bends at this node uses both sides.
+        const pathThroughNode = node.val + leftGain + rightGain;
+        best = Math.max(best, pathThroughNode);
+
+        // The parent can continue down only one side.
+        return node.val + Math.max(leftGain, rightGain);
+    }
+
+    bestBranch(root);
+    return best;
+}
+```
+
+How it runs on `[-10, 9, 20, null, null, 15, 7]`:
+
+| Node | leftGain | rightGain | Path through node | Returns | best |
+| --- | --- | --- | --- | --- | --- |
+| 9 | 0 | 0 | 9 | 9 | 9 |
+| 15 | 0 | 0 | 15 | 15 | 15 |
+| 7 | 0 | 0 | 7 | 7 | 15 |
+| 20 | 15 | 7 | **42** | 35 | **42** |
+| -10 | 9 | 35 | 34 | 25 | 42 |
+
+When every value is negative, the answer is the biggest single value. That's why `best` starts at `-Infinity`, not 0.
+
+```js
+const smallPathTree = buildTree([1, 2, 3]);
+const negativeTree = buildTree([-10, 9, 20, null, null, 15, 7]);
+const allNegativeTree = buildTree([-2, -1]);
+
+console.log(maxPathSum(smallPathTree)); // 6
+console.log(maxPathSum(negativeTree)); // 42
+console.log(maxPathSum(allNegativeTree)); // -1
+```
+
+**Time:** O(n) · **Space:** O(h). One pass over the tree, like Diameter.
+
+### 11. Construct Binary Tree from Preorder and Inorder Traversal
+
+**Problem:** you get the preorder and the inorder lists of a tree whose values are all different. Build the tree. `preorder = [3, 9, 20, 15, 7]` and `inorder = [9, 3, 15, 20, 7]` give `[3, 9, 20, null, null, 15, 7]`.
+
+**Idea:** each list gives one half of what you need.
+
+- **Preorder** is node, left, right, so its **first value is the root**.
+- **Inorder** is left, node, right. Find the root in it: everything **before** it is the left subtree, everything **after** it is the right subtree.
+- Do the same for each side.
+
+| Part | Preorder | Inorder | Root | Left of root in inorder | Right of root in inorder |
+| --- | --- | --- | --- | --- | --- |
+| Whole tree | **3**, 9, 20, 15, 7 | 9, **3**, 15, 20, 7 | 3 | 9 | 15, 20, 7 |
+| Right of 3 | **20**, 15, 7 | 15, **20**, 7 | 20 | 15 | 7 |
+
+Two things keep it fast:
+
+- A **Map** from each value to its place in inorder, so finding the root is O(1), not a search.
+- One index, `next`, into preorder. The code builds nodes in exactly preorder's order (a node, then its whole left subtree, then its right subtree), so the next root is always `preorder[next]`.
+
+```js
+function buildFromOrders(preorderValues, inorderValues) {
+    // Where each value sits in inorder, so the root is found in O(1).
+    const placeInInorder = new Map();
+    for (let i = 0; i < inorderValues.length; i++) {
+        placeInInorder.set(inorderValues[i], i);
+    }
+
+    // preorderValues[next] is the root of the next subtree we build.
+    let next = 0;
+
+    // Builds the subtree made of inorderValues[low] to inorderValues[high].
+    function build(low, high) {
+        // No values in this part: an empty spot.
+        if (low > high) {
+            return null;
+        }
+
+        const node = new TreeNode(preorderValues[next]);
+        next++;
+
+        // Before it in inorder: its left side. After it: its right side.
+        const middle = placeInInorder.get(node.val);
+
+        // Preorder lists the left subtree first, so build it first.
+        node.left = build(low, middle - 1);
+        node.right = build(middle + 1, high);
+
+        return node;
+    }
+
+    return build(0, inorderValues.length - 1);
+}
+```
+
+To check it, walk the new tree: it should give back the same two lists.
+
+```js
+const rebuilt = buildFromOrders([3, 9, 20, 15, 7], [9, 3, 15, 20, 7]);
+
+console.log(rebuilt.val); // 3
+console.log(rebuilt.right.val); // 20
+console.log(preorder(rebuilt)); // [ 3, 9, 20, 15, 7 ]
+console.log(inorder(rebuilt)); // [ 9, 3, 15, 20, 7 ]
+```
+
+**Time:** O(n) · **Space:** O(n). Each node is made once, and the Map holds n values. Without the Map, searching inorder for every root makes it O(n²).
+
+- The values must be **all different**. With repeats, you can't tell which copy in inorder is the root.
+- **Inorder + postorder** works the same way: the root is the **last** value of postorder, and you build the **right** side first.
+- **Preorder + postorder** is not enough on its own. Preorder `[1, 2]` and postorder `[2, 1]` fit both "2 is the left child" and "2 is the right child".
+
+### 12. Serialize and Deserialize Binary Tree (Hard)
+
+**Problem:** write `serialize(root)`, which turns a tree into a string, and `deserialize(text)`, which turns that string back into the same tree. You choose the format.
+
+**Idea:** a preorder walk that writes `#` for **every empty spot**. In problem 11, one list was not enough to rebuild the tree. With the empty spots written down, preorder alone is enough: you always know where each subtree ends.
+
+The tree `[1, 2, 3, null, null, 4, 5]` becomes `1,2,#,#,3,4,#,#,5,#,#`.
+
+```js
+// Preorder, with "#" for every empty spot.
+function serialize(root) {
+    const parts = [];
+
+    function write(node) {
+        if (node === null) {
+            parts.push("#");
+            return;
+        }
+
+        parts.push(String(node.val));
+        write(node.left);
+        write(node.right);
+    }
+
+    write(root);
+    return parts.join(",");
+}
+```
+
+To read it back, read the parts **in the same order**: a value makes a node, then you read its left subtree, then its right subtree. A `#` is an empty spot.
+
+```js
+function deserialize(text) {
+    const parts = text.split(",");
+
+    // The index of the next part to read.
+    let next = 0;
+
+    // Reads one subtree, in the same order serialize wrote it.
+    function read() {
+        const part = parts[next];
+        next++;
+
+        if (part === "#") {
+            return null;
+        }
+
+        const node = new TreeNode(Number(part));
+        node.left = read();
+        node.right = read();
+
+        return node;
+    }
+
+    return read();
+}
+```
+
+How `read` rebuilds `1,2,#,#,3,4,#,#,5,#,#`:
+
+| Read | What it is | Where it goes |
+| --- | --- | --- |
+| 1 | a node | the root |
+| 2 | a node | left of 1 |
+| #, # | empty spots | 2's two children. 2 is done |
+| 3 | a node | right of 1 |
+| 4 | a node | left of 3 |
+| #, # | empty spots | 4's two children |
+| 5 | a node | right of 3 |
+| #, # | empty spots | 5's two children. Done |
+
+```js
+const codeTree = buildTree([1, 2, 3, null, null, 4, 5]);
+const savedText = serialize(codeTree);
+console.log(savedText); // 1,2,#,#,3,4,#,#,5,#,#
+
+const copiedTree = deserialize(savedText);
+console.log(isSameTree(codeTree, copiedTree)); // true
+console.log(serialize(null)); // #
+```
+
+**Time:** O(n) · **Space:** O(n) for the text, plus O(h) for the call stack. Read the parts with an index, not with `parts.shift()`: shift is O(n) per call.
+
+LeetCode's own format, `[1, 2, 3, null, null, 4, 5]`, is the BFS version of the same idea. `buildTree` at the top of this page is its deserialize.
+
 ## How to spot it
 
 - The problem asks about **depth, height, size or paths** from the root to a leaf.
@@ -724,6 +1003,9 @@ This trusts the promise that both nodes are in the tree. If one might be missing
 - It asks you to **change every node** (invert, add a value, prune).
 - The answer for a node can be **built from its children's answers**.
 - It asks where two nodes **meet**: their lowest common ancestor.
+- It asks for the **best path anywhere** in the tree (Maximum Path Sum). Do it like Diameter: return the best one-sided branch, and track the best bent path outside.
+- It gives you **traversal lists** and asks for the tree: the first preorder value is the root; find it in inorder to split left from right.
+- It asks you to **save and load** a tree (serialize): preorder, with a marker for every empty spot.
 - If the problem talks about **levels** or rows, or "the closest leaf", use [Tree BFS](./tree-bfs.mdx) instead.
 
 ## Common mistakes
@@ -733,6 +1015,7 @@ This trusts the promise that both nodes are in the tree. If one might be missing
 - **Forgetting `return`.** Writing `maxDepth(node.left);` without saving or returning the answer throws it away.
 - **Calling the same helper twice per node.** The slow balanced check calls `maxDepth` at every node, so it walks the same nodes again and again (up to O(n²)). Return everything the parent needs in **one** pass.
 - **Mixing up edges and nodes.** Diameter counts edges, Maximum Depth counts nodes. Check the example.
+- **Starting the best at 0 in Maximum Path Sum.** If every value is negative, the answer is negative. Start at `-Infinity`.
 - **Building the result with spread** (`[node.val, ...preorder(node.left), ...preorder(node.right)]`). It copies lists at every level. Push into one shared array instead.
 - **Changing the input by accident.** Invert Tree changes the tree. Say so, or copy it first.
 
@@ -752,7 +1035,8 @@ This trusts the promise that both nodes are in the tree. If one might be missing
   - **Preorder** = node, left, right. **Inorder** = left, node, right (sorted on a BST). **Postorder** = left, right, node.
   - For any tree problem, decide **what one call returns** for its subtree, what it returns for `null`, and how to build it from the two children's answers. Then **trust the calls**.
   - Answers go **up** through return values (height, size) or **down** through arguments (remaining sum, depth so far).
-  - When the parent needs something different from the final answer (Diameter), **return what the parent needs** and track the answer in an outer variable.
+  - When the parent needs something different from the final answer (Diameter, Max Path Sum), **return what the parent needs** and track the answer in an outer variable.
+  - **Serialize** = preorder with `#` for every empty spot. **Deserialize** reads it back in the same order with one index.
   - Iterative inorder: **go left and push, pop and visit, then go right**.
   - Tree DFS is **O(n) time** and **O(h) space**: O(log n) if balanced, O(n) for a chain.
 </Callout>

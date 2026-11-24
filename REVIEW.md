@@ -20,7 +20,10 @@
   - Gaps filled:
     - Problems: Longest Consecutive Sequence, Trapping Rain Water, Permutation in String, Sort Colors, LCA of a binary tree, Cheapest Flights (Bellman-Ford), Min Cost to Connect Points (Kruskal), Permutations II, House Robber II, Interval List Intersections.
     - Topics: prefix-sum follow-ups, O(n!), and an intervals template on the cheat sheet.
-- **Not done, on purpose:** more classic problems the reviewers listed: Max Path Sum, Build Tree from Preorder + Inorder, Serialize Tree, Subtree, BST delete code, Word Ladder, Alien Dictionary, Longest Repeating Character Replacement, Valid Sudoku.
+- **Done later (2026-11-24):** the other classic problems the reviewers listed.
+  - Binary Trees: Subtree of Another Tree, Max Path Sum, Build Tree from Preorder + Inorder, Serialize and Deserialize.
+  - BST: Delete Node. Graph BFS/DFS: Word Ladder. Topological Sort: Alien Dictionary. Sliding Window: Longest Repeating Character Replacement. Hash Maps: Valid Sudoku.
+  - Checked: every block on those pages run the way the Run button runs it (all `// output` comments match), and each solution compared with a brute-force version on 3,000 random inputs.
 
 ## Run button: earlier steps
 

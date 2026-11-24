@@ -502,6 +502,94 @@ In the second grid, the orange at the bottom left is cut off by empty cells, so 
 
 **Time:** O(rows × cols) · **Space:** O(rows × cols). Each cell enters the queue at most once, and the queue can hold every cell.
 
+### 4. Word Ladder (Hard)
+
+**Problem:** you get `beginWord`, `endWord` and a `wordList`. Each step changes **exactly one letter**, and every word you step on (after `beginWord`) must be in `wordList`. Return the number of words in the shortest ladder from `beginWord` to `endWord`, counting both ends, or 0 if there is none.
+
+`"hit"` → `"cog"` with `["hot", "dot", "dog", "lot", "log", "cog"]` gives 5: hit → hot → dot → dog → cog.
+
+**Idea:** each word is a node, and two words are joined when they differ by one letter. "Shortest" with equal steps means **BFS**. You don't build the whole graph first. From each word, make its neighbors on the spot: change each letter to every letter from a to z, and keep the words that are in the list.
+
+| Ladder length | Words BFS reaches |
+| --- | --- |
+| 1 | hit |
+| 2 | hot |
+| 3 | dot, lot |
+| 4 | dog, log |
+| 5 | **cog** |
+
+**Step 1: the words one letter away.**
+
+```js
+// Every word in the dictionary that is one letter away from word.
+function oneLetterAway(word, dictionary) {
+    const letters = "abcdefghijklmnopqrstuvwxyz";
+    const found = [];
+
+    for (let i = 0; i < word.length; i++) {
+        const before = word.slice(0, i);
+        const after = word.slice(i + 1);
+
+        // Try every letter at position i.
+        for (const letter of letters) {
+            const candidate = before + letter + after;
+
+            if (candidate !== word && dictionary.has(candidate)) {
+                found.push(candidate);
+            }
+        }
+    }
+
+    return found;
+}
+```
+
+**Step 2: BFS.** The word Set also works as the visited set: a word is **deleted** from it when it joins the queue, so it is never added twice. Each queue item is `[word, length]`, like `[row, col, minute]` in Rotting Oranges.
+
+```js
+function ladderLength(beginWord, endWord, wordList) {
+    // Words we can still step on.
+    const unused = new Set(wordList);
+
+    if (!unused.has(endWord)) {
+        return 0;
+    }
+
+    unused.delete(beginWord);
+    const queue = [[beginWord, 1]];
+    let head = 0;
+
+    while (head < queue.length) {
+        const [word, length] = queue[head];
+        head++;
+
+        if (word === endWord) {
+            return length;
+        }
+
+        for (const nextWord of oneLetterAway(word, unused)) {
+            // Delete it now, so no other word adds it again.
+            unused.delete(nextWord);
+            queue.push([nextWord, length + 1]);
+        }
+    }
+
+    // The queue ran out: endWord can't be reached.
+    return 0;
+}
+
+const ladderWords = ["hot", "dot", "dog", "lot", "log", "cog"];
+
+console.log(ladderLength("hit", "cog", ladderWords)); // 5
+console.log(ladderLength("hit", "cog", ["hot", "dot", "dog", "lot", "log"])); // 0
+```
+
+In the second call, `"cog"` is not in the list, so no ladder can end there.
+
+**Time:** O(n × L²) · **Space:** O(n × L), where n is the number of words and L their length. Each word is taken from the queue once. For it, we try L positions × 26 letters, and each try builds and looks up a word of length L.
+
+A faster version runs BFS from **both ends** at once and stops when the two searches meet. Each side only goes about half as deep, so it looks at far fewer words.
+
 ## Detecting a cycle
 
 "Is there a loop?" is a common question, and the answer is different for undirected and directed graphs.
@@ -649,6 +737,7 @@ In `withLoop`, DFS marks 0, 1 and 2 as `VISITING`, one after another. Then 2 has
 - **"Number of islands / regions / groups / provinces"** → DFS (or BFS) from each unvisited cell or node, and count the starts.
 - **"Fewest steps", "minimum moves", "shortest path"** where every move costs the same → **BFS**.
 - **"Every minute it spreads"**, or "distance to the nearest X" with many starting points → **multi-source BFS**: put all the starts in the queue at once.
+- **"Change one letter at a time"**, "turn one wheel of a lock" (Word Ladder, Open the Lock) → BFS where each state is a node. Make the neighbors as you go; don't build the whole graph.
 - **"Which cells can reach the edge / the ocean?"** (Pacific Atlantic Water Flow, Surrounded Regions) → search **backwards**: start from the edge cells and mark everything they can reach, instead of starting a new search from every cell.
 - **"Copy" or "clone"** a graph → DFS plus a Map from old node to new node.
 - **"Is there a loop?", "deadlock", "can every task finish?"** → cycle detection (three states for directed graphs).
@@ -687,6 +776,7 @@ In `withLoop`, DFS marks 0, 1 and 2 as `VISITING`, one after another. Then 2 has
   - The BFS queue is an array plus a **head index**. `shift()` is O(n) and makes BFS O(V²).
   - In BFS, **mark visited when you add** a node to the queue, not when you take it out.
   - **Fewest steps** with equal-cost edges → BFS. Many starting points → put them **all in the queue at once** (Rotting Oranges).
+  - States instead of nodes (Word Ladder): **make the neighbors on the spot**, and delete a word from the Set when it joins the queue.
   - Count groups (islands): loop over every node; each unvisited one starts a new search and is a new group.
   - Cycles: undirected → **skip the parent**. Directed → **three states**; a loop is an arrow to a node that is still `VISITING`.
 </Callout>

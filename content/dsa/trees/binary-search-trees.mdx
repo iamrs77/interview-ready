@@ -470,19 +470,99 @@ console.log(lowestCommonAncestor(lcaTree, node2, node4).val); // 2
 
 This trick needs the BST rule. In a **plain** binary tree (LeetCode 236), you can't tell which side to go, so you search both sides with DFS instead: each call returns `p` or `q` if it found one in its subtree, and the node where both sides return something is the answer. The code is in [Binary Trees and DFS](./binary-trees.mdx#8-lowest-common-ancestor-of-a-binary-tree).
 
+### 4. Delete Node in a BST
+
+**Problem:** delete the node with the value `key`, and return the root of the tree. The tree must still follow the BST rule. If `key` isn't in the tree, return it unchanged. `[5, 3, 6, 2, 4, null, 7]` with key 3 → `[5, 4, 6, 2, null, null, 7]`.
+
+**Each call returns:** the root of its subtree, after `key` has been deleted from it. This is the same idea as [Insert](#insert).
+
+**Idea:** search for the node as usual. When you find it, there are three cases:
+
+| The node has... | What to do |
+| --- | --- |
+| No children (a leaf) | Remove it: return `null` |
+| One child | The child takes its place: return the child |
+| Two children | Copy the **next bigger value** into it: the smallest value in its right subtree. Then delete that value from the right subtree |
+
+Why the next bigger value? It is bigger than everything on the left and smaller than everything else on the right, so the BST rule still holds. And the node it came from has no left child (it's the leftmost on that side), so deleting it is one of the easy cases.
+
+```js
+// Returns: the root of this subtree, after key is deleted from it.
+function deleteNode(node, key) {
+    // Not found: nothing to delete.
+    if (node === null) {
+        return null;
+    }
+
+    // Not this node: delete from the correct side, and re-attach that side.
+    if (key < node.val) {
+        node.left = deleteNode(node.left, key);
+        return node;
+    }
+
+    if (key > node.val) {
+        node.right = deleteNode(node.right, key);
+        return node;
+    }
+
+    // This is the node. No left child (a leaf, too): the right side moves up.
+    if (node.left === null) {
+        return node.right;
+    }
+
+    // No right child: the left side moves up.
+    if (node.right === null) {
+        return node.left;
+    }
+
+    // Two children: copy in the next bigger value, then delete it on the right.
+    const nextBigger = minValue(node.right);
+    node.val = nextBigger;
+    node.right = deleteNode(node.right, nextBigger);
+
+    return node;
+}
+```
+
+Each delete below shows one case. Always save the root that comes back: deleting the root can change it.
+
+```js
+let deleteTree = buildTree([5, 3, 6, 2, 4, null, 7]);
+
+// Two children: 3 becomes 4, the smallest value on its right.
+deleteTree = deleteNode(deleteTree, 3);
+console.log(deleteTree.left.val); // 4
+console.log(inorder(deleteTree).join(" ")); // 2 4 5 6 7
+
+// One child: 7 takes the place of 6.
+deleteTree = deleteNode(deleteTree, 6);
+console.log(deleteTree.right.val); // 7
+
+// A leaf: 7 is just removed.
+deleteTree = deleteNode(deleteTree, 7);
+console.log(inorder(deleteTree).join(" ")); // 2 4 5
+
+// The root, with one child: the root changes.
+deleteTree = deleteNode(deleteTree, 5);
+console.log(deleteTree.val); // 4
+```
+
+**Time:** O(h) · **Space:** O(h) for the call stack. The search goes down one path, and finding and deleting the next bigger value goes down the rest of that path once more.
+
 ## How to spot it
 
 - The problem says **"binary search tree"** or "BST". Use the order rule: it lets you skip half the tree at each step.
 - It asks for something **sorted**: the k-th smallest or largest, the next bigger value, values in a range. Think **inorder**.
 - It asks you to **check** whether a tree is a BST. Think **allowed range passed down**.
 - It asks for the **closest value** to a target. Walk down like a search and remember the closest node you passed.
+- It asks you to **delete** a value. Three cases: a leaf, one child, two children.
 
 ## Common mistakes
 
 - **Checking each node only against its children** in Validate BST. The rule covers the whole subtree. Pass a range down.
 - **Starting the range with made-up numbers** like 0 or 1000. Use `-Infinity` and `Infinity`.
 - **Getting `<` and `<=` wrong.** With the usual "values are different" rule, an equal value is not valid. Ask how duplicates work.
-- **Losing nodes in insert.** Forgetting `node.left = ...` or forgetting `return node` cuts off part of the tree.
+- **Losing nodes in insert or delete.** Forgetting `node.left = ...` or forgetting `return node` cuts off part of the tree. Deleting the root can change it, so write `root = deleteNode(root, key)`.
 - **Off by one in Kth Smallest.** k starts at 1, so the answer is `sorted[k - 1]`.
 - **Saying O(log n) without "if balanced".** A BST built from sorted input is a chain: O(n).
 - **Using the BST trick on a plain binary tree.** Going left or right only works when the order rule holds.
@@ -491,9 +571,9 @@ This trick needs the BST rule. In a **plain** binary tree (LeetCode 236), you ca
 
 > "Since it's a BST, at each node I can compare once and drop half of the tree. Both values are smaller than this node, so I go left; both bigger, so I go right; otherwise they split here, so this is the answer. That's O(h) time and O(1) space, which is O(log n) on a balanced tree and O(n) on a chain."
 
-**Likely follow-up:** "How would you delete a node?"
+**Likely follow-up:** "What if the inserts come in sorted order?"
 
-**Answer:** "Find it, then there are three cases. A **leaf**: just remove it. **One child**: put the child in its place. **Two children**: find the smallest value in its right subtree (go right once, then left as far as possible), copy that value into the node, and delete that smallest node from the right subtree. That one has no left child, so it is an easy case. It's O(h)."
+**Answer:** "Then a plain BST turns into a chain, and every operation is O(n). A self-balancing tree, like an AVL tree or a red-black tree, moves nodes around after each insert or delete to keep the height O(log n). I wouldn't write one in an interview, but that's the fix. Java's `TreeMap` is a red-black tree; JavaScript has no built-in sorted tree."
 
 <Callout title="Remember this" type="success">
   - **BST rule:** everything in the left subtree is smaller, everything in the right subtree is bigger, at **every** node.
@@ -502,4 +582,5 @@ This trick needs the BST rule. In a **plain** binary tree (LeetCode 236), you ca
   - **Validate:** pass an allowed range (`low`, `high`) down. Going left, `high` becomes the node's value; going right, `low` does.
   - **LCA in a BST:** both smaller, go left; both bigger, go right; otherwise this node is the answer.
   - Min = go left until you can't. Max = go right until you can't.
+  - **Delete:** a leaf is removed; one child takes the node's place; two children → copy in the smallest value from the right subtree, then delete that one.
 </Callout>
