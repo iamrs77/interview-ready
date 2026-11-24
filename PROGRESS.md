@@ -279,6 +279,87 @@ A page that is not written yet has `planned: true` in its frontmatter (it shows 
 - ✅ Design Chess
 - ✅ Design an In-Memory File System
 
+## React
+
+**Written: 21 of 55**
+
+### Guide
+- ✅ Start Here
+- ⬜ Cheat Sheet
+- ✅ Last-Minute Revision
+
+### 1. React Basics
+- ✅ What React Is
+- ✅ JSX
+- ✅ Components and Props
+- ✅ Conditional Rendering
+- ✅ Lists and Keys
+- ✅ Handling Events
+
+### 2. State and Rendering
+- ✅ State with useState
+- ⬜ How Rendering Works
+- ⬜ Virtual DOM and Reconciliation
+- ⬜ Updating Objects and Arrays
+- ⬜ Lifting State Up
+- ⬜ Forms: Controlled vs Uncontrolled
+
+### 3. Hooks
+- ✅ useEffect
+- ✅ When Not to Use an Effect
+- ✅ useRef
+- ✅ Context and useContext
+- ✅ useReducer
+- ✅ useMemo and useCallback
+- ✅ Custom Hooks
+- ✅ Rules of Hooks
+- ✅ useLayoutEffect, useId and More
+
+### 4. Component Patterns
+- ⬜ Composition and Children
+- ✅ Higher-Order Components and Render Props
+- ⬜ Error Boundaries
+- ⬜ Portals
+- ⬜ Class Components and Lifecycle
+
+### 5. Performance
+- ⬜ Why Components Re-render
+- ⬜ Making React Apps Fast
+- ⬜ Code Splitting with lazy and Suspense
+
+### 6. Data and State Management
+- ⬜ Fetching Data
+- ⬜ Choosing Where State Lives
+- ✅ Redux and Redux Toolkit
+- ⬜ Server State with TanStack Query
+
+### 7. Modern React
+- ⬜ Concurrent Rendering and Transitions
+- ⬜ SSR, SSG and Hydration
+- ⬜ Server Components
+- ⬜ What's New in React 19
+
+### 8. Routing, Testing and TypeScript
+- ✅ Routing with React Router
+- ⬜ Testing React Components
+- ⬜ React with TypeScript
+
+### 9. Build It
+- ⬜ Todo List
+- ⬜ Search with Autocomplete
+- ⬜ Pagination and Infinite Scroll
+- ⬜ Modal Dialog
+- ⬜ Tabs and Accordion
+- ⬜ Star Rating
+- ⬜ Stopwatch and Countdown Timer
+- ⬜ Write These Hooks
+
+### 10. Predict and Debug
+- ⬜ Puzzles: State Updates
+- ⬜ Puzzles: Effects and Render Order
+- ⬜ Puzzles: Stale Closures
+- ⬜ Puzzles: Keys and Identity
+
 ## DSA
 
 **Written: 45 of 45**

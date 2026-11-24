@@ -7,6 +7,7 @@ import { join, relative } from 'node:path';
 const TRACKS = [
   { dir: 'system-design', title: 'System Design' },
   { dir: 'low-level-design', title: 'Low-Level Design' },
+  { dir: 'react', title: 'React' },
   { dir: 'dsa', title: 'DSA' },
   { dir: 'javascript', title: 'JavaScript' },
   { dir: 'git', title: 'Git' },

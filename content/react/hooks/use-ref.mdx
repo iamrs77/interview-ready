@@ -1,0 +1,206 @@
+---
+title: "useRef"
+description: "A box that keeps a value between renders without re-rendering, and the way to reach DOM elements."
+icon: Box
+---
+
+## The idea
+
+**`useRef`** gives you a small box that React keeps between renders. You can put any value in it and change it whenever you like, and changing it **does not re-render** the component.
+
+Think of the difference between a **scoreboard** and a **note in your pocket**. State is the scoreboard: change it, and everyone sees the new score. A ref is the note in your pocket: you can write on it any time, it's still there later, but nobody else sees the change.
+
+Refs have two main uses:
+
+1. Keeping a value that the screen **doesn't show**, like a timer id.
+2. Reaching a **DOM element**, to focus it, scroll to it or measure it.
+
+## A value that survives renders
+
+```jsx
+import { useRef } from "react";
+
+function ClickCounter() {
+    const countRef = useRef(0);
+
+    function handleClick() {
+        countRef.current = countRef.current + 1;
+        console.log("Clicked", countRef.current);
+    }
+
+    return <button onClick={handleClick}>Click me</button>;
+}
+// Click twice:
+// Clicked 1
+// Clicked 2
+```
+
+- `useRef(0)` returns an object: **`{ current: 0 }`**.
+- React gives you the **same object** on every render. That's why the value survives.
+- You read and write the value through **`.current`**.
+- Changing `.current` **doesn't re-render**. The count goes up, but nothing on screen changes.
+
+## Refs vs state
+
+| | `useState` | `useRef` |
+| --- | --- | --- |
+| Returns | `[value, setValue]` | `{ current: value }` |
+| Changing it re-renders? | **Yes** | **No** |
+| How you change it | Call the setter | Assign `ref.current = ...` |
+| When the new value is visible | On the **next** render | **Right away** |
+| Use it for | Anything the screen **shows** | Values the screen **doesn't** show |
+
+The rule: if the value appears in the JSX, it's **state**. If it's only used inside event handlers and effects, a ref is fine.
+
+## Storing a timer id
+
+A stopwatch needs to remember its interval id, so the Stop button can clear it. The id never appears on screen, so a ref is the right place:
+
+```jsx
+import { useState, useRef } from "react";
+
+function Stopwatch() {
+    const [seconds, setSeconds] = useState(0);
+    const intervalRef = useRef(null);
+
+    function handleStart() {
+        // Don't start a second timer if one is running.
+        if (intervalRef.current !== null) {
+            return;
+        }
+
+        intervalRef.current = setInterval(() => {
+            setSeconds((current) => current + 1);
+        }, 1000);
+    }
+
+    function handleStop() {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+    }
+
+    return (
+        <div>
+            <p>{seconds}s</p>
+            <button onClick={handleStart}>Start</button>
+            <button onClick={handleStop}>Stop</button>
+        </div>
+    );
+}
+```
+
+`seconds` is shown, so it's state. The interval id is only used by the handlers, so it's a ref. A normal `let` variable wouldn't work: it starts over on every render, and the id would be lost.
+
+## Reaching DOM elements
+
+Pass a ref to the **`ref`** attribute of a JSX element, and React puts the **DOM node** into `ref.current`:
+
+```jsx
+import { useRef } from "react";
+
+function SearchBar() {
+    const inputRef = useRef(null);
+
+    function handleClick() {
+        inputRef.current.focus();
+    }
+
+    return (
+        <div>
+            <input ref={inputRef} type="text" />
+            <button onClick={handleClick}>Focus the input</button>
+        </div>
+    );
+}
+```
+
+React sets `inputRef.current` **after** it has put the `<input>` on the page, and sets it back to `null` when the input is removed. So:
+
+- During the **first render**, `inputRef.current` is still `null`. Don't use it there.
+- In **event handlers** and **effects**, it's ready.
+
+Common DOM jobs for a ref: `focus()`, `scrollIntoView()`, reading a size with `getBoundingClientRect()`, `play()` and `pause()` on a video, and handing an element to a non-React library like a chart or a map.
+
+## Don't read or write refs during render
+
+```jsx
+function Counter() {
+    const renderCount = useRef(0);
+
+    // Wrong: changes a ref while rendering, and shows it on screen.
+    renderCount.current = renderCount.current + 1;
+
+    return <p>Rendered {renderCount.current} times</p>;
+}
+```
+
+The component must be **pure**: rendering mustn't change anything. And React doesn't know when a ref changes, so the screen can show an old value. Read and write refs in **event handlers** and **effects**. If the screen needs the value, use state.
+
+## Passing a ref to your own component
+
+`ref` on an HTML element gives you the DOM node. To let a parent reach an input **inside your own component**, pass the ref on.
+
+Since **React 19**, `ref` is a normal prop on function components:
+
+```jsx
+function MyInput({ ref, label }) {
+    return (
+        <label>
+            {label}
+            <input ref={ref} />
+        </label>
+    );
+}
+
+function Form() {
+    const inputRef = useRef(null);
+
+    return (
+        <div>
+            <MyInput ref={inputRef} label="Name" />
+            <button onClick={() => inputRef.current.focus()}>Edit name</button>
+        </div>
+    );
+}
+```
+
+**Before React 19**, `ref` was not passed as a prop. You had to wrap the component in **`forwardRef`**, which you'll still see in a lot of code:
+
+```jsx
+import { forwardRef } from "react";
+
+const MyInput = forwardRef(function MyInput(props, ref) {
+    return <input ref={ref} />;
+});
+```
+
+`forwardRef` still works in React 19, but it's no longer needed and will be deprecated.
+
+To give the parent **only some** abilities, like "focus" but not the whole input, use `useImperativeHandle`. See [useLayoutEffect, useId and More](./more-hooks.mdx).
+
+## Common mistakes
+
+- **Using a ref for something the screen shows.** Changing it doesn't re-render, so the screen goes out of date. Use state.
+- **Forgetting `.current`.** `inputRef.focus()` fails. It's `inputRef.current.focus()`.
+- **Using a DOM ref during the first render.** It's still `null`. Use it in a handler or an effect.
+- **Changing refs during render.** It breaks purity. Change them in handlers and effects.
+- **Using refs to do what React should do.** Showing, hiding or changing text through `ref.current.style` or `innerHTML` fights React. Use state and JSX. Use DOM refs for things React has no prop for, like focus and scroll.
+
+## In the interview
+
+**Likely question:** "What's the difference between `useRef` and `useState`?"
+
+> "Both keep a value between renders. Changing state with its setter re-renders the component, and the new value shows up on the next render. A ref is a plain object with a `current` property: I can change it any time, the change is visible right away, and it doesn't re-render. So I use state for anything shown on screen, and refs for values that aren't, like a timer id, or for reaching DOM elements to focus or measure them."
+
+**Likely follow-up:** "How does a parent get a ref to an input inside a child component?"
+
+**Answer:** "In React 19, `ref` is a normal prop, so the child takes `ref` from its props and puts it on the input. Before React 19, the child had to be wrapped in `forwardRef`. If the parent should only call certain methods, the child can use `useImperativeHandle` to expose just those."
+
+<Callout title="Remember this" type="success">
+  - **`useRef(initial)`** returns **`{ current: initial }`**, the **same object** every render.
+  - Changing **`ref.current` doesn't re-render**. Shown on screen → **state**. Not shown → a ref is fine.
+  - Use refs for **timer ids**, and to reach **DOM elements**: `<input ref={inputRef} />`, then `inputRef.current.focus()`.
+  - A DOM ref is **`null` during the first render**. Use it in **handlers and effects**.
+  - Don't read or write refs **during render**.
+  - **React 19**: `ref` is a **normal prop**. Before: **`forwardRef`**.
+</Callout>

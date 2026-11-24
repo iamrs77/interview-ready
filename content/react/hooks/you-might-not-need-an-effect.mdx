@@ -1,0 +1,266 @@
+---
+title: "When Not to Use an Effect"
+description: "The common jobs people give useEffect that belong somewhere simpler: computed values, event handlers, and keys."
+icon: Ban
+---
+
+## The idea
+
+Effects are for **syncing with something outside React**: a timer, a subscription, a server connection, a browser API. Many effects in real code don't touch anything outside React at all. They only update state from other state, or react to something the user did. Those effects make the code **slower** (extra renders), **harder to follow**, and buggier.
+
+Think of a **sticky note on the fridge** that says "milk + eggs = 2 items". Every time the shopping list changes, someone has to remember to fix the note too. It's easier to just **count the list** when you need the number. Storing a value you can work out, and keeping it updated with an effect, is that sticky note.
+
+## The quick test
+
+Before writing an effect, ask: **"Is there an outside system involved?"**
+
+```mermaid
+flowchart TB
+  Q1{"Can you work it out<br/>from props or state?"}:::service -->|yes| A1[Compute it while rendering]:::storage
+  Q1 -->|no| Q2{"Did a user action<br/>cause it?"}:::service
+  Q2 -->|yes| A2[Do it in the event handler]:::storage
+  Q2 -->|no| Q3{"Reset all state<br/>when a prop changes?"}:::service
+  Q3 -->|yes| A3["Give the component a key"]:::storage
+  Q3 -->|no| Q4{"Syncing with something<br/>outside React?"}:::service
+  Q4 -->|yes| A4[useEffect is right]:::client
+  Q4 -->|no| A5["You probably don't need an effect"]:::storage
+```
+
+## 1. Values you can compute: work them out while rendering
+
+```jsx
+function Profile({ firstName, lastName }) {
+    const [fullName, setFullName] = useState("");
+
+    // Wrong: state + effect for a value you can compute.
+    useEffect(() => {
+        setFullName(firstName + " " + lastName);
+    }, [firstName, lastName]);
+
+    return <h1>{fullName}</h1>;
+}
+```
+
+This renders **twice**: first with an empty `fullName`, then the effect sets it and React renders again. The first render even shows the wrong value for a moment.
+
+```jsx
+function Profile({ firstName, lastName }) {
+    // Right: a normal variable, worked out on every render.
+    const fullName = firstName + " " + lastName;
+
+    return <h1>{fullName}</h1>;
+}
+```
+
+One render, no extra state, nothing to keep in sync. The same goes for totals, filtered lists, counts, "is this form valid", and so on.
+
+If the calculation is **slow**, like filtering thousands of items, cache it with `useMemo` instead of an effect:
+
+```jsx
+const visibleTodos = useMemo(() => {
+    return filterTodos(todos, filter);
+}, [todos, filter]);
+```
+
+See [useMemo and useCallback](./use-memo-and-use-callback.mdx).
+
+## 2. Things the user did: put them in the event handler
+
+```jsx
+function BuyButton({ product }) {
+    const [isBought, setIsBought] = useState(false);
+
+    // Wrong: an effect that reacts to "the user clicked buy".
+    useEffect(() => {
+        if (isBought) {
+            sendOrder(product.id);
+            showToast("Added to your order!");
+        }
+    }, [isBought]);
+
+    return <button onClick={() => setIsBought(true)}>Buy</button>;
+}
+```
+
+The order is sent because the **user clicked**, not because the component is on the screen. Put that code where the click happens:
+
+```jsx
+function BuyButton({ product }) {
+    function handleBuy() {
+        sendOrder(product.id);
+        showToast("Added to your order!");
+    }
+
+    return <button onClick={handleBuy}>Buy</button>;
+}
+```
+
+The effect version has hidden bugs too: an extra render, and if `isBought` is ever restored as `true` (say, from saved state when the page reloads), the order is sent **again** without a click.
+
+The rule: code that runs **because the component appeared** goes in an effect. Code that runs **because the user did something** goes in the handler.
+
+## 3. Resetting all state when a prop changes: use a key
+
+```jsx
+function ProfilePage({ userId }) {
+    const [comment, setComment] = useState("");
+
+    // Wrong: clearing state by hand when the user changes.
+    useEffect(() => {
+        setComment("");
+    }, [userId]);
+
+    return <textarea value={comment} onChange={(e) => setComment(e.target.value)} />;
+}
+```
+
+For one render, the new profile shows the **old** comment, then the effect clears it. And every new piece of state needs its own reset line.
+
+Instead, give the component a **key** from the parent:
+
+```jsx
+function UserPage({ userId }) {
+    return <ProfilePage key={userId} userId={userId} />;
+}
+```
+
+A new key tells React "this is a different component". React throws the old one away and starts fresh, with **all** its state reset. See [Lists and Keys](../react-basics/lists-and-keys.mdx).
+
+When only **part** of the state should change, often you can store something simpler. For example, store the **selected id** instead of the selected item, and look the item up while rendering: if it's no longer in the list, the lookup just finds nothing.
+
+## 4. Chains of effects: do it all in one place
+
+```jsx
+// Wrong: each effect sets state that triggers the next effect.
+useEffect(() => {
+    if (card !== null && card.gold) {
+        setGoldCount((count) => count + 1);
+    }
+}, [card]);
+
+useEffect(() => {
+    if (goldCount > 3) {
+        setRound((round) => round + 1);
+        setGoldCount(0);
+    }
+}, [goldCount]);
+```
+
+Each step is a separate render: card changes → render → effect → gold count changes → render → effect → round changes → render. It's slow, and hard to follow.
+
+Work out all the next state **in the event handler**, in one go:
+
+```jsx
+function handlePlaceCard(nextCard) {
+    setCard(nextCard);
+
+    if (nextCard.gold) {
+        if (goldCount < 3) {
+            setGoldCount(goldCount + 1);
+        } else {
+            setGoldCount(0);
+            setRound(round + 1);
+        }
+    }
+}
+```
+
+All the updates are batched into **one** render. If the logic grows, a [reducer](./use-reducer.mdx) keeps it in one place.
+
+## 5. Telling the parent about a change: call it in the handler
+
+```jsx
+function Toggle({ onChange }) {
+    const [isOn, setIsOn] = useState(false);
+
+    // Wrong: tell the parent after the render, in an effect.
+    useEffect(() => {
+        onChange(isOn);
+    }, [isOn, onChange]);
+
+    return <button onClick={() => setIsOn(!isOn)}>{isOn ? "On" : "Off"}</button>;
+}
+```
+
+The parent hears about the change one render **late**, and then often renders again. Call `onChange` in the same handler that changes the state:
+
+```jsx
+function Toggle({ onChange }) {
+    const [isOn, setIsOn] = useState(false);
+
+    function handleClick() {
+        const next = !isOn;
+        setIsOn(next);
+        onChange(next);
+    }
+
+    return <button onClick={handleClick}>{isOn ? "On" : "Off"}</button>;
+}
+```
+
+Even better, if the parent needs to know the value, the parent can **own** the state and pass it down. See [Lifting State Up](../state-and-rendering/lifting-state-up.mdx).
+
+## 6. Code that should run once per app
+
+```jsx
+function App() {
+    // Runs twice in development with Strict Mode.
+    useEffect(() => {
+        loadDataFromLocalStorage();
+        checkAuthToken();
+    }, []);
+}
+```
+
+Strict Mode runs effects twice in development, and some setup really must run only once per app load. Run it **outside the component**, when the file loads:
+
+```jsx
+// Runs once, when the app starts.
+if (typeof window !== "undefined") {
+    loadDataFromLocalStorage();
+    checkAuthToken();
+}
+
+function App() {
+    // ...
+}
+```
+
+## When an effect IS right
+
+Use an effect when the component must stay in sync with something **outside React** for as long as it's on the screen:
+
+- Timers and intervals
+- Event listeners on `window` or `document`
+- Connections: WebSockets, chat servers, subscriptions
+- Non-React widgets: maps, charts, video players
+- Fetching data for what's on the screen (with a cleanup that ignores late answers, or better, a data library)
+
+See [useEffect](./use-effect.mdx).
+
+## Common mistakes
+
+- **State plus an effect for a value you can compute.** Work it out while rendering.
+- **An effect that watches a "clicked" flag.** Do the work in the click handler.
+- **Resetting state in an effect when a prop changes.** Give the component a `key`.
+- **Effects that set state that triggers other effects.** Work out all the next state in the handler, or use a reducer.
+- **Calling a parent's `onChange` from an effect.** Call it in the handler, next to the state update.
+
+## In the interview
+
+**Likely question:** "When should you not use `useEffect`?"
+
+> "Effects are for syncing with something outside React, like a timer, a subscription or a server. I don't use them for values I can compute from props or state: I work those out while rendering, with `useMemo` if it's slow. I don't use them for things a user action causes, like sending a form: that goes in the event handler. And to reset state when a prop changes, I give the component a `key` instead. These effects cause extra renders, show stale values for a moment, and make the flow harder to follow."
+
+**Likely follow-up:** "How do you reset a component's state when a prop changes?"
+
+**Answer:** "Give it a `key` based on that prop, like `<ProfilePage key={userId} />`. When the key changes, React throws away the old component and creates a fresh one, so all its state resets. No effect needed."
+
+<Callout title="Remember this" type="success">
+  - Effects are for syncing with **outside systems**. No outside system → you probably **don't need an effect**.
+  - **Computable** from props or state → **compute while rendering** (`useMemo` if slow).
+  - Caused by a **user action** → put it in the **event handler**.
+  - **Reset all state** when a prop changes → **`key={prop}`**.
+  - **Chains of effects** → work out all the next state in **one handler** (or a reducer).
+  - **Tell the parent** in the handler, not in an effect. **Once-per-app** setup → outside the component.
+</Callout>

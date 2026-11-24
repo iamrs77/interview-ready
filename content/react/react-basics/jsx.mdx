@@ -1,0 +1,158 @@
+---
+title: "JSX"
+description: "The HTML-like syntax React uses. A build tool turns it into plain JavaScript function calls that make objects."
+icon: Braces
+---
+
+## The idea
+
+**JSX** lets you write HTML-like markup inside JavaScript. It looks like HTML, but it is **not HTML and not a string**. Before the code runs, a build tool turns every JSX tag into a plain JavaScript function call.
+
+Think of shorthand, like writing "ASAP" instead of "as soon as possible". It's quicker to write and easier to read, and it gets expanded into the long form before anyone uses it.
+
+## What JSX turns into
+
+This line of JSX:
+
+```jsx
+const title = <h1 className="title">Hello</h1>;
+```
+
+is turned by the build tool (Babel, SWC or esbuild) into a function call:
+
+```js noRun
+import { jsx } from "react/jsx-runtime";
+
+const title = jsx("h1", { className: "title", children: "Hello" });
+```
+
+Before React 17, it became `React.createElement("h1", { className: "title" }, "Hello")` instead. That's why old React files start with `import React from "react"`, even when they never use `React` by name. Both do the same job.
+
+The call returns a plain JavaScript object, called a **React element**. Simplified, it looks like this:
+
+```js noRun
+const title = {
+    type: "h1",
+    props: {
+        className: "title",
+        children: "Hello",
+    },
+};
+```
+
+A React element is a **description** of what to show, not a real DOM node. It is cheap to make, so React can make thousands of them on every update. `react-dom` turns them into real DOM nodes later.
+
+## JavaScript inside curly braces
+
+Inside JSX, **curly braces `{ }`** switch back to JavaScript. You can put any **expression** there: anything that gives back a value.
+
+```jsx
+function Profile() {
+    const user = { name: "Ana", photoUrl: "/ana.png", unread: 3 };
+
+    return (
+        <div>
+            <img src={user.photoUrl} alt={user.name} />
+            <h2>{user.name.toUpperCase()}</h2>
+            <p>{user.unread} unread messages</p>
+            <p>{user.unread > 0 ? "Check your inbox" : "All caught up"}</p>
+        </div>
+    );
+}
+```
+
+Curly braces work in two places: as **text** between tags, and as an **attribute value** (`src={user.photoUrl}`). Use quotes for a plain string (`alt="Profile photo"`) and braces for everything else.
+
+**Statements don't work** inside braces: no `if`, `for` or `const`. A statement does something but gives back no value. Use the `? :` operator, `&&`, or `map` instead. See [Conditional Rendering](./conditional-rendering.mdx) and [Lists and Keys](./lists-and-keys.mdx).
+
+## The rules
+
+| Rule | Wrong | Right |
+| --- | --- | --- |
+| Return **one** parent element | `return <h1 /><p />` | Wrap them: `<div>...</div>` or `<>...</>` |
+| **Close every tag**, even empty ones | `<img src={url}>` | `<img src={url} />` |
+| Attributes use **camelCase** | `onclick`, `tabindex` | `onClick`, `tabIndex` |
+| `class` and `for` have other names | `class="box"`, `for="email"` | `className="box"`, `htmlFor="email"` |
+| `style` takes an **object** | `style="color: red"` | `style={{ color: "red" }}` |
+| Comments go in braces | `<!-- note -->` | `{/* note */}` |
+
+Why these rules?
+
+- **One parent:** a function returns **one** value, and JSX becomes one function call. Two tags side by side would be two values.
+- **`className`:** `class` is a reserved word in JavaScript. JSX uses the names of the DOM properties, and the DOM property is also `element.className`.
+- **`style={{ }}`:** the outer braces mean "JavaScript here", the inner braces are a normal object. CSS names become camelCase (`backgroundColor`), and a plain number means pixels (`fontSize: 16`).
+
+`aria-*` and `data-*` attributes are the exception: they keep their dashes, like `aria-label="Close"`.
+
+## Fragments
+
+When you need one parent but don't want an extra `<div>` on the page, use a **Fragment**: `<>` and `</>`. It groups the elements and adds nothing to the page.
+
+```jsx
+function Price() {
+    return (
+        <>
+            <dt>Price</dt>
+            <dd>$25</dd>
+        </>
+    );
+}
+```
+
+An extra `<div>` here would break the HTML: a `<dl>` list expects `<dt>` and `<dd>` directly inside it. When you need a `key` on a fragment, in a list, write the long form: `<Fragment key={item.id}>`.
+
+## What different values show
+
+| Value in `{ }` | What appears on the page |
+| --- | --- |
+| A string or a number | The text. `0` shows as `0` |
+| `true`, `false`, `null`, `undefined` | Nothing |
+| An array | Each item, one after another |
+| A React element | That element |
+| A plain object | An error: "Objects are not valid as a React child" |
+
+The "nothing" row is what makes `{isOpen && <Menu />}` work. The `0` row is the famous trap: see [Conditional Rendering](./conditional-rendering.mdx#the-0-trap).
+
+## JSX protects you from injected HTML
+
+Text in curly braces is **escaped**: React shows it as text, never as HTML. This stops a common attack, **XSS** (cross-site scripting), where a user types HTML or a script into a form and it runs on other people's screens.
+
+```jsx
+function Comment() {
+    const text = "<img src=x onerror=alert(1)>";
+
+    // Shows the characters on the page. Nothing runs.
+    return <p>{text}</p>;
+}
+```
+
+To insert real HTML, you must write the long, scary name **`dangerouslySetInnerHTML={{ __html: html }}`**. Only do it with HTML you trust, or that you cleaned with a library like DOMPurify.
+
+## Common mistakes
+
+- **`return` on its own line.** JavaScript adds a `;` right after `return`, so the function returns `undefined`. Start the JSX on the same line: `return (`.
+- **Two elements without a parent.** The build fails with "Adjacent JSX elements must be wrapped in an enclosing tag". Wrap them in a Fragment.
+- **An `if` or `for` inside braces.** Only expressions work. Use `? :`, `&&` or `map`.
+- **`class` instead of `className`.** React prints a warning in the console. Use `className`.
+- **A string for `style`.** React throws an error. Pass an object: `style={{ marginTop: 8 }}`.
+- **Putting an object in the JSX**, like `{user}`. Show one of its fields: `{user.name}`.
+
+## In the interview
+
+> "JSX is a syntax that lets me write HTML-like markup in JavaScript. It isn't HTML: a compiler like Babel turns each tag into a function call, `jsx()` today or `React.createElement()` in older code, and that call returns a plain object describing the element. Curly braces let me put any JavaScript expression inside, and text in braces is escaped, which protects against XSS."
+
+**Likely follow-up:** "Can you write React without JSX?"
+
+**Answer:** "Yes. JSX is only a nicer way to write `React.createElement(type, props, ...children)`. Without a build step, I'd call `createElement` myself. It works, but nested UI gets hard to read, so almost everyone uses JSX."
+
+**Another follow-up:** "Why `className` and not `class`?"
+
+**Answer:** "`class` is a reserved word in JavaScript, and JSX attributes follow the DOM property names, which use `className`. For the same reason it's `htmlFor` instead of `for`."
+
+<Callout title="Remember this" type="success">
+  - JSX is **not HTML**: each tag becomes a function call, `jsx()` (React 17+) or `React.createElement()`, that returns a plain **object** (a React element).
+  - `{ }` holds any JavaScript **expression**. No `if` or `for` inside; use `? :`, `&&` or `map`.
+  - Rules: **one parent** (or a Fragment `<>...</>`), **close every tag**, **camelCase** attributes, `className`, `htmlFor`, `style={{ }}` with an object.
+  - `true`, `false`, `null` and `undefined` show **nothing**. `0` **shows "0"**. A plain object throws an error.
+  - Text in braces is **escaped**, so it's safe from XSS. `dangerouslySetInnerHTML` skips that protection.
+</Callout>

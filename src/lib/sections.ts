@@ -1,5 +1,7 @@
 import {
   Activity,
+  Anchor,
+  Atom,
   Binary,
   Blocks,
   Box,
@@ -15,7 +17,9 @@ import {
   FileCode,
   FileType,
   FlaskConical,
+  Gauge,
   GitBranch,
+  Hammer,
   Layers,
   Layers2,
   LayoutGrid,
@@ -23,7 +27,9 @@ import {
   MessageSquare,
   MoveHorizontal,
   PenTool,
+  Plug,
   Puzzle,
+  RefreshCw,
   Ruler,
   Search,
   Send,
@@ -118,6 +124,21 @@ export const jsSections = {
   typescript: { label: 'TypeScript', icon: FileType, className: 'bg-blue-500/10 text-blue-700' },
 } satisfies Record<string, Section>;
 
+/** The same for React (folders in content/react). */
+export const reactSections = {
+  guide: { label: 'Guide', icon: Compass, className: 'bg-violet-500/10 text-violet-700' },
+  'react-basics': { label: 'React Basics', icon: Atom, className: 'bg-teal-500/10 text-teal-700' },
+  'state-and-rendering': { label: 'State and Rendering', icon: RefreshCw, className: 'bg-sky-500/10 text-sky-700' },
+  hooks: { label: 'Hooks', icon: Anchor, className: 'bg-indigo-500/10 text-indigo-700' },
+  patterns: { label: 'Component Patterns', icon: Shapes, className: 'bg-cyan-500/10 text-cyan-700' },
+  performance: { label: 'Performance', icon: Gauge, className: 'bg-amber-500/10 text-amber-700' },
+  'data-and-state': { label: 'Data and State Management', icon: Database, className: 'bg-emerald-500/10 text-emerald-700' },
+  'modern-react': { label: 'Modern React', icon: Sparkles, className: 'bg-pink-500/10 text-pink-700' },
+  ecosystem: { label: 'Routing, Testing and TypeScript', icon: Plug, className: 'bg-blue-500/10 text-blue-700' },
+  'build-it': { label: 'Build It', icon: Hammer, className: 'bg-orange-500/10 text-orange-700' },
+  'predict-and-debug': { label: 'Predict and Debug', icon: CircleQuestionMark, className: 'bg-fuchsia-500/10 text-fuchsia-700' },
+} satisfies Record<string, Section>;
+
 /** Git has no sections: every page is in the track root. */
 export const gitSections = {
   guide: { label: 'Git', icon: GitBranch, className: 'bg-orange-500/10 text-orange-700' },
@@ -128,6 +149,7 @@ const sectionsByTrack: Record<string, Record<string, Section>> = {
   'low-level-design': lldSections,
   dsa: dsaSections,
   javascript: jsSections,
+  react: reactSections,
   git: gitSections,
 };
 

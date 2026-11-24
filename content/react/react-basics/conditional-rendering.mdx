@@ -1,0 +1,195 @@
+---
+title: "Conditional Rendering"
+description: "Showing different UI for different data, with if, the ? : operator and &&, and the 0 trap."
+icon: Split
+---
+
+## The idea
+
+**Conditional rendering** means showing different things depending on the data: a "Log in" button for guests and a "Log out" button for users, a spinner while loading, an empty-state message when the list is empty.
+
+There is no special React syntax for this. You use plain JavaScript: `if`, the `? :` operator, and `&&`. Think of a shop sign that flips between **Open** and **Closed**: same sign, and which side shows depends on the time.
+
+## if, and returning early
+
+The simplest way: an `if` **before** the JSX, returning a different result.
+
+```jsx
+function Inbox({ messages }) {
+    if (messages.length === 0) {
+        return <p>No new messages.</p>;
+    }
+
+    return <p>You have {messages.length} new messages.</p>;
+}
+```
+
+This is clearest when the **whole** output changes, like for loading and error screens:
+
+```jsx
+function UserPage({ isLoading, error, user }) {
+    if (isLoading) {
+        return <Spinner />;
+    }
+
+    if (error) {
+        return <p>Something went wrong.</p>;
+    }
+
+    return <h1>{user.name}</h1>;
+}
+```
+
+Each `if` handles one case and leaves. By the last line, `user` is surely there.
+
+## The ? : operator
+
+Inside JSX you can't write `if`, because only expressions are allowed in `{ }`. Use the **conditional operator** `condition ? a : b` when you need **one of two** things in the middle of some JSX:
+
+```jsx
+function LoginBar({ isLoggedIn, name }) {
+    return (
+        <header>
+            <span>My Shop</span>
+            {isLoggedIn ? <span>Hi, {name}</span> : <button>Log in</button>}
+        </header>
+    );
+}
+```
+
+Only the **part that changes** sits inside the `? :`. The header and the shop name stay the same either way.
+
+Avoid putting a `? :` inside another one. Two levels are already hard to read. Use `if` before the `return`, or a small component, instead.
+
+## && : show it or show nothing
+
+When there is only **one** thing to show, or nothing, use `&&`:
+
+```jsx
+function Cart({ items }) {
+    return (
+        <div>
+            <h2>Cart</h2>
+            {items.length > 0 && <button>Checkout</button>}
+        </div>
+    );
+}
+```
+
+How `a && b` works in JavaScript: if `a` is falsy, the result is `a` itself. Otherwise the result is `b`. So the line gives either `false`, which React shows as nothing, or the button.
+
+## The 0 trap
+
+This is a classic interview question. What does this show when there are no messages?
+
+```jsx
+function Inbox({ messages }) {
+    return <div>{messages.length && <Badge count={messages.length} />}</div>;
+}
+```
+
+It shows **`0`** on the page.
+
+`messages.length` is `0`, and `0` is falsy, so `&&` gives back the `0` itself. React shows nothing for `false`, `null` and `undefined`, but it **does** show numbers, and `0` is a number. (An empty string `""` also gets through `&&`, but it shows nothing, so it doesn't cause a visible bug.)
+
+The fix: make the left side a real `true` or `false`.
+
+```jsx
+function Inbox({ messages }) {
+    return <div>{messages.length > 0 && <Badge count={messages.length} />}</div>;
+}
+```
+
+`Boolean(messages.length) &&` and `!!messages.length &&` also work. `> 0` is the easiest to read.
+
+## Returning null
+
+A component can return **`null`** to show nothing at all:
+
+```jsx
+function Warning({ message }) {
+    if (!message) {
+        return null;
+    }
+
+    return <div className="warning">{message}</div>;
+}
+```
+
+The component **still runs**, and its hooks still run. It just adds nothing to the page. Since React 18, returning `undefined` also shows nothing, but `null` says clearly that it's on purpose.
+
+Often it's cleaner for the **parent** to decide: `{message && <Warning message={message} />}`.
+
+## Many cases: a variable or a lookup
+
+When there are more than two cases, work out the content **before** the `return`:
+
+```jsx
+function StatusBadge({ status }) {
+    let label;
+
+    if (status === "paid") {
+        label = "Paid";
+    } else if (status === "shipped") {
+        label = "On its way";
+    } else {
+        label = "Waiting";
+    }
+
+    return <span className="badge">{label}</span>;
+}
+```
+
+When each case maps to one value, an object lookup is even shorter:
+
+```jsx
+const STATUS_LABELS = {
+    paid: "Paid",
+    shipped: "On its way",
+    pending: "Waiting",
+};
+
+function StatusBadge({ status }) {
+    const label = STATUS_LABELS[status];
+
+    return <span className="badge">{label}</span>;
+}
+```
+
+## Removing vs hiding
+
+There are two ways to make something disappear, and they behave differently:
+
+| | Conditional rendering: `{isOpen && <Panel />}` | Hiding: `<div hidden={!isOpen}><Panel /></div>` |
+| --- | --- | --- |
+| Is it on the page? | No, it's **removed** | Yes, just not shown |
+| Its state (typed text, scroll position) | **Lost**. It starts fresh next time | **Kept** |
+| Its effects | Cleaned up when removed | Keep running |
+| Cost | Built again each time it opens | Stays in memory all the time |
+
+Use conditional rendering by default. Hide with CSS when the part is costly to build again, or when its state must survive, like a half-filled form in a tab you switch away from. React 19.2 added `<Activity mode="hidden">`, which hides a part while keeping its state: see [What's New in React 19](../modern-react/react-19.mdx).
+
+## Common mistakes
+
+- **`count && ...` when `count` can be 0.** The page shows `0`. Write `count > 0 && ...`.
+- **`if` inside the JSX braces.** It's a syntax error. Use `? :` or `&&`, or move the `if` above the `return`.
+- **Nested `? :` chains.** Hard to read. Use `if` before the `return`, a lookup object, or split into components.
+- **Hooks after an early return.** `if (!user) return null;` and then `useState(...)` below it breaks the [Rules of Hooks](../hooks/rules-of-hooks.mdx): the hook runs on some renders and not others. Put every hook **above** the first `return`.
+- **Expecting state to survive** when a component is removed and shown again. It starts fresh. Hide it with CSS if the state must stay.
+
+## In the interview
+
+> "There's no special syntax: I use plain JavaScript. For whole different screens, like loading or error, I use an `if` and return early. Inside JSX, I use `? :` to pick one of two things, and `&&` to show something or nothing. With `&&` I make sure the left side is a real boolean, because `0 && <X />` renders the `0`."
+
+**Likely follow-up:** "What's the difference between not rendering a component and hiding it with CSS?"
+
+**Answer:** "When I don't render it, React removes it: its DOM goes away, its effects clean up, and its state is lost. When I hide it with CSS, it stays mounted and keeps its state and effects, but it also keeps using memory. I remove by default, and hide when the state must survive or the component is expensive to rebuild."
+
+<Callout title="Remember this" type="success">
+  - Whole different output → **`if` and return early**. One of two things in JSX → **`? :`**. Something or nothing → **`&&`**.
+  - **The 0 trap:** `0 && <X />` shows **0**. Use `count > 0 && <X />`.
+  - Return **`null`** to show nothing. The component and its hooks still run.
+  - Many cases → a variable set by `if` above the `return`, or a **lookup object**.
+  - Not rendering **removes** a component and **loses its state**. CSS hiding **keeps** it.
+  - Keep **every hook above** the first early `return`.
+</Callout>

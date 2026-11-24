@@ -1,0 +1,190 @@
+---
+title: "useMemo and useCallback"
+description: "Remembering a value or a function between renders, why that matters for React.memo, and when it's a waste."
+icon: MemoryStick
+---
+
+## The idea
+
+**Memoization** means: remember the result of some work, and reuse it as long as the inputs are the same.
+
+- **`useMemo`** remembers a **value**: the result of a calculation.
+- **`useCallback`** remembers a **function** itself.
+
+Think of a long sum you worked out on paper. You write the answer on a sticky note with the numbers you used. Next time someone asks, you check: same numbers? Read the note. Different numbers? Work it out again and write a new note.
+
+## Why this is needed: every render starts fresh
+
+Each render calls your component function **from the top**. Every value and every function inside it is made **again**:
+
+```jsx
+function Parent() {
+    // A new array, a new object and a new function on every render.
+    const items = [1, 2, 3];
+    const style = { color: "red" };
+    const handleClick = () => console.log("clicked");
+
+    return <List items={items} style={style} onClick={handleClick} />;
+}
+```
+
+Usually that's fine: making small objects is fast. It causes problems in two cases:
+
+1. A **slow calculation** runs on every render, even when its inputs didn't change.
+2. A **new object or function** is passed to a child wrapped in `React.memo`, or used in an effect's dependency array. To React, a new object is a **changed** value, even if it looks the same.
+
+## useMemo: remember a value
+
+```jsx
+const result = useMemo(() => calculate(a, b), [a, b]);
+```
+
+- On the first render, React calls the function and remembers the result.
+- On later renders, if `a` and `b` are the **same** (by `Object.is`), React returns the remembered result **without** calling the function.
+- If either changed, React calls the function again and remembers the new result.
+
+A real use: filtering a long list.
+
+```jsx
+import { useMemo } from "react";
+
+function TodoList({ todos, filter, theme }) {
+    const visibleTodos = useMemo(() => {
+        return todos.filter((todo) => matchesFilter(todo, filter));
+    }, [todos, filter]);
+
+    return (
+        <ul className={theme}>
+            {visibleTodos.map((todo) => (
+                <li key={todo.id}>{todo.text}</li>
+            ))}
+        </ul>
+    );
+}
+```
+
+When only `theme` changes, the filter doesn't run again.
+
+Don't wrap cheap work. `useMemo(() => num * 2, [num])` costs more than it saves: React still has to store the value and compare the dependencies on every render, and multiplying is faster than that.
+
+## React.memo: skip a child's render
+
+By default, when a parent re-renders, **all its children re-render too**, even if their props didn't change. Wrapping a component in **`React.memo`** changes that: React skips the render if **every prop** is the same as last time.
+
+```jsx
+import { memo } from "react";
+
+const Child = memo(function Child({ name }) {
+    return <div>{name}</div>;
+});
+```
+
+React compares each prop with `Object.is`. For strings and numbers that's easy. For objects and functions, it means: **is it the very same object as last time?** A new function, even with the same code, is a different object.
+
+## useCallback: remember a function
+
+So here is a trap. `Child` is wrapped in `memo`, yet it still re-renders every time:
+
+```jsx
+import { memo, useState } from "react";
+
+function Parent() {
+    const [count, setCount] = useState(0);
+
+    function handleChildClick() {
+        console.log("Child button clicked");
+    }
+
+    return (
+        <div>
+            <button onClick={() => setCount(count + 1)}>Count: {count}</button>
+            <Child onButtonClick={handleChildClick} />
+        </div>
+    );
+}
+
+const Child = memo(function Child({ onButtonClick }) {
+    console.log("Child rendered");
+
+    return <button onClick={onButtonClick}>Child button</button>;
+});
+```
+
+Clicking "Count" logs `Child rendered` every time. Step by step:
+
+1. You click "Count", so `Parent` re-renders.
+2. `handleChildClick` is made **again**: a new function object.
+3. `Child` gets a different `onButtonClick` prop than last time.
+4. `memo` sees a changed prop, so `Child` re-renders.
+
+`memo` failed silently. The fix is **`useCallback`**, which gives back the **same** function between renders:
+
+```jsx
+import { useCallback } from "react";
+
+const handleChildClick = useCallback(() => {
+    console.log("Child button clicked");
+}, []);
+```
+
+Now `handleChildClick` is the same function on every render, so `memo` sees no change, and `Child` doesn't re-render when the count changes.
+
+`useCallback(fn, deps)` is just a shorter way to write `useMemo(() => fn, deps)`. Same dependency rules: if the function uses props or state, list them, and you get a new function only when they change.
+
+## They work as a team
+
+`useCallback` on its own does **nothing useful**. It only pays off when someone **compares** the function:
+
+| Who receives the function | Does `useCallback` help? |
+| --- | --- |
+| A normal child component | **No**. It re-renders anyway, because its parent did |
+| A child wrapped in `memo` | **Yes**. The prop stays the same, so `memo` can skip the render |
+| An effect's dependency array | **Yes**. The effect doesn't re-run on every render |
+| A plain `<button onClick>` | **No**. HTML elements don't skip renders |
+
+The same goes for `useMemo` on objects and arrays: it helps when the value goes to a `memo` child or a dependency array.
+
+## When they don't help
+
+- **The work is cheap.** Most calculations take far less than a millisecond. Memoizing them adds code and costs a little on every render.
+- **The child isn't wrapped in `memo`.** A stable function prop changes nothing.
+- **Another prop is new every render anyway.** One inline object, like `style={{ color: "red" }}`, breaks `memo` no matter how many other props you memoize.
+- **The `children` prop.** `<Box><p>Hi</p></Box>` creates new JSX on every render, so a `memo`'d `Box` re-renders anyway.
+- **The dependencies change every render.** The cache never gets reused.
+
+To find out if something is slow, **measure**: wrap it in `console.time("filter")` and `console.timeEnd("filter")`, or use the React DevTools Profiler. Memoize what's measurably slow. See [Making React Apps Fast](../performance/making-react-fast.mdx).
+
+Two more facts:
+
+- `useMemo` is a **performance hint**, not a guarantee. React may throw a cached value away and calculate it again. Your code must still be correct if that happens.
+- The **React Compiler** (stable since October 2025) adds this memoization for you at build time. In a project that uses it, you rarely write `useMemo`, `useCallback` or `memo` by hand. Interviewers still expect you to understand them.
+
+## Common mistakes
+
+- **Wrapping everything in `useMemo` and `useCallback`.** It makes the code harder to read, often for no gain.
+- **`useCallback` without `memo` on the child.** The child re-renders anyway.
+- **Missing dependencies.** The cached function or value keeps using **old** props or state. Trust the `exhaustive-deps` lint rule.
+- **Side effects inside `useMemo`.** It runs during render, so it must be pure. Fetching or setting state belongs in an effect or a handler.
+- **Expecting `memo` to stop re-renders from the component's own state or context.** `memo` only compares **props**.
+
+## In the interview
+
+**Likely question:** "What's the difference between `useMemo` and `useCallback`?"
+
+> "Both cache something between renders and recalculate only when a dependency changes. `useMemo` caches the **result** of calling a function, so I use it for slow calculations or to keep an object the same. `useCallback` caches the **function itself**; it's the same as `useMemo` returning a function. The main reason for `useCallback` is to pass a stable function to a child wrapped in `React.memo`, or to use it in an effect's dependencies. Without `memo` on the child, it doesn't help."
+
+**Likely follow-up:** "Should you wrap every function in `useCallback`?"
+
+**Answer:** "No. Memoization has a cost: extra code, memory, and comparing dependencies on every render. It only pays off when the function goes to a memoized child or a dependency array, or when a calculation is measurably slow. I measure first with the Profiler. And with the React Compiler, most of this is done automatically."
+
+**Another follow-up:** "What does `React.memo` compare?"
+
+**Answer:** "Each prop, with `Object.is`: a shallow comparison. Strings and numbers compare by value, objects and functions by identity. That's why a new object or function prop on every render defeats `memo`."
+
+<Callout title="Remember this" type="success">
+  - **`useMemo(() => value, deps)`** caches a **value**. **`useCallback(fn, deps)`** caches a **function**. `useCallback(fn, d)` = `useMemo(() => fn, d)`.
+  - Every render makes **new objects and functions**. To `memo` and dependency arrays, new means **changed**.
+  - **`React.memo`** skips a render when **all props** are equal by `Object.is` (shallow).
+  - **`useCallback` + `memo`** together: the stable function lets `memo` skip the child. Alone, `useCallback` does nothing.
+  - Don't memoize cheap work. **Measure first**. The **React Compiler** memoizes automatically.
+</Callout>

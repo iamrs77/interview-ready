@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowRight, Binary, Boxes, FileCode, GitBranch, Network, type LucideIcon } from 'lucide-react';
+import { ArrowRight, Atom, Binary, Boxes, FileCode, GitBranch, Network, type LucideIcon } from 'lucide-react';
 import { source, type Track } from '@/lib/source';
 import { TrackProgress } from '@/components/track-progress';
 import { ResetProgressButton } from '@/components/reset-progress-button';
@@ -10,6 +10,7 @@ const TRACK_CARDS: { track: Track; title: string; icon: LucideIcon; iconClass: s
   { track: 'javascript', title: 'JavaScript', icon: FileCode, iconClass: 'bg-yellow-500/15 text-yellow-700' },
   { track: 'system-design', title: 'System Design', icon: Network, iconClass: 'bg-indigo-500/10 text-indigo-600' },
   { track: 'low-level-design', title: 'Low-Level Design', icon: Boxes, iconClass: 'bg-teal-500/10 text-teal-700' },
+  { track: 'react', title: 'React', icon: Atom, iconClass: 'bg-cyan-500/10 text-cyan-700' },
   { track: 'git', title: 'Git', icon: GitBranch, iconClass: 'bg-orange-500/10 text-orange-700' },
 ];
 

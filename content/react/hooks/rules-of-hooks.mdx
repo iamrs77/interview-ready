@@ -1,0 +1,170 @@
+---
+title: "Rules of Hooks"
+description: "The two rules every hook call must follow, why React needs them, and the lint rule that checks them."
+icon: ShieldCheck
+---
+
+## The idea
+
+Hooks come with **two rules**:
+
+1. Call hooks only at the **top level** of the function: never inside an `if`, a loop, or a nested function.
+2. Call hooks only from **React functions**: components and custom hooks.
+
+Think of a **coat check with numbered hooks**, but no names. Each guest always hangs their coat on the next free hook, in order: first guest on hook 1, second on hook 2. It works as long as the guests always arrive in the **same order**. If one guest skips a visit, everyone after them gets the wrong coat back. React stores your hooks' data the same way: by **position**, not by name.
+
+## Rule 1: only at the top level
+
+```jsx
+function Form({ showSurname }) {
+    const [name, setName] = useState("Ana");
+
+    // Wrong: a hook inside a condition.
+    if (showSurname) {
+        const [surname, setSurname] = useState("Lee");
+    }
+
+    const [age, setAge] = useState(29);
+
+    return <p>{name}, {age}</p>;
+}
+```
+
+Don't call hooks:
+
+- inside `if` or `? :` conditions,
+- inside loops,
+- **after an early `return`**,
+- inside event handlers, or functions passed to `useMemo`, `useReducer` or `useEffect`,
+- inside `try`, `catch` or `finally`.
+
+Every hook call must run on **every** render, in the **same order**.
+
+## Why order matters
+
+React gives no names to your hooks. It keeps each component's hook data in a **list**, and hands out the next item each time a hook is called. Here is what happens to the `Form` above when `showSurname` goes from `true` to `false`:
+
+| Call | First render (`showSurname` true) | Second render (`showSurname` false) |
+| --- | --- | --- |
+| 1st hook | `name` → slot 1: "Ana" | `name` → slot 1: "Ana" ✓ |
+| 2nd hook | `surname` → slot 2: "Lee" | `age` → slot 2: **"Lee"** ✗ |
+| 3rd hook | `age` → slot 3: 29 | (none) |
+
+On the second render, `age` gets the **surname's** slot. React notices that fewer hooks ran than last time and stops with an error:
+
+```text
+Rendered fewer hooks than expected. This may be caused by an accidental early return statement.
+```
+
+The other way round (`false`, then `true`) gives **"Rendered more hooks than during the previous render."** Either way, the fix is the same: make every render call the same hooks in the same order.
+
+## How to fix a conditional hook
+
+**Put the condition inside the hook**, not around it:
+
+```jsx
+// Wrong: the effect only exists on some renders.
+if (isOpen) {
+    useEffect(() => {
+        document.title = "Menu open";
+    });
+}
+```
+
+```jsx
+// Right: the effect always exists, and decides inside what to do.
+useEffect(() => {
+    if (isOpen) {
+        document.title = "Menu open";
+    }
+}, [isOpen]);
+```
+
+**Move every hook above the early return:**
+
+```jsx
+function Profile({ user }) {
+    // Hooks first.
+    const [isEditing, setIsEditing] = useState(false);
+
+    // Then the early return.
+    if (!user) {
+        return null;
+    }
+
+    return <h1>{user.name}</h1>;
+}
+```
+
+**Or split into components.** If a part of the page needs its own state only sometimes, make it a component and render it conditionally: `{showSurname && <SurnameField />}`. Each component has its own hook list, so that's allowed.
+
+## Rule 2: only from React functions
+
+Call hooks from:
+
+- **function components**,
+- **custom hooks** (functions named `useSomething`).
+
+Not from:
+
+- normal JavaScript functions,
+- class components,
+- event handlers.
+
+```jsx
+// Wrong: a normal function that calls a hook.
+function getTheme() {
+    return useContext(ThemeContext);
+}
+```
+
+```jsx
+// Right: make it a custom hook.
+function useTheme() {
+    return useContext(ThemeContext);
+}
+```
+
+This keeps all the stateful logic of a component **visible from its code**: every hook it uses is called either in the component or in a `use` function it calls. See [Custom Hooks](./custom-hooks.mdx).
+
+## The ESLint plugin
+
+You don't need to check the rules by eye. **`eslint-plugin-react-hooks`** checks them as you type, and the Vite and Next.js templates include it. It has two main rules:
+
+| Rule | What it checks |
+| --- | --- |
+| `react-hooks/rules-of-hooks` | Hooks are called at the top level, from components or custom hooks |
+| `react-hooks/exhaustive-deps` | Effects, `useMemo` and `useCallback` list every value they use in their dependencies |
+
+This is also why custom hooks **must** start with `use`: the plugin finds hooks by their name.
+
+## One exception: use
+
+React 19 added **`use`**, which reads a promise or a context. Unlike other hooks, it **can** be called inside `if` and loops. It still must be called from a component or a custom hook. See [What's New in React 19](../modern-react/react-19.mdx).
+
+## Common mistakes
+
+- **A hook after an early `return`.** It runs on some renders and not others. Put every hook above the first `return`.
+- **A hook inside a condition**, to "only use it when needed". Put the condition **inside** the hook instead.
+- **A hook in a loop**, like one `useState` per list item. Make each item its own component with its own state.
+- **A hook inside an event handler.** Hooks are for render. In a handler, call the **setter** you got from the hook.
+- **Turning off the lint rule.** It's almost always pointing at a real bug.
+
+## In the interview
+
+**Likely question:** "What are the Rules of Hooks, and why do they exist?"
+
+> "Two rules: call hooks only at the top level, never inside conditions, loops or nested functions; and call them only from function components or custom hooks. They exist because React doesn't name your hooks: it stores each component's hook data in a list and matches each call by its position. If a hook is skipped on one render, every hook after it gets the wrong data. The `eslint-plugin-react-hooks` plugin checks both rules."
+
+**Likely follow-up:** "How do you use a hook only when a condition is true?"
+
+**Answer:** "I call the hook every time and put the condition inside it, like an `if` inside the effect. Or I move that part into its own component and render the component conditionally, since each component has its own list of hooks."
+
+<Callout title="Remember this" type="success">
+  - Rule 1: hooks only at the **top level**. No hooks in **conditions, loops, nested functions**, or **after an early return**.
+  - Rule 2: hooks only in **components** and **custom hooks** (`useSomething`).
+  - Why: React matches hooks by **call order**, not by name. A skipped hook shifts every hook after it.
+  - Errors: **"Rendered fewer hooks than expected"** / **"Rendered more hooks than during the previous render"**.
+  - Fix: put the condition **inside** the hook, move hooks **above** early returns, or **split** into components.
+  - **`eslint-plugin-react-hooks`**: `rules-of-hooks` and `exhaustive-deps`. React 19's **`use`** can be called conditionally.
+</Callout>

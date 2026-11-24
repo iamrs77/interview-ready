@@ -1,0 +1,247 @@
+---
+title: "Components and Props"
+description: "A component is a function that returns JSX. Props are its inputs, passed in by the parent, and they are read-only."
+icon: Component
+---
+
+## The idea
+
+A **component** is a JavaScript function that returns JSX. **Props** are its inputs: the values a parent passes in, like the arguments of a function.
+
+Think of a **name badge template** at a conference. The layout is the same on every badge: a logo, a big name, a company. Only the details change. The template is the component; the name and company written on each badge are the props.
+
+## A first component
+
+```jsx
+function Greeting() {
+    return <h1>Hello!</h1>;
+}
+
+function App() {
+    return (
+        <div>
+            <Greeting />
+            <Greeting />
+        </div>
+    );
+}
+```
+
+`App` uses `Greeting` twice, like an HTML tag. Two things make a function a component:
+
+- It returns JSX (or `null`).
+- Its name starts with a **capital letter**. In JSX, `<Greeting />` means "my component" and `<greeting />` means "an HTML tag called greeting".
+
+## Passing props
+
+The parent writes props like HTML attributes. React collects them into **one object** and passes it to the component as its first argument.
+
+```jsx
+function Greeting(props) {
+    return <h1>Hello, {props.name}!</h1>;
+}
+
+function App() {
+    return (
+        <div>
+            <Greeting name="Ana" />
+            <Greeting name="Ben" />
+        </div>
+    );
+}
+```
+
+On the page:
+
+```html
+<div>
+    <h1>Hello, Ana!</h1>
+    <h1>Hello, Ben!</h1>
+</div>
+```
+
+The first `Greeting` gets `props = { name: "Ana" }`. Most code reads the props with **destructuring** right in the parameter list, so you can write `name` instead of `props.name`:
+
+```jsx
+function Greeting({ name }) {
+    return <h1>Hello, {name}!</h1>;
+}
+```
+
+A prop can be **any** JavaScript value. Use quotes for strings and curly braces for everything else:
+
+```jsx
+<ProductCard
+    name="Desk lamp"
+    price={25}
+    inStock={true}
+    tags={["home", "light"]}
+    onAdd={handleAdd}
+/>
+```
+
+`<Button disabled />` with no value is short for `disabled={true}`.
+
+## Default values
+
+Give a prop a default value in the destructuring. The default is used when the parent **leaves the prop out** (or passes `undefined`).
+
+```jsx
+function Avatar({ url, size = 48 }) {
+    return <img src={url} width={size} height={size} alt="" />;
+}
+
+function App() {
+    return (
+        <div>
+            {/* size is 48 */}
+            <Avatar url="/ana.png" />
+
+            {/* size is 96 */}
+            <Avatar url="/ana.png" size={96} />
+        </div>
+    );
+}
+```
+
+Passing `size={null}` does **not** use the default: `null` is a real value. Older code sets defaults with `Avatar.defaultProps = { size: 48 }`. React 19 removed that for function components; it still works on class components.
+
+## Props are read-only
+
+A component must **never change its own props**. The props belong to the parent.
+
+```jsx
+function Greeting(props) {
+    // Wrong: in development, React freezes props, so this throws an error.
+    props.name = "Someone else";
+
+    return <h1>Hello, {props.name}!</h1>;
+}
+```
+
+Why so strict? React expects components to be **pure**: the same props always give the same JSX. That's what lets React call a component again at any time and trust the result.
+
+When something must change:
+
+- **The parent** changes its own state and passes **new props** down. The child shows them on its next render.
+- **The child** keeps its own data in **state**, if only the child needs it. See [State with useState](../state-and-rendering/use-state.mdx).
+
+## The children prop
+
+Whatever you put **between** a component's opening and closing tags arrives as a special prop, **`children`**. This lets you build "boxes" that wrap any content.
+
+```jsx
+function Card({ title, children }) {
+    return (
+        <div className="card">
+            <h2>{title}</h2>
+            {children}
+        </div>
+    );
+}
+
+function App() {
+    return (
+        <Card title="Profile">
+            <p>Ana, 29, Toronto</p>
+            <button>Edit</button>
+        </Card>
+    );
+}
+```
+
+`Card` doesn't know or care what's inside it. The same `Card` can wrap a profile, a chart or a form. See [Composition and Children](../patterns/composition-and-children.mdx).
+
+## Passing functions: how a child talks to its parent
+
+Data flows **down**, so a child can't change its parent's data. Instead, the parent passes a **function** as a prop, and the child calls it when something happens.
+
+```jsx
+function AddButton({ onAdd }) {
+    return <button onClick={onAdd}>Add to cart</button>;
+}
+
+function Shop() {
+    function handleAdd() {
+        console.log("Added!");
+    }
+
+    return <AddButton onAdd={handleAdd} />;
+}
+```
+
+The usual names: the **prop** starts with `on` (`onAdd`, `onDelete`), and the **function** that handles it starts with `handle` (`handleAdd`).
+
+```mermaid
+flowchart TB
+  Shop[Shop<br/>defines handleAdd]:::service -->|"prop: onAdd={handleAdd}"| Button[AddButton]:::client
+  Button -.->|"click: calls onAdd()"| Shop
+```
+
+## Components must be pure
+
+A pure component does only one thing while rendering: it works out the JSX from its props and state. It does **not** change anything outside itself.
+
+```jsx
+let guestCount = 0;
+
+// Wrong: changes a variable outside the component while rendering.
+function Guest() {
+    guestCount = guestCount + 1;
+
+    return <p>Guest number {guestCount}</p>;
+}
+```
+
+The numbers depend on how many times React happened to call `Guest`, and React may call a component more often than you expect. In development, Strict Mode calls each component **twice** on purpose to expose bugs like this one. Fix it by passing the number in as a prop.
+
+Side effects, like fetching data or starting a timer, go in **event handlers** or in **`useEffect`**, never in the render itself. See [useEffect](../hooks/use-effect.mdx).
+
+## Don't define a component inside another component
+
+```jsx
+function Parent() {
+    // Wrong: a brand-new Child type on every render of Parent.
+    function Child() {
+        return <input />;
+    }
+
+    return <Child />;
+}
+```
+
+Every time `Parent` renders, `Child` is a **new** function. To React, a new function is a different component type, so it throws the old `Child` away, with its state and DOM, and makes a new one. Here, whatever the user typed in the input disappears on every re-render. Always define components at the **top level** of the file.
+
+## Common mistakes
+
+- **Lowercase component names.** `<card />` is an unknown HTML tag, not your component.
+- **Changing props.** Props are read-only. Change state in the parent instead.
+- **Forgetting the curly braces** for numbers and booleans. `price="25"` passes the **string** `"25"`, so `price + 1` gives `"251"`.
+- **Calling the handler while passing it.** `onAdd={handleAdd()}` passes the **result** of `handleAdd`, and calls it on every render. Pass the function: `onAdd={handleAdd}`.
+- **Defining components inside components.** Their state resets on every render.
+- **Expecting `key` or `ref` in props.** `key` is used by React and never reaches the component. If the child needs the id, pass it again as its own prop: `key={user.id} userId={user.id}`.
+
+## In the interview
+
+**Likely question:** "What's the difference between props and state?"
+
+| | Props | State |
+| --- | --- | --- |
+| Who owns it | The **parent** | The **component itself** |
+| Can the component change it? | **No**, read-only | **Yes**, with its setter function |
+| Changing it re-renders the component? | New props come with the parent's re-render | **Yes** |
+| Used for | Configuring a component from outside | Data that changes over time inside it |
+
+> "A component is a function that takes props and returns JSX. Props are the inputs, passed down by the parent, and they're read-only: the component must not change them. State is data the component owns and changes itself with a setter, which makes React re-render it. When a child needs to tell the parent something, the parent passes a function as a prop, and the child calls it."
+
+**Likely follow-up:** "What is `children`?"
+
+**Answer:** "Whatever I put between a component's opening and closing tags. It arrives as the `children` prop, so wrapper components like `Card` or `Modal` can show any content without knowing what it is."
+
+<Callout title="Remember this" type="success">
+  - A **component** = a function, named with a **capital letter**, that returns JSX.
+  - **Props** = one object of inputs from the parent. Strings in quotes, everything else in `{ }`. Defaults with `{ size = 48 }`.
+  - Props are **read-only**. Components must be **pure**: same props, same JSX, no changes outside during render.
+  - **`children`** = whatever is between the tags. Children talk to parents by calling **functions passed as props** (`onAdd`).
+  - Never define a component **inside** another one: it's a new type each render, so its state resets.
+</Callout>

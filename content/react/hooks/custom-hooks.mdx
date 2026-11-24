@@ -1,0 +1,253 @@
+---
+title: "Custom Hooks"
+description: "Your own functions that start with use and call other hooks, to reuse stateful logic across components."
+icon: Puzzle
+---
+
+## The idea
+
+A **custom hook** is a JavaScript function whose name starts with **`use`** and that calls other hooks inside it, like `useState` or `useEffect`. It lets you pull **logic** out of a component and reuse it in many components.
+
+Think of a **recipe card**. Two cooks can follow the same recipe card, but each one cooks in their own kitchen with their own ingredients. A custom hook is the recipe: every component that calls it follows the same steps, but gets its **own** state.
+
+## A first custom hook: useCounter
+
+Here is a hook that manages a counter, with increment, decrement and reset:
+
+```jsx
+import { useState } from "react";
+
+function useCounter(initialValue = 0) {
+    const [count, setCount] = useState(initialValue);
+
+    function increment() {
+        setCount((current) => current + 1);
+    }
+
+    function decrement() {
+        setCount((current) => current - 1);
+    }
+
+    function reset() {
+        setCount(initialValue);
+    }
+
+    return { count, increment, decrement, reset };
+}
+```
+
+- It takes an **input**: the starting value.
+- It uses **`useState`** inside, like a component would.
+- It **returns** the state and the functions that change it.
+- It returns **no JSX**. A hook is logic; the component decides what to show.
+
+Any component can now use it:
+
+```jsx
+function App() {
+    // Start counting from 5.
+    const { count, increment, decrement, reset } = useCounter(5);
+
+    return (
+        <div>
+            <h1>Counter: {count}</h1>
+            <button onClick={increment}>+</button>
+            <button onClick={decrement}>-</button>
+            <button onClick={reset}>Reset</button>
+        </div>
+    );
+}
+```
+
+Clicking **+** adds one, **-** takes one away, and **Reset** goes back to 5.
+
+## Extracting a hook from a component
+
+Custom hooks usually start as code **inside** a component that you want to reuse. This component shows the window's width, and keeps it up to date:
+
+```jsx
+import { useState, useEffect } from "react";
+
+function Header() {
+    const [width, setWidth] = useState(window.innerWidth);
+
+    useEffect(() => {
+        function handleResize() {
+            setWidth(window.innerWidth);
+        }
+
+        window.addEventListener("resize", handleResize);
+
+        return () => window.removeEventListener("resize", handleResize);
+    }, []);
+
+    return <header>{width < 600 ? "Menu" : "Home  About  Contact"}</header>;
+}
+```
+
+Now the sidebar needs the width too. Instead of copying the state and the effect, **move them into a hook**:
+
+```jsx
+import { useState, useEffect } from "react";
+
+function useWindowWidth() {
+    const [width, setWidth] = useState(window.innerWidth);
+
+    useEffect(() => {
+        function handleResize() {
+            setWidth(window.innerWidth);
+        }
+
+        window.addEventListener("resize", handleResize);
+
+        return () => window.removeEventListener("resize", handleResize);
+    }, []);
+
+    return width;
+}
+
+function Header() {
+    const width = useWindowWidth();
+
+    return <header>{width < 600 ? "Menu" : "Home  About  Contact"}</header>;
+}
+
+function Sidebar() {
+    const width = useWindowWidth();
+
+    if (width < 600) {
+        return null;
+    }
+
+    return <aside>Sidebar</aside>;
+}
+```
+
+The components now say **what** they need ("the window width"), not **how** to get it. The how lives in one place, and a bug fix there fixes every component.
+
+## Hooks share logic, not state
+
+This is the most important thing about custom hooks, and a common interview question. Two components call `useCounter()`. Do they share one count?
+
+```jsx
+function CounterA() {
+    const { count, increment } = useCounter();
+
+    return <button onClick={increment}>A: {count}</button>;
+}
+
+function CounterB() {
+    const { count } = useCounter();
+
+    return <p>B: {count}</p>;
+}
+```
+
+**No.** Click A twice and it shows `A: 2`, while B still shows `B: 0`.
+
+A custom hook is just a function. Calling it is like **pasting its code** into the component: every call runs its own `useState`, so every component gets its **own** state. Hooks share the **logic**, never the **data**.
+
+To share the **same** data between components:
+
+- **Lift the state up** to their common parent, and pass it down as props. See [Lifting State Up](../state-and-rendering/lifting-state-up.mdx).
+- Or keep it in a **context**. See [Context and useContext](./use-context.mdx).
+
+## Hooks get fresh values on every render
+
+A custom hook runs **every time** the component renders, as part of the component. So you can pass it props or state, and it always sees the latest ones:
+
+```jsx
+function ChatRoom({ roomId }) {
+    // When roomId changes, the hook gets the new one on the next render.
+    const messages = useChatMessages(roomId);
+
+    return <MessageList messages={messages} />;
+}
+```
+
+Inside `useChatMessages`, an effect with `[roomId]` in its dependencies reconnects whenever the room changes.
+
+## Naming and rules
+
+- **The name must start with `use` followed by a capital letter**: `useCounter`, `useWindowWidth`, `useFetch`. The name is how React's lint rules know the function calls hooks, so they can check the [Rules of Hooks](./rules-of-hooks.mdx) inside it, and wherever it's called.
+- **Only functions that call hooks should start with `use`.** A function that only works with values, like `formatDate`, is a normal function. Calling it `useFormatDate` makes the linter stop you from calling it inside an `if`, for no reason.
+- **Custom hooks follow the same rules as built-in ones.** Call them at the top level of a component or another hook, never inside an `if`, a loop, or an event handler.
+- **Hooks can call other hooks**, including other custom hooks. A `useUserProfile` can call `useFetch`, which calls `useState` and `useEffect`.
+
+## What to return
+
+- **One value**: return it directly, like `useWindowWidth()` returns a number.
+- **Two values**, like a value and its setter: return an **array**, like `useState` does. The caller can name them freely: `const [isOn, toggle] = useToggle()`.
+- **More than two**: return an **object**, like `useCounter`. The caller picks what they need by name, and the order doesn't matter.
+
+## A label in React DevTools: useDebugValue
+
+React DevTools lists the hooks each component uses. **`useDebugValue`** adds a readable label to your custom hook there:
+
+```jsx
+import { useDebugValue } from "react";
+
+function useOnlineStatus() {
+    const isOnline = useSyncExternalStore(subscribe, getSnapshot);
+
+    // Shows "Online" or "Offline" next to the hook in DevTools.
+    useDebugValue(isOnline ? "Online" : "Offline");
+
+    return isOnline;
+}
+```
+
+It does nothing in the app itself. It's useful for hooks in shared libraries.
+
+## Good custom hooks
+
+| Good: one clear purpose | Avoid: vague lifecycle wrappers |
+| --- | --- |
+| `useWindowWidth()` | `useMount(fn)` |
+| `useOnlineStatus()` | `useUpdateEffect(fn)` |
+| `useFetch(url)` | `useEffectOnce(fn)` |
+| `useLocalStorage(key, initial)` | |
+
+A hook like `useMount(fn)` only hides `useEffect(fn, [])`, and the linter can't check its dependencies any more. Name hooks after **what they do for the component**, not when they run.
+
+For hooks that interviews ask you to write live, see [Write These Hooks](../build-it/write-these-hooks.mdx): `useDebounce`, `usePrevious`, `useLocalStorage` and `useFetch`.
+
+## Why use custom hooks?
+
+- **Reuse logic** across components without copying code.
+- **Keep components clean**: the component shows UI, the hook holds the logic.
+- **Combine hooks**: one custom hook can use several others, like `useFetch` plus `useLocalStorage` for data that's saved between visits.
+- **Test logic on its own**: Testing Library's `renderHook` runs a hook without writing a component. See [Testing React](../ecosystem/testing-react.mdx).
+
+Before hooks, React reused logic with **higher-order components** and **render props**. Custom hooks replaced most of those. See [HOCs and Render Props](../patterns/hoc-and-render-props.mdx).
+
+## Common mistakes
+
+- **Expecting two components to share state** because they call the same hook. Each call has its own state.
+- **A name without `use`.** `getCounter()` that calls `useState` hides it from the lint rules, so their checks don't run.
+- **`use` on a function with no hooks.** It adds rules that don't apply.
+- **Calling a hook inside an `if`, a loop, or an event handler.** Custom hooks follow the Rules of Hooks too.
+- **Returning JSX from a hook.** A hook returns data and functions. If it returns UI, it should be a component.
+
+## In the interview
+
+**Likely question:** "What is a custom hook, and why would you write one?"
+
+> "A custom hook is a function whose name starts with `use` and that calls other hooks. I write one when several components need the same stateful logic, like tracking the window width or fetching data: I move the state and effects into the hook, and it returns what the components need. Components then say what they need instead of how to get it. Each component that calls the hook gets its own state: hooks share logic, not data."
+
+**Likely follow-up:** "If two components call the same custom hook, do they share state?"
+
+**Answer:** "No. Each call runs its own `useState` and `useEffect`, as if the hook's code were pasted into each component. To share the same data, I lift the state up to a common parent or put it in context."
+
+**Another follow-up:** "Why must a custom hook's name start with `use`?"
+
+**Answer:** "So that React's lint rules recognize it as a hook. They then check the Rules of Hooks inside it, like no hooks in conditions, and check that callers use it at the top level too. A function that doesn't call any hooks shouldn't start with `use`."
+
+<Callout title="Remember this" type="success">
+  - A **custom hook** = a function named **`useSomething`** that **calls other hooks**, to reuse logic.
+  - It returns **data and functions**, not JSX. One value → return it; two → an **array**; more → an **object**.
+  - **Hooks share logic, not state.** Each component that calls `useCounter()` gets its **own** count. To share data: **lift state up** or use **context**.
+  - It runs on **every render**, so it always sees the latest props and state.
+  - Same **Rules of Hooks** as built-in hooks. Only use the `use` prefix if it **calls hooks**.
+  - Name hooks by **purpose** (`useWindowWidth`), not by lifecycle (`useMount`).
+</Callout>

@@ -1,0 +1,336 @@
+---
+title: "Higher-Order Components and Render Props"
+description: "Two older ways to share logic between components: wrapping a component in a function, and passing a function that renders. And why hooks replaced most of them."
+icon: Layers2
+---
+
+## The idea
+
+Before hooks (React 16.8, 2019), function components couldn't have state, so React code shared logic between components in two other ways:
+
+- A **higher-order component (HOC)**: a **function** that takes a component and returns a **new component** with extra behavior.
+- A **render prop**: a component that takes a **function as a prop**, and calls it to decide what to render.
+
+Think of a **gift-wrapping service**. You hand over a present, and you get back the same present, wrapped, with a card attached. The present inside is untouched. An HOC is the wrapping service: your component goes in, and a wrapped version with extra props or behavior comes out.
+
+Today custom hooks do most of this job, but you'll meet both patterns in older code and in libraries, and interviewers still ask about them.
+
+## Higher-order components
+
+```js noRun
+const EnhancedComponent = higherOrderComponent(OriginalComponent);
+```
+
+An HOC:
+
+- is a plain **function**, usually named **`withSomething`**;
+- takes a component, and returns a **new component** that renders the original one;
+- **doesn't change** the original component. It **wraps** it.
+
+The name comes from **higher-order functions** in JavaScript: functions that take or return other functions, like `map`. See [Higher-Order Functions](../../javascript/functions/higher-order-functions-and-currying.mdx).
+
+## The basic shape
+
+```jsx
+function withExtraProp(WrappedComponent) {
+    // Return a new component.
+    function WithExtraProp(props) {
+        const extra = "I am an extra prop!";
+
+        // Render the original, with all its props plus the extra one.
+        return <WrappedComponent {...props} extra={extra} />;
+    }
+
+    return WithExtraProp;
+}
+```
+
+- **`WrappedComponent`**: the original component you want to add to.
+- **`WithExtraProp`**: the new component. It renders `WrappedComponent`, passes on **all** the props it received with `{...props}`, and adds `extra`.
+
+Using it:
+
+```jsx
+function Display({ name, extra }) {
+    return (
+        <div>
+            <p>Name: {name}</p>
+            <p>Extra: {extra}</p>
+        </div>
+    );
+}
+
+// Make the wrapped version once, outside any component.
+const EnhancedDisplay = withExtraProp(Display);
+
+function App() {
+    return <EnhancedDisplay name="Ana" />;
+}
+```
+
+On the page:
+
+```html
+<div>
+    <p>Name: Ana</p>
+    <p>Extra: I am an extra prop!</p>
+</div>
+```
+
+`App` only passed `name`. The HOC added `extra` on the way through.
+
+## Example: withLogger
+
+An HOC can add behavior, not only props. This one logs when the wrapped component appears and disappears:
+
+```jsx
+import { useEffect } from "react";
+
+function withLogger(WrappedComponent) {
+    function WithLogger(props) {
+        useEffect(() => {
+            console.log(WrappedComponent.name + " mounted");
+
+            return () => {
+                console.log(WrappedComponent.name + " unmounted");
+            };
+        }, []);
+
+        return <WrappedComponent {...props} />;
+    }
+
+    return WithLogger;
+}
+```
+
+In a real project it often sits in its own folder, and a component file exports the wrapped version:
+
+```text
+src/
+    hoc/
+        withLogger.jsx
+    App.jsx
+```
+
+```jsx
+import withLogger from "./hoc/withLogger";
+
+function App() {
+    return <div>Hello from App!</div>;
+}
+
+export default withLogger(App);
+```
+
+When `App` appears, the console shows `App mounted`. In development, Strict Mode runs effects twice, so you see `App mounted`, `App unmounted`, `App mounted`. See [useEffect](../hooks/use-effect.mdx).
+
+## Example: withAuth, a guard
+
+A common real use is to protect pages: show the page only to logged-in users.
+
+```jsx
+function withAuth(WrappedComponent) {
+    function WithAuth(props) {
+        const user = useCurrentUser();
+
+        if (!user) {
+            return <LoginPage />;
+        }
+
+        return <WrappedComponent {...props} user={user} />;
+    }
+
+    return WithAuth;
+}
+
+const ProtectedDashboard = withAuth(Dashboard);
+const ProtectedSettings = withAuth(Settings);
+```
+
+The same check now guards every page, written once.
+
+## Rules for writing HOCs
+
+- **Pass all props through** with `{...props}`. The wrapper shouldn't swallow props it doesn't use.
+- **Don't change the original component.** Return a new one that renders it.
+- **Never call an HOC during render.** Make the wrapped component **once**, at the top level of the file:
+
+```jsx
+function Parent() {
+    // Wrong: a brand-new component type on every render of Parent.
+    const LoggedCounter = withLogger(Counter);
+
+    return <LoggedCounter />;
+}
+```
+
+Each call to `withLogger` returns a **new** function, so on every render React sees a different component type. It throws the old `Counter` away and builds a new one: its **state resets** every time `Parent` renders. This is the same problem as [defining a component inside a component](../react-basics/components-and-props.mdx).
+
+- **Give the wrapper a clear name**, for React DevTools and error messages. Naming the inner function (`WithLogger`) helps; a `displayName` is even clearer:
+
+```jsx
+WithLogger.displayName = "withLogger(" + WrappedComponent.name + ")";
+```
+
+- **Refs.** In React 19, `ref` is a normal prop, so `{...props}` passes it on to the wrapped component. Before React 19, an HOC had to use `forwardRef` to pass a ref through. See [useRef](../hooks/use-ref.mdx).
+
+## HOCs you've probably used
+
+- **`React.memo(Component)`** takes a component and returns a new one that skips re-renders when the props are the same. It's an HOC built into React. See [useMemo and useCallback](../hooks/use-memo-and-use-callback.mdx).
+- **`connect(mapStateToProps)(Component)`** from React-Redux, in older Redux code. Today, the `useSelector` hook does the same.
+- **`withRouter(Component)`** from React Router 5, which passed the router's data as props. React Router 6 removed it in favor of hooks like `useNavigate`.
+
+## Render props
+
+A **render prop** is a prop whose value is a **function that returns JSX**. The component does the work, like tracking the mouse, and then **calls your function** with the result to decide what to show.
+
+```jsx
+import { useState } from "react";
+
+function MouseTracker({ render }) {
+    const [position, setPosition] = useState({ x: 0, y: 0 });
+
+    function handleMouseMove(event) {
+        setPosition({ x: event.clientX, y: event.clientY });
+    }
+
+    return (
+        <div onMouseMove={handleMouseMove} style={{ height: 300 }}>
+            {render(position)}
+        </div>
+    );
+}
+
+function App() {
+    return (
+        <MouseTracker
+            render={(position) => (
+                <p>
+                    The mouse is at {position.x}, {position.y}
+                </p>
+            )}
+        />
+    );
+}
+```
+
+`MouseTracker` owns the **logic** (the state and the event). The parent decides the **look**. Another parent could pass a function that draws a cat at the mouse position, using the same tracker.
+
+The function is often passed as **`children`** instead of a prop called `render`:
+
+```jsx
+<MouseTracker>
+    {(position) => <p>The mouse is at {position.x}, {position.y}</p>}
+</MouseTracker>
+```
+
+Then `MouseTracker` calls `children(position)` instead of `render(position)`.
+
+React itself used this pattern for context before `useContext` existed:
+
+```jsx
+<ThemeContext.Consumer>
+    {(theme) => <button className={theme}>Save</button>}
+</ThemeContext.Consumer>
+```
+
+## Why hooks replaced them
+
+The same mouse logic as a custom hook:
+
+```jsx
+function useMousePosition() {
+    const [position, setPosition] = useState({ x: 0, y: 0 });
+
+    useEffect(() => {
+        function handleMouseMove(event) {
+            setPosition({ x: event.clientX, y: event.clientY });
+        }
+
+        window.addEventListener("mousemove", handleMouseMove);
+
+        return () => window.removeEventListener("mousemove", handleMouseMove);
+    }, []);
+
+    return position;
+}
+
+function App() {
+    const position = useMousePosition();
+
+    return <p>The mouse is at {position.x}, {position.y}</p>;
+}
+```
+
+No wrapper, no function prop: one line that says what the component needs. The problems hooks solved:
+
+| Problem | HOCs | Render props | Hooks |
+| --- | --- | --- | --- |
+| **Wrapper hell**: extra layers in the component tree | `withA(withB(withC(Page)))` adds 3 layers | Each one adds a layer | **No** extra layers |
+| **Where did this prop come from?** | Hidden: injected by some HOC | Clear: it's the function's argument | Clear: `const x = useX()` |
+| **Name clashes** | Two HOCs adding `data`: one silently wins | No clash: you name the argument | No clash: you name the variable |
+| **Nesting** | Fine to read | Functions inside functions, deeper and deeper | Flat: one call per line |
+
+The name clash in action:
+
+```jsx
+function withUserData(WrappedComponent) {
+    return function WithUserData(props) {
+        return <WrappedComponent {...props} data="user data" />;
+    };
+}
+
+function withPostData(WrappedComponent) {
+    return function WithPostData(props) {
+        return <WrappedComponent {...props} data="post data" />;
+    };
+}
+
+// Both add a prop called "data".
+const Page = withUserData(withPostData(Profile));
+```
+
+`Profile` gets `data="post data"`. The inner HOC sets `data` last, so the user data is **silently lost**, with no error.
+
+See [Custom Hooks](../hooks/custom-hooks.mdx).
+
+## Are they still used?
+
+Yes, in a few places:
+
+- **Older code and libraries.** Many codebases still have `connect`, `withRouter`, or their own `withSomething` helpers.
+- **Wrapping what renders**, not just sharing data. A hook can't wrap a component in a boundary, so `withErrorBoundary(Component)` is still common, since [error boundaries](./error-boundaries.mdx) must be class components. Guards like `withAuth` are also still written as HOCs.
+- **Render props for "how to draw each item".** List and table components often take a function like `renderItem={(item) => <Row item={item} />}`, so the parent controls how each row looks.
+
+For **sharing logic**, reach for a **custom hook** first.
+
+## Common mistakes
+
+- **Calling the HOC inside a component.** A new component type each render, so the state resets. Wrap once, at the top level.
+- **Forgetting `{...props}`.** Props from the parent never reach the wrapped component.
+- **Two HOCs adding the same prop name.** One value is lost without any error.
+- **Changing the wrapped component** (like setting things on it) instead of returning a new one.
+- **A new render-prop function on every render with `React.memo`.** The function is a new object each time, so `memo` can't skip the render.
+
+## In the interview
+
+**Likely question:** "What is a higher-order component?"
+
+> "A function that takes a component and returns a new component that renders the original with extra props or behavior, like `withAuth(Dashboard)` or `withLogger(App)`. It doesn't change the original, it wraps it, and passes all the props through. It was the main way to share logic between components before hooks. `React.memo` and React-Redux's `connect` are well-known HOCs."
+
+**Likely follow-up:** "What's a render prop, and why did hooks replace both patterns?"
+
+**Answer:** "A render prop is a function prop that a component calls to decide what to render: the component owns the logic and the caller owns the look. Both patterns work, but HOCs hide where props come from and can clash on prop names, and both add extra layers to the tree, which leads to wrapper hell. A custom hook shares the same logic as a plain function call, with no extra layers and explicit names. I still use HOCs to wrap rendering, like error boundaries, and render props for things like `renderItem` in lists."
+
+**Another follow-up:** "Why shouldn't you call an HOC inside a component's render?"
+
+**Answer:** "Every call returns a new component type. React compares types between renders, sees a different one, unmounts the old component and mounts a new one, so its state is lost on every render. HOCs should be applied once, at the top level of the file."
+
+<Callout title="Remember this" type="success">
+  - **HOC** = a function: **component in, new component out**. Named **`withSomething`**. It **wraps**, never changes, the original.
+  - Pass all props through with **`{...props}`**. Apply HOCs **once at the top level**, never during render (the state resets).
+  - Known HOCs: **`React.memo`**, React-Redux **`connect`**, React Router 5 **`withRouter`**.
+  - **Render prop** = a function prop that returns JSX: the component owns the **logic**, the caller owns the **look**. Often passed as **`children`**.
+  - **Hooks replaced both** for sharing logic: no wrapper hell, no hidden props, no name clashes.
+  - Still used: **wrapping rendering** (`withErrorBoundary`, `withAuth`) and **`renderItem`**-style props.
+</Callout>

@@ -1,0 +1,250 @@
+---
+title: "useLayoutEffect, useId and More"
+description: "The hooks you reach for less often: measuring before paint, unique ids, exposing methods to a parent, outside stores, and effect events."
+icon: Wrench
+---
+
+## The idea
+
+`useState`, `useEffect`, `useRef`, `useContext`, `useReducer`, `useMemo` and `useCallback` cover almost everything. This page covers the **special tools**: you won't use them every day, but interviewers ask what they're for.
+
+Think of a toolbox. Hammer and screwdriver come out every day. The level and the stud finder come out rarely, but when you need them, nothing else does the job.
+
+## useLayoutEffect: run before the screen paints
+
+**`useLayoutEffect`** works like `useEffect`, but it runs **after React updates the DOM and before the browser paints** the screen. The browser waits for it to finish.
+
+| Step | What happens |
+| --- | --- |
+| 1 | React renders and updates the DOM |
+| 2 | **`useLayoutEffect` runs**. The user hasn't seen anything yet |
+| 3 | The browser paints. The user sees the screen |
+| 4 | **`useEffect` runs** (usually) |
+
+Use it when you need to **measure** the layout and change something **before** the user sees it. A tooltip is the classic example: it can only decide to show above or below the button once it knows its own height.
+
+```jsx
+import { useLayoutEffect, useRef, useState } from "react";
+
+function Tooltip({ text, buttonTop }) {
+    const ref = useRef(null);
+    const [height, setHeight] = useState(0);
+
+    useLayoutEffect(() => {
+        // Measure the real height before the browser paints.
+        const box = ref.current.getBoundingClientRect();
+        setHeight(box.height);
+    }, []);
+
+    // Not enough room above the button? Show it below instead.
+    const showBelow = buttonTop < height;
+
+    return (
+        <div ref={ref} className={showBelow ? "tooltip below" : "tooltip above"}>
+            {text}
+        </div>
+    );
+}
+```
+
+With `useEffect`, the user could see the tooltip in the wrong place for one frame, then jump: a **flicker**. With `useLayoutEffect`, the second render happens before the first paint, so the user only sees the final position.
+
+The cost: the browser **can't paint** until it finishes, so slow code here freezes the screen. Use `useEffect` by default, and `useLayoutEffect` only to fix a visible flicker. It also doesn't run during server rendering.
+
+## useId: unique ids for accessibility
+
+HTML links some elements together by id: a `<label htmlFor>` to an `<input id>`, or `aria-describedby` to a hint. If a component uses a fixed id like `"email"`, two copies on the page clash. **`useId`** gives each copy its own unique id:
+
+```jsx
+import { useId } from "react";
+
+function EmailField() {
+    const id = useId();
+    const hintId = id + "-hint";
+
+    return (
+        <div>
+            <label htmlFor={id}>Email</label>
+            <input id={id} type="email" aria-describedby={hintId} />
+            <p id={hintId}>We never share your email.</p>
+        </div>
+    );
+}
+```
+
+Why not `Math.random()`? With server rendering, the server and the browser would make **different** random ids, and React reports a hydration mismatch. `useId` gives the **same** id on both sides.
+
+Don't use `useId` for **list keys**. Keys should come from your data. See [Lists and Keys](../react-basics/lists-and-keys.mdx).
+
+## useImperativeHandle: choose what a parent can call
+
+Normally a parent passes a ref, and the child puts it on a DOM element, so the parent gets the **whole** element. **`useImperativeHandle`** lets the child decide **exactly** what the parent gets instead: a small object with only the methods you choose.
+
+Say the parent should be able to focus the input and clear it, and nothing else:
+
+```jsx
+import { useImperativeHandle, useRef } from "react";
+
+function CustomInput({ ref }) {
+    const inputRef = useRef(null);
+
+    useImperativeHandle(ref, () => {
+        return {
+            focusInput() {
+                inputRef.current.focus();
+            },
+            clear() {
+                inputRef.current.value = "";
+            },
+        };
+    }, []);
+
+    return <input ref={inputRef} type="text" />;
+}
+
+function Parent() {
+    const customInputRef = useRef(null);
+
+    return (
+        <div>
+            <CustomInput ref={customInputRef} />
+            <button onClick={() => customInputRef.current.focusInput()}>Focus</button>
+            <button onClick={() => customInputRef.current.clear()}>Clear</button>
+        </div>
+    );
+}
+```
+
+`customInputRef.current` is **not** the `<input>`. It's the object `{ focusInput, clear }`. The parent can't change the input's style or read its value directly.
+
+This uses the **React 19** style, where `ref` is a normal prop. Before React 19, the child also needed **`forwardRef`**:
+
+```jsx
+import { forwardRef, useImperativeHandle, useRef } from "react";
+
+const CustomInput = forwardRef(function CustomInput(props, ref) {
+    const inputRef = useRef(null);
+
+    useImperativeHandle(ref, () => {
+        return {
+            focusInput() {
+                inputRef.current.focus();
+            },
+        };
+    }, []);
+
+    return <input ref={inputRef} type="text" />;
+});
+```
+
+| Piece | What it does |
+| --- | --- |
+| `ref` prop (React 19) or `forwardRef` (before) | Lets a parent's ref reach the child |
+| `useImperativeHandle` | Decides **what** the parent gets through that ref |
+
+Use it rarely. A parent calling methods on a child is **imperative**; most things should be props instead (`isOpen={true}` rather than `modalRef.current.open()`). It fits things React has no prop for: focus, scroll, play, and "reset this form".
+
+## useSyncExternalStore: read from an outside store
+
+Some data lives **outside React** and changes on its own: the browser's online status, the window size, or a state library's store. **`useSyncExternalStore`** subscribes a component to it, safely:
+
+```jsx
+import { useSyncExternalStore } from "react";
+
+function subscribe(callback) {
+    window.addEventListener("online", callback);
+    window.addEventListener("offline", callback);
+
+    // Return how to unsubscribe.
+    return () => {
+        window.removeEventListener("online", callback);
+        window.removeEventListener("offline", callback);
+    };
+}
+
+function getSnapshot() {
+    return navigator.onLine;
+}
+
+function StatusBar() {
+    const isOnline = useSyncExternalStore(subscribe, getSnapshot);
+
+    return <p>{isOnline ? "Online" : "Offline"}</p>;
+}
+```
+
+It takes two functions:
+
+- **`subscribe(callback)`**: start listening, call `callback` on every change, and return an unsubscribe function.
+- **`getSnapshot()`**: return the current value.
+
+With server rendering, also pass a third function, **`getServerSnapshot`**, for the value to use on the server, where there is no `navigator`.
+
+You could do this with `useState` plus `useEffect`, but with [concurrent rendering](../modern-react/concurrent-rendering.mdx), different parts of the screen could show different values from the same store during one render (called **tearing**). `useSyncExternalStore` prevents that. You'll rarely write it yourself: libraries like Redux and Zustand use it inside.
+
+## useEffectEvent: read the latest value without re-running
+
+Sometimes an effect needs a value, but a change in that value **shouldn't** restart the effect. Here, the chat should reconnect when the **room** changes, but not when the **theme** changes:
+
+```jsx
+import { useEffect, useEffectEvent } from "react";
+
+function ChatRoom({ roomId, theme }) {
+    const onConnected = useEffectEvent(() => {
+        showNotification("Connected to " + roomId, theme);
+    });
+
+    useEffect(() => {
+        const connection = createConnection(roomId);
+        connection.on("connected", () => {
+            onConnected();
+        });
+        connection.connect();
+
+        return () => connection.disconnect();
+    }, [roomId]);
+
+    return <h1>Welcome to {roomId}</h1>;
+}
+```
+
+- **`onConnected`** always sees the **latest** `roomId` and `theme`, but it's not a dependency, so changing the theme doesn't reconnect.
+- Without it, you'd have to put `theme` in the array (a reconnect on every theme change), or leave it out (a stale theme and a lint warning).
+
+`useEffectEvent` is stable since **React 19.2**. Call the function it returns only from **inside effects**, never during render or from event handlers. See [What's New in React 19](../modern-react/react-19.mdx).
+
+## Where the other hooks are
+
+| Hook | What it's for | Page |
+| --- | --- | --- |
+| `useTransition` | Mark an update as non-urgent, so typing stays fast | [Concurrent Rendering](../modern-react/concurrent-rendering.mdx) |
+| `useDeferredValue` | Show an older value while a slow part catches up | [Concurrent Rendering](../modern-react/concurrent-rendering.mdx) |
+| `useActionState`, `useOptimistic` | Form actions and instant "optimistic" updates | [What's New in React 19](../modern-react/react-19.mdx) |
+| `use` | Read a promise or a context, even inside an `if` | [What's New in React 19](../modern-react/react-19.mdx) |
+| `useDebugValue` | A label for your custom hook in React DevTools | [Custom Hooks](./custom-hooks.mdx) |
+
+## Common mistakes
+
+- **`useLayoutEffect` everywhere.** It blocks painting. Use `useEffect` unless you see a flicker.
+- **`Math.random()` or a counter for ids.** It breaks with server rendering. Use `useId`.
+- **`useId` for list keys.** Keys come from the data.
+- **`useImperativeHandle` instead of props.** If it can be a prop, make it a prop.
+- **Calling a `useEffectEvent` function during render** or passing it to children. Call it only from effects.
+
+## In the interview
+
+**Likely question:** "What's the difference between `useEffect` and `useLayoutEffect`?"
+
+> "Both run after React updates the DOM. `useLayoutEffect` runs before the browser paints, and the browser waits for it, so I can measure the layout and fix it before the user sees anything. `useEffect` usually runs after the paint, so it doesn't block the screen. I use `useEffect` by default, and `useLayoutEffect` only to measure and adjust something that would otherwise flicker, like a tooltip's position."
+
+**Likely follow-up:** "What is `useImperativeHandle` for?"
+
+**Answer:** "It lets a child choose what a parent's ref gives access to. Instead of the whole DOM element, the parent gets an object with only the methods the child exposes, like `focus` or `reset`. In React 19 the child receives `ref` as a prop; before that it needed `forwardRef`. I use it rarely, only for actions that can't be props, like focusing or scrolling."
+
+<Callout title="Remember this" type="success">
+  - **`useLayoutEffect`** runs **before paint** and blocks it. For **measuring** and avoiding flicker. Default to `useEffect`.
+  - **`useId`** = unique ids that match on **server and client**, for `htmlFor` and `aria-*`. **Not for keys**.
+  - **`useImperativeHandle(ref, () => ({ ... }))`** exposes **only chosen methods** to a parent's ref. React 19: `ref` is a prop; before: **`forwardRef`**.
+  - **`useSyncExternalStore(subscribe, getSnapshot)`** reads outside stores without **tearing**. Store libraries use it.
+  - **`useEffectEvent`** (React 19.2) reads the **latest** values inside an effect **without** being a dependency.
+</Callout>
