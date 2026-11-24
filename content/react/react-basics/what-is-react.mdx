@@ -8,32 +8,14 @@ icon: Atom
 
 **React** is a JavaScript library for building user interfaces. You describe **what the screen should look like** for the data you have right now. When the data changes, React works out what changed and updates the page for you.
 
-Think of ordering in a restaurant. You say **what** you want: "a pizza with mushrooms". You don't walk into the kitchen and tell the cook each step. React works the same way: you say what the screen should show, and React does the steps to get the page there.
+Think of ordering in a restaurant. You say **what** you want, "a pizza with mushrooms", and you don't tell the cook each step. React works the same way: you say what the screen should show, and React does the steps.
 
 ## Imperative vs declarative
 
-There are two ways to write UI code:
-
-- **Imperative:** you give the steps. "Find the label. Change its text to 3 likes."
+- **Imperative:** you give the steps. "Find the label. Change its text to 3 likes." In plain JavaScript, you find elements with `document.querySelector` and change them by hand.
 - **Declarative:** you describe the result. "The label shows the number of likes." The library does the steps.
 
-Here is a like button in plain JavaScript. You change the page yourself, step by step.
-
-```js noRun
-// Plain JavaScript: find the elements, then change them by hand.
-const button = document.querySelector("#like");
-const label = document.querySelector("#count");
-let likes = 0;
-
-button.addEventListener("click", () => {
-    likes = likes + 1;
-
-    // You must remember to update the page every time likes changes.
-    label.textContent = likes + " likes";
-});
-```
-
-The same button in React. You only say what the button shows for the current `likes`.
+A like button in React. You only say what the button shows for the current `likes`:
 
 ```jsx
 import { useState } from "react";
@@ -50,19 +32,13 @@ function LikeButton() {
 }
 ```
 
-When `setLikes` changes the number, React calls `LikeButton` again, gets the new result, and updates the text on the page. You never touch the page yourself. (`useState` is explained in [State with useState](../state-and-rendering/use-state.mdx).)
+When `setLikes` changes the number, React calls `LikeButton` again and updates the text on the page. (`useState` is explained in [State with useState](../state-and-rendering/use-state.mdx).) When the same data shows in 5 places, plain JavaScript must update all 5 by hand; in React, each place reads the data, so all 5 stay right.
 
-| | Plain JavaScript | React |
-| --- | --- | --- |
-| You write | The steps to change the page | What the page looks like for the current data |
-| Who updates the page | You | React |
-| When the data shows in 5 places | You update all 5, and a forgotten one is a bug | Each place reads the data, so all 5 stay right |
-
-This idea is often written as **UI = f(state)**: the screen is a function of the data. Same data in, same screen out.
+This idea is often written as **UI = f(state)**: the screen is a function of the data.
 
 ## Components
 
-A React app is built from **components**: small, reusable pieces of UI, like LEGO bricks. A component is a JavaScript function that returns what to show. A shop page might look like this:
+A React app is built from **components**: small, reusable pieces of UI. A component is a JavaScript function that returns what to show. A shop page might look like this:
 
 ```mermaid
 graph TD
@@ -74,11 +50,11 @@ graph TD
   List --> C3[ProductCard]:::storage
 ```
 
-`ProductCard` is written once and used three times, with different data each time. Each component looks after its own small part of the page. See [Components and Props](./components-and-props.mdx).
+`ProductCard` is written once and used three times, with different data each time. See [Components and Props](./components-and-props.mdx).
 
 ## One-way data flow
 
-Data in React flows **one way: down**, from a parent component to its children. The parent passes data as **props**. A child can't change its parent's data directly. When something happens in the child, like a click, it **calls a function** that the parent passed down, and the parent changes its own data.
+Data flows **one way: down**, from a parent to its children, as **props**. A child can't change its parent's data directly. Instead, it **calls a function** that the parent passed down, and the parent changes its own data.
 
 ```mermaid
 flowchart TB
@@ -86,7 +62,7 @@ flowchart TB
   Child -.->|"on click: calls onAdd()"| Parent
 ```
 
-This makes bugs easier to find. If some data on the screen is wrong, you look at the component that **owns** that data, not at every component that shows it.
+This makes bugs easier to find: if some data on the screen is wrong, you look at the component that **owns** it.
 
 ## How React updates the page
 
@@ -100,61 +76,29 @@ Steps 1 and 2 happen in memory, on plain JavaScript objects. That description is
 
 ## Putting React on a page
 
-A React app starts from one empty element in the HTML page:
+A React app starts from one empty element in the HTML page, `<div id="root"></div>`. One small file calls `createRoot(container).render(<App />)` to draw the top component, `App`, inside it. From then on, React owns everything inside `#root`.
 
-```html
-<div id="root"></div>
-```
-
-One small file tells React to draw the top component, `App`, inside it:
-
-```jsx
-import { createRoot } from "react-dom/client";
-import App from "./App.jsx";
-
-const container = document.getElementById("root");
-const root = createRoot(container);
-
-root.render(<App />);
-```
-
-From then on, React owns everything inside `#root`. There are two packages: **`react`** holds components and hooks, and **`react-dom`** puts them on a web page. (React Native puts the same components on phone screens instead.)
+There are two packages: **`react`** holds components and hooks, and **`react-dom`** puts them on a web page.
 
 ## Library vs framework, and SPAs
 
-React is a **library**: it does the UI. It does not choose how you handle pages and URLs, fetch data, or build your files. You pick other tools for those, like React Router, TanStack Query and Vite.
+React is a **library**: it does the UI. Pages and URLs, data fetching and building come from other tools, like React Router, TanStack Query and Vite. A **framework** built on React, like Next.js, makes those choices for you.
 
-A **framework** built on React makes those choices for you: Next.js and React Router's framework mode are the common ones. React's own docs suggest starting a new app with a framework. The old starter, Create React App, was deprecated in 2025.
-
-Many React apps are **single-page applications (SPAs)**. The browser loads one HTML page once. After that, JavaScript swaps the content when you move around, without loading a new page from the server. Frameworks like Next.js can also build the HTML on the server first. See [SSR, SSG and Hydration](../modern-react/ssr-and-hydration.mdx).
-
-## In the real world
-
-- React was made at **Facebook**. It ran Facebook's News Feed from 2011 and Instagram's website from 2012, and Facebook made it open source in 2013.
-- **Instagram, Netflix and Airbnb** build their web apps with React.
-- **React Native** uses the same components and hooks to build iOS and Android apps.
+Many React apps are **single-page applications (SPAs)**. The browser loads one HTML page once. After that, JavaScript swaps the content when you move around, without loading a new page from the server. Frameworks like Next.js can also build the HTML on the server first: see [SSR, SSG and Hydration](../modern-react/ssr-and-hydration.mdx).
 
 ## Common mistakes
 
-- **Calling React a framework.** It's a library for UI. Next.js is a framework built on it.
-- **Changing the page by hand** with `document.querySelector` inside a React app. React doesn't know about the change and can overwrite it on the next update. Change the data instead.
-- **Lowercase component names.** `<likeButton />` is treated as an unknown HTML tag. Components must start with a **capital letter**: `<LikeButton />`.
-- **"The virtual DOM makes React faster than the DOM."** It doesn't, by itself. Perfect hand-written DOM updates are faster. The virtual DOM lets React find what changed **for you**, so the page stays fast enough without you writing those updates.
+- **Changing the page by hand** with `document.querySelector` inside a React app. React doesn't know about the change and can overwrite it. Change the data instead.
+- **Lowercase component names.** `<likeButton />` is treated as an unknown HTML tag. Use a **capital letter**: `<LikeButton />`.
+- **"The virtual DOM makes React faster than the DOM."** Not by itself: perfect hand-written DOM updates are faster. The virtual DOM lets React find what changed **for you**.
 
 ## In the interview
-
-- Say **declarative** and **components** in your first sentence.
-- Mention **one-way data flow** and that React updates **only what changed**.
 
 > "React is a JavaScript library for building user interfaces out of components. Instead of changing the page step by step, I describe what the UI should look like for the current state. When the state changes, React calls my components again, compares the new result with the old one, and updates only the parts of the DOM that changed. Data flows one way, from parents to children through props."
 
 **Likely follow-up:** "Why use React instead of plain JavaScript?"
 
 **Answer:** "Keeping the page in sync with the data is the hard part of UI code. With plain JavaScript, every change has to update every place that shows that data by hand. With React, I describe the UI for any state, and React keeps the page in sync. Components also make the UI reusable and easier to test. For a small static page, plain JavaScript is fine."
-
-**Another follow-up:** "Is React a framework?"
-
-**Answer:** "No, it's a library for the view layer. Routing, data fetching and building come from other tools, or from a framework built on React, like Next.js."
 
 <Callout title="Remember this" type="success">
   - React is a **library** for UIs. You describe **what** to show; React does the steps. **UI = f(state)**.

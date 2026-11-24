@@ -8,25 +8,9 @@ icon: ListOrdered
 
 To show a list, you turn an **array of data** into an **array of JSX** with `map`. Each item gets a **`key`**: a name tag that tells React **which item is which** between renders.
 
-Think of a **coat check**. Each coat gets a numbered ticket. Coats can be moved around on the racks, and you still get your own coat back, because the ticket stays with the coat. A key is that ticket. Without it, React would have to guess by **position**: "you get whatever coat is on hook 3 now".
+Think of a **coat check**. Each coat gets a numbered ticket. Coats can be moved around on the racks, and you still get your own coat back, because the ticket stays with the coat. A key is that ticket. Without it, React would have to guess by **position**.
 
 ## Rendering a list with map
-
-```jsx
-function FruitList() {
-    const fruits = ["Apple", "Banana", "Cherry"];
-
-    return (
-        <ul>
-            {fruits.map((fruit) => (
-                <li key={fruit}>{fruit}</li>
-            ))}
-        </ul>
-    );
-}
-```
-
-`map` gives back a new array of `<li>` elements, and JSX shows every item of an array. Real data is usually an array of **objects**, and each object has an **id** from the database. That id is the best key.
 
 ```jsx
 function ProductList({ products }) {
@@ -42,13 +26,7 @@ function ProductList({ products }) {
 }
 ```
 
-To show only some items, `filter` first, then `map`:
-
-```jsx
-const inStock = products.filter((product) => product.stock > 0);
-
-const rows = inStock.map((product) => <ProductRow key={product.id} product={product} />);
-```
+`map` gives back a new array of `<li>` elements, and JSX shows every item of an array. Real data usually has an **id** from the database: that id is the best key. To show only some items, `filter` first, then `map`.
 
 ## What keys are for
 
@@ -62,7 +40,7 @@ So keys let React **move** items instead of rebuilding them, and keep each item'
 
 ## Why the index is a bad key
 
-`map` also gives you the index, so `key={index}` is tempting. It works only while the list **never changes order**. Here is what goes wrong when you add an item at the top.
+`key={index}` works only while the list **never changes order**. Here is what goes wrong when you add an item at the top.
 
 Each row has an input where the user typed a note. Before: "Milk" and "Eggs". Then "Bread" is added at the top.
 
@@ -72,43 +50,18 @@ Each row has an input where the user typed a note. Before: "Milk" and "Eggs". Th
 | 2nd | Eggs, note "a dozen" | **Milk**, note "a dozen" ✗ | Eggs, note "a dozen" ✓ |
 | 3rd | (none) | Eggs, empty note | Bread, empty note ✓ |
 
-With index keys, React sees key 0 in both lists and thinks "same item, its text changed from Milk to Bread". The input's state belongs to key 0, so the note "2 litres" stays at the top, now next to Bread. Every row is updated, and the notes end up next to the wrong items.
+With index keys, React sees key 0 in both lists and thinks "same item, its text changed from Milk to Bread". The input's state belongs to key 0, so the note "2 litres" stays at the top, now next to Bread.
 
-With id keys, React sees "milk" and "eggs" are still there, just moved down, and "bread" is new. Only one row is created, and every note stays with its item.
-
-The index is fine only when **all three** are true:
-
-1. The list never changes order and nothing is inserted or removed in the middle.
-2. Items have no state of their own (no inputs, no checkboxes, no open/closed toggles).
-3. Items have no id you could use.
+With id keys, React sees "milk" and "eggs" are still there, just moved down, and "bread" is new. Every note stays with its item.
 
 ## The rules for keys
 
 - **Unique among siblings.** Two items in the same list can't share a key. Keys in different lists can repeat.
-- **Stable.** The same item must get the same key on every render. Never `key={Math.random()}`: a new key every render means React throws away and rebuilds **every** item every time, and all their state is lost.
+- **Stable.** The same item must get the same key on every render. Never `key={Math.random()}`: React would rebuild **every** item every time, and all their state is lost.
 - **On the outer element of the map.** The key goes on what `map` returns, `<ProductRow key={product.id} />`, not on an element inside `ProductRow`.
-- **Not a prop.** React keeps the key for itself; `props.key` is `undefined` inside the component. If the component needs the id, pass it again: `<ProductRow key={product.id} productId={product.id} />`.
+- **Not a prop.** `props.key` is `undefined` inside the component. If it needs the id, pass it again: `<ProductRow key={product.id} productId={product.id} />`.
 
-When an item needs **two** elements with no wrapper, use a Fragment with a key:
-
-```jsx
-import { Fragment } from "react";
-
-function Glossary({ terms }) {
-    return (
-        <dl>
-            {terms.map((term) => (
-                <Fragment key={term.id}>
-                    <dt>{term.word}</dt>
-                    <dd>{term.meaning}</dd>
-                </Fragment>
-            ))}
-        </dl>
-    );
-}
-```
-
-If you forget keys, React still works but prints a warning in the console: "Each child in a list should have a unique "key" prop." It then falls back to positions, like index keys.
+If you forget keys, React prints a warning in the console and falls back to positions, like index keys.
 
 No id in the data? Make one **when the data is created**, for example `crypto.randomUUID()` when the user adds a todo, and store it with the item. Don't make it while rendering.
 
@@ -123,7 +76,7 @@ function ChatPage({ contactId }) {
 }
 ```
 
-Without the key, switching from Ana to Ben would keep the half-typed message meant for Ana. With `key={contactId}`, each contact gets a fresh `ChatBox`. This is the simplest way to "reset all state when a prop changes". See [When Not to Use an Effect](../hooks/you-might-not-need-an-effect.mdx).
+Without the key, switching from Ana to Ben would keep the half-typed message meant for Ana. See [When Not to Use an Effect](../hooks/you-might-not-need-an-effect.mdx).
 
 ## Common mistakes
 

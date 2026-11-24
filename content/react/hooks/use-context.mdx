@@ -69,7 +69,7 @@ function App() {
 }
 ```
 
-Since **React 19**, you can use the context itself as the provider: `<UserContext value={user}>`. Before React 19 you wrote **`<UserContext.Provider value={user}>`**. The old form still works, and you'll see it in most existing code.
+Since **React 19**, you can use the context itself as the provider: `<UserContext value={user}>`. Before React 19 you wrote **`<UserContext.Provider value={user}>`**, which you'll see in most existing code.
 
 **Step 3: Read it with `useContext`**, in any component inside the provider:
 
@@ -91,101 +91,11 @@ function UserMenu() {
 
 `Header` and `Navbar` no longer need a `user` prop at all.
 
-## Which value does a component get?
-
-`useContext` looks **up** the tree and uses the **nearest** provider above the component.
-
-```jsx
-const ThemeContext = createContext("light");
-
-function Page() {
-    return (
-        <ThemeContext value="dark">
-            {/* Reads "dark" */}
-            <Sidebar />
-
-            <ThemeContext value="light">
-                {/* Reads "light": the nearer provider wins */}
-                <Footer />
-            </ThemeContext>
-        </ThemeContext>
-    );
-}
-```
-
-With **no** provider above it, a component gets the **default** from `createContext("light")`.
+`useContext` looks **up** the tree and uses the **nearest** provider above the component. With **no** provider above it, a component gets the **default** from `createContext`.
 
 ## Context with state
 
 Context only **passes** a value down. To let components **change** it, keep the value in state in the provider, and pass the setter too:
-
-```jsx
-import { createContext, useContext, useState } from "react";
-
-const ThemeContext = createContext(null);
-
-function ThemeProvider({ children }) {
-    const [theme, setTheme] = useState("light");
-
-    function toggleTheme() {
-        setTheme((current) => (current === "light" ? "dark" : "light"));
-    }
-
-    return (
-        <ThemeContext value={{ theme, toggleTheme }}>
-            {children}
-        </ThemeContext>
-    );
-}
-
-function ThemeButton() {
-    const { theme, toggleTheme } = useContext(ThemeContext);
-
-    return <button onClick={toggleTheme}>Theme: {theme}</button>;
-}
-
-function App() {
-    return (
-        <ThemeProvider>
-            <ThemeButton />
-        </ThemeProvider>
-    );
-}
-```
-
-Clicking the button changes the state in `ThemeProvider`, which passes a new value, and every component reading `ThemeContext` re-renders with it.
-
-## A custom hook for each context
-
-A common pattern: wrap `useContext` in a small hook that also checks for a missing provider.
-
-```jsx
-function useTheme() {
-    const value = useContext(ThemeContext);
-
-    if (value === null) {
-        throw new Error("useTheme must be used inside <ThemeProvider>");
-    }
-
-    return value;
-}
-
-function ThemeButton() {
-    const { theme, toggleTheme } = useTheme();
-
-    return <button onClick={toggleTheme}>Theme: {theme}</button>;
-}
-```
-
-Components call `useTheme()` and never import the context itself. A forgotten provider gives a clear error instead of "cannot read properties of null". See [Custom Hooks](./custom-hooks.mdx).
-
-## Who re-renders when the value changes
-
-When a provider's `value` changes, **every component that reads that context re-renders**. This happens even when a parent in between is wrapped in `React.memo`: context skips past it to reach the readers.
-
-That has two costs to know about:
-
-**1. An object made during render is a new value every time.**
 
 ```jsx
 function ThemeProvider({ children }) {
@@ -198,7 +108,11 @@ function ThemeProvider({ children }) {
 }
 ```
 
-React compares the old and new `value` with `Object.is`. A new object is never equal to the old one, so whenever `ThemeProvider` re-renders for any reason, **every reader** re-renders too. If that matters, keep the object the same with `useMemo`:
+## Who re-renders when the value changes
+
+When a provider's `value` changes, **every component that reads that context re-renders**. This happens even when a parent in between is wrapped in `React.memo`: context skips past it to reach the readers.
+
+**1. An object made during render is a new value every time.** React compares the old and new `value` with `Object.is`. A new object is never equal to the old one, so whenever `ThemeProvider` re-renders for any reason, **every reader** re-renders too. If that matters, keep the object the same with `useMemo`:
 
 ```jsx
 const value = useMemo(() => ({ theme, setTheme }), [theme]);
@@ -209,19 +123,16 @@ const value = useMemo(() => ({ theme, setTheme }), [theme]);
 ## When not to use context
 
 - **Only one or two levels.** Pass props. They make the data flow easy to see.
-- **The middle components just wrap content.** Pass the content as **`children`** instead, and the data doesn't need to travel through them. See [Composition and Children](../patterns/composition-and-children.mdx).
-- **Data that changes very often**, like a mouse position or text typed in a big form, read by many components. Every change re-renders every reader. A store like Zustand or Redux lets each component subscribe to just the piece it needs.
+- **The middle components just wrap content.** Pass the content as **`children`** instead. See [Composition and Children](../patterns/composition-and-children.mdx).
+- **Data that changes very often**, read by many components. Every change re-renders every reader. A store like Zustand or Redux lets each component subscribe to just the piece it needs.
 
-Good fits for context: the logged-in user, the theme, the language, and data that a group of components shares, like the open tab in a `<Tabs>` component.
-
-Context is **not a state manager**. It doesn't store or update anything. State (`useState` or `useReducer`) holds the data; context just **delivers** it. See [useReducer](./use-reducer.mdx) for the two used together, and [Choosing Where State Lives](../data-and-state/where-state-lives.mdx).
+Context is **not a state manager**. State (`useState` or `useReducer`) holds the data; context just **delivers** it. See [useReducer](./use-reducer.mdx) for the two used together.
 
 ## Common mistakes
 
-- **Reading the context outside its provider.** You silently get the default value. A custom hook that throws makes this obvious.
+- **Reading the context outside its provider.** You silently get the default value.
 - **A new object as `value` on every render.** Every reader re-renders whenever the provider does. Use `useMemo`.
 - **One context for everything.** Unrelated changes re-render everyone. Split it.
-- **Reaching for context for one level of props.** Props are simpler and clearer.
 - **Expecting `React.memo` to stop context updates.** It doesn't. A memo'd component that reads the context still re-renders when the value changes.
 
 ## In the interview

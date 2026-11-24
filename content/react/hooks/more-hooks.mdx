@@ -21,35 +21,9 @@ Think of a toolbox. Hammer and screwdriver come out every day. The level and the
 | 3 | The browser paints. The user sees the screen |
 | 4 | **`useEffect` runs** (usually) |
 
-Use it when you need to **measure** the layout and change something **before** the user sees it. A tooltip is the classic example: it can only decide to show above or below the button once it knows its own height.
+Use it when you need to **measure** the layout and change something **before** the user sees it. A tooltip is the classic example: it can only decide to show above or below the button once it knows its own height. With `useEffect`, the user could see the tooltip in the wrong place for one frame, then jump: a **flicker**. With `useLayoutEffect`, the user only sees the final position.
 
-```jsx
-import { useLayoutEffect, useRef, useState } from "react";
-
-function Tooltip({ text, buttonTop }) {
-    const ref = useRef(null);
-    const [height, setHeight] = useState(0);
-
-    useLayoutEffect(() => {
-        // Measure the real height before the browser paints.
-        const box = ref.current.getBoundingClientRect();
-        setHeight(box.height);
-    }, []);
-
-    // Not enough room above the button? Show it below instead.
-    const showBelow = buttonTop < height;
-
-    return (
-        <div ref={ref} className={showBelow ? "tooltip below" : "tooltip above"}>
-            {text}
-        </div>
-    );
-}
-```
-
-With `useEffect`, the user could see the tooltip in the wrong place for one frame, then jump: a **flicker**. With `useLayoutEffect`, the second render happens before the first paint, so the user only sees the final position.
-
-The cost: the browser **can't paint** until it finishes, so slow code here freezes the screen. Use `useEffect` by default, and `useLayoutEffect` only to fix a visible flicker. It also doesn't run during server rendering.
+The cost: the browser **can't paint** until it finishes, so slow code here freezes the screen. Use `useEffect` by default, and `useLayoutEffect` only to fix a visible flicker.
 
 ## useId: unique ids for accessibility
 
@@ -115,103 +89,23 @@ function Parent() {
 }
 ```
 
-`customInputRef.current` is **not** the `<input>`. It's the object `{ focusInput, clear }`. The parent can't change the input's style or read its value directly.
+`customInputRef.current` is **not** the `<input>`. It's the object `{ focusInput, clear }`.
 
-This uses the **React 19** style, where `ref` is a normal prop. Before React 19, the child also needed **`forwardRef`**:
+This uses the **React 19** style, where `ref` is a normal prop. Before React 19, the child also needed **`forwardRef`**.
 
-```jsx
-import { forwardRef, useImperativeHandle, useRef } from "react";
-
-const CustomInput = forwardRef(function CustomInput(props, ref) {
-    const inputRef = useRef(null);
-
-    useImperativeHandle(ref, () => {
-        return {
-            focusInput() {
-                inputRef.current.focus();
-            },
-        };
-    }, []);
-
-    return <input ref={inputRef} type="text" />;
-});
-```
-
-| Piece | What it does |
-| --- | --- |
-| `ref` prop (React 19) or `forwardRef` (before) | Lets a parent's ref reach the child |
-| `useImperativeHandle` | Decides **what** the parent gets through that ref |
-
-Use it rarely. A parent calling methods on a child is **imperative**; most things should be props instead (`isOpen={true}` rather than `modalRef.current.open()`). It fits things React has no prop for: focus, scroll, play, and "reset this form".
+Use it rarely. Most things should be props instead (`isOpen={true}` rather than `modalRef.current.open()`). It fits things React has no prop for: focus, scroll, play, and "reset this form".
 
 ## useSyncExternalStore: read from an outside store
 
-Some data lives **outside React** and changes on its own: the browser's online status, the window size, or a state library's store. **`useSyncExternalStore`** subscribes a component to it, safely:
-
-```jsx
-import { useSyncExternalStore } from "react";
-
-function subscribe(callback) {
-    window.addEventListener("online", callback);
-    window.addEventListener("offline", callback);
-
-    // Return how to unsubscribe.
-    return () => {
-        window.removeEventListener("online", callback);
-        window.removeEventListener("offline", callback);
-    };
-}
-
-function getSnapshot() {
-    return navigator.onLine;
-}
-
-function StatusBar() {
-    const isOnline = useSyncExternalStore(subscribe, getSnapshot);
-
-    return <p>{isOnline ? "Online" : "Offline"}</p>;
-}
-```
-
-It takes two functions:
-
-- **`subscribe(callback)`**: start listening, call `callback` on every change, and return an unsubscribe function.
-- **`getSnapshot()`**: return the current value.
-
-With server rendering, also pass a third function, **`getServerSnapshot`**, for the value to use on the server, where there is no `navigator`.
+Some data lives **outside React** and changes on its own: the browser's online status, the window size, or a state library's store. **`useSyncExternalStore(subscribe, getSnapshot)`** subscribes a component to it, safely. `subscribe(callback)` starts listening and returns an unsubscribe function; `getSnapshot()` returns the current value.
 
 You could do this with `useState` plus `useEffect`, but with [concurrent rendering](../modern-react/concurrent-rendering.mdx), different parts of the screen could show different values from the same store during one render (called **tearing**). `useSyncExternalStore` prevents that. You'll rarely write it yourself: libraries like Redux and Zustand use it inside.
 
 ## useEffectEvent: read the latest value without re-running
 
-Sometimes an effect needs a value, but a change in that value **shouldn't** restart the effect. Here, the chat should reconnect when the **room** changes, but not when the **theme** changes:
+Sometimes an effect needs a value, but a change in that value **shouldn't** restart the effect. A chat should reconnect when the **room** changes, but not when the **theme** changes. A function wrapped in **`useEffectEvent`** always sees the **latest** values, but it's not a dependency, so changing the theme doesn't reconnect.
 
-```jsx
-import { useEffect, useEffectEvent } from "react";
-
-function ChatRoom({ roomId, theme }) {
-    const onConnected = useEffectEvent(() => {
-        showNotification("Connected to " + roomId, theme);
-    });
-
-    useEffect(() => {
-        const connection = createConnection(roomId);
-        connection.on("connected", () => {
-            onConnected();
-        });
-        connection.connect();
-
-        return () => connection.disconnect();
-    }, [roomId]);
-
-    return <h1>Welcome to {roomId}</h1>;
-}
-```
-
-- **`onConnected`** always sees the **latest** `roomId` and `theme`, but it's not a dependency, so changing the theme doesn't reconnect.
-- Without it, you'd have to put `theme` in the array (a reconnect on every theme change), or leave it out (a stale theme and a lint warning).
-
-`useEffectEvent` is stable since **React 19.2**. Call the function it returns only from **inside effects**, never during render or from event handlers. See [What's New in React 19](../modern-react/react-19.mdx).
+`useEffectEvent` is stable since **React 19.2**. Call the function it returns only from **inside effects**. See [What's New in React 19](../modern-react/react-19.mdx).
 
 ## Where the other hooks are
 
@@ -221,7 +115,6 @@ function ChatRoom({ roomId, theme }) {
 | `useDeferredValue` | Show an older value while a slow part catches up | [Concurrent Rendering](../modern-react/concurrent-rendering.mdx) |
 | `useActionState`, `useOptimistic` | Form actions and instant "optimistic" updates | [What's New in React 19](../modern-react/react-19.mdx) |
 | `use` | Read a promise or a context, even inside an `if` | [What's New in React 19](../modern-react/react-19.mdx) |
-| `useDebugValue` | A label for your custom hook in React DevTools | [Custom Hooks](./custom-hooks.mdx) |
 
 ## Common mistakes
 

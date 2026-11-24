@@ -8,31 +8,11 @@ icon: Component
 
 A **component** is a JavaScript function that returns JSX. **Props** are its inputs: the values a parent passes in, like the arguments of a function.
 
-Think of a **name badge template** at a conference. The layout is the same on every badge: a logo, a big name, a company. Only the details change. The template is the component; the name and company written on each badge are the props.
-
-## A first component
-
-```jsx
-function Greeting() {
-    return <h1>Hello!</h1>;
-}
-
-function App() {
-    return (
-        <div>
-            <Greeting />
-            <Greeting />
-        </div>
-    );
-}
-```
-
-`App` uses `Greeting` twice, like an HTML tag. Two things make a function a component:
-
-- It returns JSX (or `null`).
-- Its name starts with a **capital letter**. In JSX, `<Greeting />` means "my component" and `<greeting />` means "an HTML tag called greeting".
+Think of a **name badge template** at a conference. The layout is the same on every badge; only the name and company change. The template is the component; the details on each badge are the props.
 
 ## Passing props
+
+A component returns JSX (or `null`), and its name starts with a **capital letter**: `<Greeting />` means "my component", `<greeting />` means "an HTML tag called greeting".
 
 The parent writes props like HTML attributes. React collects them into **one object** and passes it to the component as its first argument.
 
@@ -51,36 +31,9 @@ function App() {
 }
 ```
 
-On the page:
+The first `Greeting` gets `props = { name: "Ana" }`. Most code reads the props with **destructuring** right in the parameter list, `function Greeting({ name })`, so you can write `name` instead of `props.name`.
 
-```html
-<div>
-    <h1>Hello, Ana!</h1>
-    <h1>Hello, Ben!</h1>
-</div>
-```
-
-The first `Greeting` gets `props = { name: "Ana" }`. Most code reads the props with **destructuring** right in the parameter list, so you can write `name` instead of `props.name`:
-
-```jsx
-function Greeting({ name }) {
-    return <h1>Hello, {name}!</h1>;
-}
-```
-
-A prop can be **any** JavaScript value. Use quotes for strings and curly braces for everything else:
-
-```jsx
-<ProductCard
-    name="Desk lamp"
-    price={25}
-    inStock={true}
-    tags={["home", "light"]}
-    onAdd={handleAdd}
-/>
-```
-
-`<Button disabled />` with no value is short for `disabled={true}`.
+A prop can be **any** JavaScript value. Use quotes for strings and curly braces for everything else: `name="Desk lamp"`, `price={25}`, `onAdd={handleAdd}`.
 
 ## Default values
 
@@ -90,41 +43,34 @@ Give a prop a default value in the destructuring. The default is used when the p
 function Avatar({ url, size = 48 }) {
     return <img src={url} width={size} height={size} alt="" />;
 }
-
-function App() {
-    return (
-        <div>
-            {/* size is 48 */}
-            <Avatar url="/ana.png" />
-
-            {/* size is 96 */}
-            <Avatar url="/ana.png" size={96} />
-        </div>
-    );
-}
 ```
 
-Passing `size={null}` does **not** use the default: `null` is a real value. Older code sets defaults with `Avatar.defaultProps = { size: 48 }`. React 19 removed that for function components; it still works on class components.
+`<Avatar url="/ana.png" />` gets size 48. Passing `size={null}` does **not** use the default: `null` is a real value. React 19 removed `defaultProps` for function components.
 
 ## Props are read-only
 
-A component must **never change its own props**. The props belong to the parent.
+A component must **never change its own props**: they belong to the parent. `props.name = "Someone else"` is wrong; in development, React freezes props, so it throws an error.
+
+When something must change, **the parent** changes its own state and passes **new props** down. If only the child needs the data, the child keeps it in **state**. See [State with useState](../state-and-rendering/use-state.mdx).
+
+## Components must be pure
+
+A pure component only works out the JSX from its props and state: the same props always give the same JSX. It does **not** change anything outside itself while rendering. That's what lets React call a component again at any time and trust the result.
 
 ```jsx
-function Greeting(props) {
-    // Wrong: in development, React freezes props, so this throws an error.
-    props.name = "Someone else";
+let guestCount = 0;
 
-    return <h1>Hello, {props.name}!</h1>;
+// Wrong: changes a variable outside the component while rendering.
+function Guest() {
+    guestCount = guestCount + 1;
+
+    return <p>Guest number {guestCount}</p>;
 }
 ```
 
-Why so strict? React expects components to be **pure**: the same props always give the same JSX. That's what lets React call a component again at any time and trust the result.
+The numbers depend on how many times React happened to call `Guest`. In development, Strict Mode calls each component **twice** on purpose to expose bugs like this one. Fix it by passing the number in as a prop.
 
-When something must change:
-
-- **The parent** changes its own state and passes **new props** down. The child shows them on its next render.
-- **The child** keeps its own data in **state**, if only the child needs it. See [State with useState](../state-and-rendering/use-state.mdx).
+Side effects, like fetching data or starting a timer, go in **event handlers** or in **`useEffect`**, never in the render itself. See [useEffect](../hooks/use-effect.mdx).
 
 ## The children prop
 
@@ -150,7 +96,7 @@ function App() {
 }
 ```
 
-`Card` doesn't know or care what's inside it. The same `Card` can wrap a profile, a chart or a form. See [Composition and Children](../patterns/composition-and-children.mdx).
+The same `Card` can wrap a profile, a chart or a form. See [Composition and Children](../patterns/composition-and-children.mdx).
 
 ## Passing functions: how a child talks to its parent
 
@@ -170,32 +116,13 @@ function Shop() {
 }
 ```
 
-The usual names: the **prop** starts with `on` (`onAdd`, `onDelete`), and the **function** that handles it starts with `handle` (`handleAdd`).
+The usual names: the **prop** starts with `on` (`onAdd`), and the **function** that handles it starts with `handle` (`handleAdd`).
 
 ```mermaid
 flowchart TB
   Shop[Shop<br/>defines handleAdd]:::service -->|"prop: onAdd={handleAdd}"| Button[AddButton]:::client
   Button -.->|"click: calls onAdd()"| Shop
 ```
-
-## Components must be pure
-
-A pure component does only one thing while rendering: it works out the JSX from its props and state. It does **not** change anything outside itself.
-
-```jsx
-let guestCount = 0;
-
-// Wrong: changes a variable outside the component while rendering.
-function Guest() {
-    guestCount = guestCount + 1;
-
-    return <p>Guest number {guestCount}</p>;
-}
-```
-
-The numbers depend on how many times React happened to call `Guest`, and React may call a component more often than you expect. In development, Strict Mode calls each component **twice** on purpose to expose bugs like this one. Fix it by passing the number in as a prop.
-
-Side effects, like fetching data or starting a timer, go in **event handlers** or in **`useEffect`**, never in the render itself. See [useEffect](../hooks/use-effect.mdx).
 
 ## Don't define a component inside another component
 
@@ -210,7 +137,7 @@ function Parent() {
 }
 ```
 
-Every time `Parent` renders, `Child` is a **new** function. To React, a new function is a different component type, so it throws the old `Child` away, with its state and DOM, and makes a new one. Here, whatever the user typed in the input disappears on every re-render. Always define components at the **top level** of the file.
+Every time `Parent` renders, `Child` is a **new** function, so React sees a different component type. It throws the old `Child` away, with its state and DOM, and whatever the user typed disappears. Always define components at the **top level** of the file.
 
 ## Common mistakes
 
@@ -218,8 +145,6 @@ Every time `Parent` renders, `Child` is a **new** function. To React, a new func
 - **Changing props.** Props are read-only. Change state in the parent instead.
 - **Forgetting the curly braces** for numbers and booleans. `price="25"` passes the **string** `"25"`, so `price + 1` gives `"251"`.
 - **Calling the handler while passing it.** `onAdd={handleAdd()}` passes the **result** of `handleAdd`, and calls it on every render. Pass the function: `onAdd={handleAdd}`.
-- **Defining components inside components.** Their state resets on every render.
-- **Expecting `key` or `ref` in props.** `key` is used by React and never reaches the component. If the child needs the id, pass it again as its own prop: `key={user.id} userId={user.id}`.
 
 ## In the interview
 

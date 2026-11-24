@@ -12,20 +12,7 @@ Think of a **scoreboard** at a game. The referee doesn't repaint the board by ha
 
 ## Why a normal variable doesn't work
 
-```jsx
-function Counter() {
-    // Wrong: a normal variable.
-    let count = 0;
-
-    function handleClick() {
-        count = count + 1;
-    }
-
-    return <button onClick={handleClick}>Clicked {count} times</button>;
-}
-```
-
-Clicking does nothing on screen, for two reasons:
+A normal `let count = 0` fails for two reasons:
 
 1. **Changing a normal variable doesn't tell React anything.** React has no reason to render again.
 2. **A normal variable starts over on every render.** Even if React did render again, `let count = 0` would run again, and `count` would be 0.
@@ -54,8 +41,6 @@ function Counter() {
 - **`count`**: the current value. On the first render it's the starting value, `0`.
 - **`setCount`**: the function that changes it.
 
-The usual names are `[something, setSomething]`: `[name, setName]`, `[isOpen, setIsOpen]`.
-
 ## What happens when you click
 
 1. `setCount(1)` stores the new value and asks React for a **re-render**.
@@ -63,24 +48,7 @@ The usual names are `[something, setSomething]`: `[name, setName]`, `[isOpen, se
 3. This time `useState(0)` ignores the `0` and returns the stored value: `count` is `1`.
 4. The JSX now says "You clicked 1 times". React compares it with the screen and updates only the text that changed.
 
-The starting value is used **only on the first render**. After that, React always returns the stored value.
-
-## Each component has its own state
-
-```jsx
-function App() {
-    return (
-        <div>
-            <Counter />
-            <Counter />
-        </div>
-    );
-}
-```
-
-Clicking the first button doesn't change the second one. State belongs to **one copy** of a component on the page, not to the function. React keeps each copy's state by its **position** in the tree.
-
-Hooks like `useState` must be called at the **top level** of the component, never inside an `if` or a loop. React matches each `useState` call to its stored value by **call order**. See [Rules of Hooks](../hooks/rules-of-hooks.mdx).
+Each `<Counter />` on the page has its **own** state. Hooks like `useState` must be called at the **top level** of the component, never inside an `if` or a loop: React matches each `useState` call to its stored value by **call order**. See [Rules of Hooks](../hooks/rules-of-hooks.mdx).
 
 ## State is a snapshot
 
@@ -106,7 +74,7 @@ It shows **1**, not 3. And the log prints **0**.
 
 During this render, `count` is a **constant**: it is `0` for the whole render, including inside `handleClick`. So the three lines all say `setCount(0 + 1)`. Setting state doesn't change the `count` you already have. It only changes what `useState` returns on the **next** render.
 
-Think of state as a **photo** taken at render time. Each render has its own photo, and code in that render sees that photo, even code that runs later, like a click handler or a timer.
+Think of state as a **photo** taken at render time. Code in that render sees that photo, even code that runs later, like a click handler or a timer.
 
 ## The updater function
 
@@ -120,42 +88,17 @@ function handleClick() {
 }
 ```
 
-Now one click adds **3**. React puts the three functions in a queue. On the next render it runs them in order, each with the result of the one before:
-
-| Queued update | `current` | Returns |
-| --- | --- | --- |
-| `current => current + 1` | 0 | 1 |
-| `current => current + 1` | 1 | 2 |
-| `current => current + 1` | 2 | 3 |
+Now one click adds **3**. React puts the three functions in a queue. On the next render it runs them in order, each with the result of the one before.
 
 Use the updater function whenever the next state is worked out **from the previous state**, and especially in timers and async code, where the `count` in your function can be out of date. See [Puzzles: Stale Closures](../predict-and-debug/puzzles-stale-closures.mdx).
 
-## Batching: one render for many updates
+## Batching
 
-React doesn't re-render after **each** setter call. It waits until your event handler has **finished**, then renders **once** with all the updates. This is **batching**.
-
-```jsx
-function Profile() {
-    const [name, setName] = useState("");
-    const [age, setAge] = useState(0);
-
-    function handleReset() {
-        setName("Ana");
-        setAge(29);
-        // One re-render here, not two.
-    }
-
-    return <button onClick={handleReset}>{name} {age}</button>;
-}
-```
-
-Since React 18, batching happens **everywhere**: in event handlers, in `setTimeout`, and after `await` in async code. Before React 18, updates inside timers and promises were **not** batched, and each setter caused its own render.
+React doesn't re-render after **each** setter call. It waits until your event handler has **finished**, then renders **once** with all the updates. This is **batching**. Since React 18, batching happens **everywhere**: in event handlers, in `setTimeout`, and after `await` in async code.
 
 ## Same value, no re-render
 
-React compares the new value with the old one using `Object.is`. If they're the **same**, React skips the re-render.
-
-That's why changing an object **in place** doesn't work:
+React compares the new value with the old one using `Object.is`. If they're the **same**, React skips the re-render. That's why changing an object **in place** doesn't work:
 
 ```jsx
 // Wrong: same object, so React sees no change and doesn't re-render.
@@ -170,38 +113,12 @@ Always treat objects and arrays in state as **read-only**, and replace them with
 
 ## A slow starting value
 
-The starting value is only used on the first render, but the code that **makes** it runs on every render:
-
-```jsx
-// Runs readSavedTodos() on every render, then throws the result away.
-const [todos, setTodos] = useState(readSavedTodos());
-```
+The starting value is only used on the first render, but `useState(readSavedTodos())` still runs `readSavedTodos()` on every render. Pass a **function**, and React calls it only once. This is called **lazy initial state**.
 
 ```jsx
 // Runs readSavedTodos() only once, on the first render.
 const [todos, setTodos] = useState(() => readSavedTodos());
 ```
-
-When making the starting value is slow, like reading `localStorage` or building a big array, pass a **function**. React calls it only once. This is called **lazy initial state**.
-
-## State or props?
-
-Ask: "does this component **own** this data and change it?"
-
-- Data passed in from the parent → **props**. The component can't change it.
-- Data the component changes itself over time → **state**.
-- Data you can **work out** from props or other state, like a total or a filtered list → **neither**. Compute it while rendering.
-
-```jsx
-function Cart({ items }) {
-    // Not state: worked out from props on every render.
-    const total = items.reduce((sum, item) => sum + item.price, 0);
-
-    return <p>Total: {total}</p>;
-}
-```
-
-See [Components and Props](../react-basics/components-and-props.mdx) for the full props vs state table.
 
 ## Common mistakes
 
@@ -210,7 +127,6 @@ See [Components and Props](../react-basics/components-and-props.mdx) for the ful
 - **Changing objects or arrays in place.** `items.push(x); setItems(items)` does nothing. Make a copy: `setItems([...items, x])`.
 - **Setting state during render.** `setCount(1)` in the component body renders again, which sets state again: "Too many re-renders". Set state in event handlers or effects.
 - **Copying props into state.** `useState(props.name)` uses the prop **only once**. When the prop changes, the state doesn't. Use the prop directly.
-- **Storing values you can compute.** Keeping `total` in state next to `items` means two things to keep in sync. Work it out while rendering.
 
 ## In the interview
 
@@ -227,8 +143,7 @@ See [Components and Props](../react-basics/components-and-props.mdx) for the ful
 **Answer:** "Neither, really. The call returns right away and doesn't change the current variable. It schedules a re-render, and React batches all the updates from the same event into one render. Since React 18 that batching also happens in timeouts and promises."
 
 <Callout title="Remember this" type="success">
-  - **`const [count, setCount] = useState(0)`**. The starting value is used only on the **first render**.
-  - A normal variable resets every render and doesn't re-render. State is **kept** by React, and the **setter re-renders**.
+  - **`const [count, setCount] = useState(0)`**. React **keeps** the value, the **setter re-renders**, and the starting value is used only on the **first render**.
   - **State is a snapshot**: `count` doesn't change during a render. `setCount(count + 1)` three times adds **1**.
   - New value from the old one → **updater function** `setCount(c => c + 1)`.
   - **Batching**: one re-render after the handler finishes. Everywhere since **React 18**.

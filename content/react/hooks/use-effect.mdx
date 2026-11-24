@@ -10,17 +10,7 @@ icon: RefreshCw
 
 Think of a **hotel room**. When you check in, you switch on the air conditioning. When you check out, you switch it off. If you move to another room, you switch off the first one **before** switching on the next. An effect works the same way: a **setup** when the component appears, a **cleanup** when it goes away, and a cleanup then a new setup when something it depends on changes.
 
-## What is a side effect?
-
-Rendering must be **pure**: it only works out the JSX from props and state. A **side effect** is anything that touches the world **outside** that calculation:
-
-- Starting a timer with `setInterval`
-- Fetching data from a server
-- Subscribing to events, like `window.addEventListener("resize", ...)`
-- Connecting to a chat server or a WebSocket
-- Changing the page title, or calling a non-React library
-
-Side effects caused by a **user action**, like saving a form on click, go in the **event handler**. Side effects caused by the component **being on the screen** go in `useEffect`.
+Rendering must be **pure**: it only works out the JSX from props and state. A **side effect** is anything that touches the world **outside** that calculation. Side effects caused by a **user action**, like saving a form on click, go in the **event handler**. Side effects caused by the component **being on the screen** go in `useEffect`. See [When Not to Use an Effect](./you-might-not-need-an-effect.mdx).
 
 ## The syntax
 
@@ -32,27 +22,6 @@ useEffect(() => {
         // Cleanup: runs before the next setup, and when the component is removed.
     };
 }, [dependencies]);
-```
-
-Two arguments:
-
-1. A **setup function**. It can return a **cleanup function**.
-2. A **dependency array**: the values the effect uses. React runs the effect again only when one of them has changed.
-
-## When effects run
-
-```jsx
-function Page() {
-    console.log("render");
-
-    useEffect(() => {
-        console.log("effect");
-    });
-
-    return <h1>Hello</h1>;
-}
-// render
-// effect
 ```
 
 React first calls the component, updates the DOM, and only **then** runs the effect. That's why an effect can safely read the DOM: it's already there. And because it usually runs after the browser has painted, a slow effect doesn't hold up the screen.
@@ -72,8 +41,6 @@ React compares each dependency with its value from the last render, using `Objec
 The rule: **every value from the component that the effect uses** (props, state, and anything worked out from them) must be in the array. The ESLint rule **`react-hooks/exhaustive-deps`** checks this for you. Leaving one out to "run it less often" causes bugs with old values; see the stale closure section below.
 
 ## Cleanup
-
-Here is a timer that counts seconds:
 
 ```jsx
 import { useState, useEffect } from "react";
@@ -99,49 +66,13 @@ function Timer() {
 
 Without the cleanup, the timer keeps running after `Timer` is removed from the page. Show and hide it a few times, and several timers run at once.
 
-The cleanup runs at **two** moments:
-
-- **Before the effect runs again**, because a dependency changed.
-- **When the component is removed** from the page (unmounted).
-
-```jsx
-function ChatRoom({ roomId }) {
-    useEffect(() => {
-        const connection = createConnection(roomId);
-        connection.connect();
-
-        return () => {
-            connection.disconnect();
-        };
-    }, [roomId]);
-
-    return <h1>Welcome to {roomId}</h1>;
-}
-```
-
-When `roomId` changes from `"music"` to `"travel"`, the order is:
-
-```text
-connect music
-disconnect music
-connect travel
-```
-
-Cleanup is where you undo the setup: clear timers, remove event listeners, close connections, unsubscribe.
+The cleanup runs **before the effect runs again**, because a dependency changed, and **when the component is removed** from the page (unmounted). Cleanup is where you undo the setup: clear timers, remove event listeners, close connections, unsubscribe.
 
 ## Strict Mode runs effects twice in development
 
-In development, with `<StrictMode>`, React runs every effect **setup, cleanup, setup** when the component first appears:
+In development, with `<StrictMode>`, React runs every effect **setup, cleanup, setup** when the component first appears.
 
-```text
-connect music
-disconnect music
-connect music
-```
-
-This is on purpose. It's a test: if the app works the same after setup, cleanup, setup, your cleanup is correct. If you see two connections or two timers, the cleanup is **missing**. It happens only in development, never in production.
-
-Don't "fix" it by blocking the second run with a ref. Fix the cleanup.
+This is on purpose. It's a test: if the app works the same after setup, cleanup, setup, your cleanup is correct. If you see two connections or two timers, the cleanup is **missing**. It happens only in development, never in production. Don't "fix" it by blocking the second run with a ref. Fix the cleanup.
 
 ## Fetching data in an effect
 
@@ -177,12 +108,10 @@ function UserProfile({ userId }) {
 }
 ```
 
-Two things to notice:
-
 - **The effect function can't be `async`.** An async function returns a promise, and React expects the effect to return a cleanup function or nothing. Write an async function **inside** the effect and call it.
 - **The `ignore` flag stops a race condition.** If `userId` changes from 1 to 2 quickly, the answer for user 1 may arrive **after** user 2's. The cleanup marks the old request as out of date, so its answer is ignored.
 
-In real apps, data fetching usually goes through a library like TanStack Query, or a framework. See [Fetching Data](../data-and-state/fetching-data.mdx).
+In real apps, data fetching usually goes through a library like TanStack Query. See [Fetching Data](../data-and-state/fetching-data.mdx).
 
 ## The stale closure trap
 
@@ -207,37 +136,17 @@ function Timer() {
 
 The effect ran **once**, after the first render, so its function remembers that render's `seconds`, which is **0**. Every tick says `setSeconds(0 + 1)`. The screen shows 1 forever.
 
-Two fixes:
-
-- Use the **updater function**: `setSeconds((current) => current + 1)`. It doesn't need `seconds` at all. This is the best fix here.
-- Add `seconds` to the dependency array. It works, but the interval is cleared and started again every second.
-
-See [Puzzles: Stale Closures](../predict-and-debug/puzzles-stale-closures.mdx).
+The fix: use the **updater function**, `setSeconds((current) => current + 1)`. It doesn't need `seconds` at all. See [Puzzles: Stale Closures](../predict-and-debug/puzzles-stale-closures.mdx).
 
 ## Objects and functions as dependencies
 
-```jsx
-function SearchResults({ query }) {
-    // A new object on every render.
-    const options = { query: query, limit: 10 };
+An object made in the component, like `const options = { query: query, limit: 10 }`, is a **new object** on every render, and a new object is never `Object.is` equal to the old one. So an effect with `[options]` runs after **every** render. The same happens with functions made inside the component.
 
-    useEffect(() => {
-        fetchResults(options);
-    }, [options]);
-}
-```
-
-`options` is a **new object** on every render, and a new object is never `Object.is` equal to the old one. So the effect runs after **every** render. The same happens with functions made inside the component.
-
-Fixes, best first:
-
-1. **Make the object inside the effect**, and depend on the plain values: `[query]`.
-2. Move it **outside the component** if it doesn't use props or state.
-3. Keep it stable with `useMemo` or `useCallback`. See [useMemo and useCallback](./use-memo-and-use-callback.mdx).
+The fix: **make the object inside the effect**, and depend on the plain values: `[query]`.
 
 ## Lifecycle methods and effects
 
-Class components had **lifecycle methods**. Interviewers often ask how they map to `useEffect`:
+Interviewers often ask how class **lifecycle methods** map to `useEffect`:
 
 | Class component | With useEffect |
 | --- | --- |
@@ -245,16 +154,7 @@ Class components had **lifecycle methods**. Interviewers often ask how they map 
 | `componentDidUpdate` | `useEffect(fn, [a, b])`, or no array to run after every render |
 | `componentWillUnmount` | The **cleanup** function returned by the effect |
 
-But the better way to think about effects is **"keep in sync"**, not "run at mount". An effect says: "while this component is on screen, keep it connected to room `roomId`". React works out when to start, stop and restart. See [Class Components and Lifecycle](../patterns/class-components.mdx).
-
-## Do you need an effect at all?
-
-Effects are for syncing with **outside** systems. Many effects in real code shouldn't be there:
-
-- **A value worked out from props or state**, like a filtered list or a full name. Compute it while rendering. An effect plus state means an extra render and two things to keep in sync.
-- **Something that happens because the user did something**, like sending a form. Put it in the event handler.
-
-See [When Not to Use an Effect](./you-might-not-need-an-effect.mdx).
+But the better way to think about effects is **"keep in sync"**, not "run at mount". See [Class Components and Lifecycle](../patterns/class-components.mdx).
 
 ## Common mistakes
 
@@ -263,7 +163,6 @@ See [When Not to Use an Effect](./you-might-not-need-an-effect.mdx).
 - **An `async` effect function.** `useEffect(async () => ...)` returns a promise, not a cleanup. Put the async function inside.
 - **Setting state that the effect depends on.** `useEffect(() => setCount(count + 1), [count])` runs forever.
 - **Objects or functions made during render as dependencies.** The effect runs after every render.
-- **Using an effect for derived data.** `useEffect(() => setTotal(...), [items])` should be `const total = ...` while rendering.
 
 ## In the interview
 
@@ -286,5 +185,4 @@ See [When Not to Use an Effect](./you-might-not-need-an-effect.mdx).
   - **Strict Mode** runs setup, cleanup, setup in development, to catch missing cleanups.
   - Put **every** value the effect uses in the array (`exhaustive-deps`). Missing ones cause **stale closures**: use `setX(prev => ...)`.
   - The effect function **can't be async**. Ignore late answers with a flag in the cleanup.
-  - Values you can compute and user actions **don't** need an effect.
 </Callout>

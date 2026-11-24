@@ -6,25 +6,13 @@ icon: Split
 
 ## The idea
 
-**Conditional rendering** means showing different things depending on the data: a "Log in" button for guests and a "Log out" button for users, a spinner while loading, an empty-state message when the list is empty.
+**Conditional rendering** means showing different things depending on the data: a "Log in" button for guests, a spinner while loading, an empty-state message when the list is empty.
 
 There is no special React syntax for this. You use plain JavaScript: `if`, the `? :` operator, and `&&`. Think of a shop sign that flips between **Open** and **Closed**: same sign, and which side shows depends on the time.
 
 ## if, and returning early
 
-The simplest way: an `if` **before** the JSX, returning a different result.
-
-```jsx
-function Inbox({ messages }) {
-    if (messages.length === 0) {
-        return <p>No new messages.</p>;
-    }
-
-    return <p>You have {messages.length} new messages.</p>;
-}
-```
-
-This is clearest when the **whole** output changes, like for loading and error screens:
+Use an `if` **before** the JSX when the **whole** output changes, like for loading and error screens:
 
 ```jsx
 function UserPage({ isLoading, error, user }) {
@@ -44,7 +32,7 @@ Each `if` handles one case and leaves. By the last line, `user` is surely there.
 
 ## The ? : operator
 
-Inside JSX you can't write `if`, because only expressions are allowed in `{ }`. Use the **conditional operator** `condition ? a : b` when you need **one of two** things in the middle of some JSX:
+Inside JSX you can't write `if`, because only expressions are allowed in `{ }`. Use `condition ? a : b` when you need **one of two** things in the middle of some JSX:
 
 ```jsx
 function LoginBar({ isLoggedIn, name }) {
@@ -56,10 +44,6 @@ function LoginBar({ isLoggedIn, name }) {
     );
 }
 ```
-
-Only the **part that changes** sits inside the `? :`. The header and the shop name stay the same either way.
-
-Avoid putting a `? :` inside another one. Two levels are already hard to read. Use `if` before the `return`, or a small component, instead.
 
 ## && : show it or show nothing
 
@@ -90,7 +74,7 @@ function Inbox({ messages }) {
 
 It shows **`0`** on the page.
 
-`messages.length` is `0`, and `0` is falsy, so `&&` gives back the `0` itself. React shows nothing for `false`, `null` and `undefined`, but it **does** show numbers, and `0` is a number. (An empty string `""` also gets through `&&`, but it shows nothing, so it doesn't cause a visible bug.)
+`messages.length` is `0`, and `0` is falsy, so `&&` gives back the `0` itself. React shows nothing for `false`, `null` and `undefined`, but it **does** show numbers, and `0` is a number.
 
 The fix: make the left side a real `true` or `false`.
 
@@ -100,65 +84,15 @@ function Inbox({ messages }) {
 }
 ```
 
-`Boolean(messages.length) &&` and `!!messages.length &&` also work. `> 0` is the easiest to read.
-
 ## Returning null
 
-A component can return **`null`** to show nothing at all:
+A component can return **`null`** to show nothing at all, like `if (!message) return null;`. The component **still runs**, and its hooks still run. It just adds nothing to the page.
 
-```jsx
-function Warning({ message }) {
-    if (!message) {
-        return null;
-    }
+## Many cases
 
-    return <div className="warning">{message}</div>;
-}
-```
-
-The component **still runs**, and its hooks still run. It just adds nothing to the page. Since React 18, returning `undefined` also shows nothing, but `null` says clearly that it's on purpose.
-
-Often it's cleaner for the **parent** to decide: `{message && <Warning message={message} />}`.
-
-## Many cases: a variable or a lookup
-
-When there are more than two cases, work out the content **before** the `return`:
-
-```jsx
-function StatusBadge({ status }) {
-    let label;
-
-    if (status === "paid") {
-        label = "Paid";
-    } else if (status === "shipped") {
-        label = "On its way";
-    } else {
-        label = "Waiting";
-    }
-
-    return <span className="badge">{label}</span>;
-}
-```
-
-When each case maps to one value, an object lookup is even shorter:
-
-```jsx
-const STATUS_LABELS = {
-    paid: "Paid",
-    shipped: "On its way",
-    pending: "Waiting",
-};
-
-function StatusBadge({ status }) {
-    const label = STATUS_LABELS[status];
-
-    return <span className="badge">{label}</span>;
-}
-```
+When there are more than two cases, work out the content **before** the `return`: set a variable with `if`, or, when each case maps to one value, use an object lookup like `STATUS_LABELS[status]`.
 
 ## Removing vs hiding
-
-There are two ways to make something disappear, and they behave differently:
 
 | | Conditional rendering: `{isOpen && <Panel />}` | Hiding: `<div hidden={!isOpen}><Panel /></div>` |
 | --- | --- | --- |
@@ -167,7 +101,7 @@ There are two ways to make something disappear, and they behave differently:
 | Its effects | Cleaned up when removed | Keep running |
 | Cost | Built again each time it opens | Stays in memory all the time |
 
-Use conditional rendering by default. Hide with CSS when the part is costly to build again, or when its state must survive, like a half-filled form in a tab you switch away from. React 19.2 added `<Activity mode="hidden">`, which hides a part while keeping its state: see [What's New in React 19](../modern-react/react-19.mdx).
+Use conditional rendering by default. Hide with CSS when the part is costly to build again, or when its state must survive, like a half-filled form in a tab you switch away from.
 
 ## Common mistakes
 
@@ -175,7 +109,7 @@ Use conditional rendering by default. Hide with CSS when the part is costly to b
 - **`if` inside the JSX braces.** It's a syntax error. Use `? :` or `&&`, or move the `if` above the `return`.
 - **Nested `? :` chains.** Hard to read. Use `if` before the `return`, a lookup object, or split into components.
 - **Hooks after an early return.** `if (!user) return null;` and then `useState(...)` below it breaks the [Rules of Hooks](../hooks/rules-of-hooks.mdx): the hook runs on some renders and not others. Put every hook **above** the first `return`.
-- **Expecting state to survive** when a component is removed and shown again. It starts fresh. Hide it with CSS if the state must stay.
+- **Expecting state to survive** when a component is removed and shown again. It starts fresh.
 
 ## In the interview
 

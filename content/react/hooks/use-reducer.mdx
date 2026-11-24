@@ -8,7 +8,7 @@ icon: Workflow
 
 With `useState`, you set the new value directly: `setCount(count + 1)`. With **`useReducer`**, you **describe what happened** instead: `dispatch({ type: "increment" })`. A separate function, the **reducer**, holds all the rules for how each kind of action changes the state.
 
-Think of a **bank teller**. You don't open the ledger and change your balance yourself. You hand over a slip: "deposit 50". The teller follows the bank's rules and updates the ledger. The slip is the **action**, the teller is the **reducer**, and handing over the slip is **dispatch**.
+Think of a **bank teller**. You hand over a slip: "deposit 50". The teller follows the bank's rules and updates the ledger. The slip is the **action**, the teller is the **reducer**, and handing over the slip is **dispatch**.
 
 ## The syntax
 
@@ -16,12 +16,7 @@ Think of a **bank teller**. You don't open the ledger and change your balance yo
 const [state, dispatch] = useReducer(reducer, initialState);
 ```
 
-- **`reducer`**: a function `(state, action) => newState`.
-- **`initialState`**: the starting state.
-- **`state`**: the current state.
-- **`dispatch`**: the function you call with an action.
-
-An **action** is a plain object that describes what happened. By convention it has a **`type`**, and any extra data it needs.
+The **reducer** is a function `(state, action) => newState`. You call **`dispatch`** with an **action**: a plain object that describes what happened, with a **`type`** and any extra data it needs.
 
 ## A counter with a reducer
 
@@ -63,8 +58,6 @@ What happens on a click of **+**:
 2. On the next render, React calls `counterReducer({ count: 0 }, { type: "increment" })`.
 3. The reducer returns `{ count: 1 }`, and that becomes `state`.
 
-Like the updater function in `useState`, actions are **queued**: dispatching `increment` twice in one click adds 2.
-
 ## The reducer must be pure
 
 The reducer gets the current state and an action, and **returns** the next state. Nothing else:
@@ -72,47 +65,6 @@ The reducer gets the current state and an action, and **returns** the next state
 - **Never change `state`.** Return a **new** object. `state.count++; return state;` returns the **same** object, so React sees no change and the screen doesn't update.
 - **No side effects.** No fetching, no timers, no `localStorage`. Those go in event handlers or effects.
 - **Same input, same output.** In development, Strict Mode calls the reducer **twice** to help you catch impure reducers.
-
-Because it's a plain function, a reducer is easy to test without React:
-
-```js noRun
-const next = counterReducer({ count: 0 }, { type: "increment" });
-
-console.log(next); // { count: 1 }
-```
-
-## Actions with data
-
-Most actions carry data. Put it next to `type` in the action object:
-
-```jsx
-function todosReducer(todos, action) {
-    switch (action.type) {
-        case "added":
-            return [...todos, { id: action.id, text: action.text, done: false }];
-        case "toggled":
-            return todos.map((todo) => {
-                if (todo.id !== action.id) {
-                    return todo;
-                }
-
-                return { ...todo, done: !todo.done };
-            });
-        case "deleted":
-            return todos.filter((todo) => todo.id !== action.id);
-        default:
-            throw new Error("Unknown action: " + action.type);
-    }
-}
-
-// In a component:
-dispatch({ type: "added", id: crypto.randomUUID(), text: "Buy milk" });
-dispatch({ type: "toggled", id: todoId });
-```
-
-Name actions after **what the user did** ("added", "toggled"), not how state should change ("setTodos"). Then the component reads like a list of events, and all the "how" lives in the reducer.
-
-You'll also see a Redux style in a lot of code: an uppercase type, and the data in a field called **`payload`**, like `{ type: "SET_USERNAME", payload: "Ben" }`. Both styles work. Pick one per project and stick to it.
 
 ## A bigger example: manual and auto mode
 
@@ -175,13 +127,11 @@ Each case copies the old state with `...state` and changes one field, so `mode` 
 | Testing the logic | Through the component | Call the reducer directly |
 | Code size | Less | More: the reducer and the action types |
 
-Start with `useState`. Switch to `useReducer` when one event updates several pieces of state, when the same update is copied into many handlers, or when the update logic is hard to follow. `useState` is actually built on top of the same mechanism inside React.
-
 ## useReducer with context
 
-`useReducer` holds the state; [context](./use-context.mdx) delivers it. Together they give a small app-wide store, with no library. A common example is the logged-in user: many components show it, and a few change it.
+`useReducer` holds the state; [context](./use-context.mdx) delivers it. Together they give a small app-wide store, with no library.
 
-**Step 1: create the context, the reducer and a provider.** They usually live together in one file, like `UserContext.jsx`:
+**Step 1: create the context, the reducer and a provider**, usually in one file like `UserContext.jsx`:
 
 ```jsx
 import { createContext, useContext, useReducer } from "react";
@@ -267,37 +217,7 @@ function Profile() {
 
 Typing in `Profile` updates the `Header` too: both read the **same** state through the context. That's the difference from a [custom hook](./custom-hooks.mdx), where every component gets its own state.
 
-And the entry file, with the React 18+ way to start an app:
-
-```jsx
-import { createRoot } from "react-dom/client";
-
-const root = createRoot(document.getElementById("root"));
-root.render(<App />);
-```
-
-Older code uses `ReactDOM.render(<App />, element)`. React 19 **removed** it.
-
-One improvement for bigger apps: `dispatch` **never changes**, but `{ state, dispatch }` is a new object whenever the state changes. So a component that only **dispatches**, like a "Log out" button, still re-renders on every keystroke in the username box. Put them in **two** contexts:
-
-```jsx
-const UserStateContext = createContext(null);
-const UserDispatchContext = createContext(null);
-
-export function UserProvider({ children }) {
-    const [state, dispatch] = useReducer(userReducer, initialState);
-
-    return (
-        <UserStateContext value={state}>
-            <UserDispatchContext value={dispatch}>
-                {children}
-            </UserDispatchContext>
-        </UserStateContext>
-    );
-}
-```
-
-Components that only read `UserDispatchContext` now never re-render when the state changes, because `dispatch` is always the same function.
+One improvement for bigger apps: `dispatch` **never changes**, but `{ state, dispatch }` is a new object whenever the state changes. So a component that only **dispatches** still re-renders. Put `state` and `dispatch` in **two** contexts.
 
 This is the same idea as **Redux**: one store, actions describing what happened, and a pure reducer working out the next state. See [Redux](../data-and-state/redux.mdx).
 
@@ -305,7 +225,6 @@ This is the same idea as **Redux**: one store, actions describing what happened,
 
 - **Changing state inside the reducer.** `state.count++; return state;` doesn't update the screen. Return a new object.
 - **Forgetting `...state`** when the state has several fields. Returning `{ count: 1 }` loses `mode`.
-- **Side effects in the reducer**, like fetching or saving. Keep the reducer pure; do those in handlers or effects.
 - **No `default` case.** A typo in an action type silently returns `undefined`, and the state is gone. Throw an error, or return `state`.
 - **Reading state right after `dispatch`.** Like `useState`, the `state` in this render doesn't change. The new state arrives on the next render.
 
@@ -321,7 +240,7 @@ This is the same idea as **Redux**: one store, actions describing what happened,
 
 <Callout title="Remember this" type="success">
   - **`const [state, dispatch] = useReducer(reducer, initialState)`**.
-  - Components **dispatch actions** that say **what happened**: `dispatch({ type: "added", text })`.
+  - Components **dispatch actions** that say **what happened**: `dispatch({ type: "increment" })`.
   - The **reducer** `(state, action) => newState` holds all the update rules. It must be **pure**: no changing `state`, no side effects.
   - Return a **new object**. Copy the rest with **`...state`**. Throw or return `state` for unknown actions.
   - **useState** for simple values; **useReducer** for related values and many kinds of updates.

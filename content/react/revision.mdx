@@ -55,9 +55,9 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 **[Handling Events](./react-basics/handling-events.mdx)**
 
 - Pass a **function**: `onClick={handleClick}` or `onClick={() => remove(id)}`. **Never** `onClick={handleClick()}`.
-- Event props are **camelCase**. Handlers read **`event.target.value`**, **`event.key`**, and call **`event.preventDefault()`** (not `return false`).
-- Put **`onSubmit` on the form**, and call `event.preventDefault()` to stop the page reload.
-- Events **bubble** through the React tree. `event.stopPropagation()` stops them. `onClickCapture` runs on the way down.
+- Event props are **camelCase**. Handlers read **`event.target.value`** and **`event.key`**.
+- Put **`onSubmit` on the form**, and call `event.preventDefault()` to stop the page reload (not `return false`).
+- Events **bubble** through the React tree. `event.stopPropagation()` stops them.
 - React's **`onChange` fires on every keystroke**.
 - **SyntheticEvent** = a cross-browser wrapper. **Delegation** = one listener per event type at the **root**. No event pooling since React 17.
 
@@ -65,8 +65,7 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 
 **[State with useState](./state-and-rendering/use-state.mdx)**
 
-- **`const [count, setCount] = useState(0)`**. The starting value is used only on the **first render**.
-- A normal variable resets every render and doesn't re-render. State is **kept** by React, and the **setter re-renders**.
+- **`const [count, setCount] = useState(0)`**. React **keeps** the value, the **setter re-renders**, and the starting value is used only on the **first render**.
 - **State is a snapshot**: `count` doesn't change during a render. `setCount(count + 1)` three times adds **1**.
 - New value from the old one → **updater function** `setCount(c => c + 1)`.
 - **Batching**: one re-render after the handler finishes. Everywhere since **React 18**.
@@ -83,7 +82,6 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - **Strict Mode** runs setup, cleanup, setup in development, to catch missing cleanups.
 - Put **every** value the effect uses in the array (`exhaustive-deps`). Missing ones cause **stale closures**: use `setX(prev => ...)`.
 - The effect function **can't be async**. Ignore late answers with a flag in the cleanup.
-- Values you can compute and user actions **don't** need an effect.
 
 **[When Not to Use an Effect](./hooks/you-might-not-need-an-effect.mdx)**
 
@@ -91,16 +89,14 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - **Computable** from props or state → **compute while rendering** (`useMemo` if slow).
 - Caused by a **user action** → put it in the **event handler**.
 - **Reset all state** when a prop changes → **`key={prop}`**.
-- **Chains of effects** → work out all the next state in **one handler** (or a reducer).
-- **Tell the parent** in the handler, not in an effect. **Once-per-app** setup → outside the component.
+- **Chains of effects** → work out all the next state in **one handler** (or a reducer). **Tell the parent** in the handler, not in an effect.
 
 **[useRef](./hooks/use-ref.mdx)**
 
 - **`useRef(initial)`** returns **`{ current: initial }`**, the **same object** every render.
 - Changing **`ref.current` doesn't re-render**. Shown on screen → **state**. Not shown → a ref is fine.
-- Use refs for **timer ids**, and to reach **DOM elements**: `<input ref={inputRef} />`, then `inputRef.current.focus()`.
-- A DOM ref is **`null` during the first render**. Use it in **handlers and effects**.
-- Don't read or write refs **during render**.
+- Use refs for values like a **timer id**, and to reach **DOM elements**: `<input ref={inputRef} />`, then `inputRef.current.focus()`.
+- A DOM ref is **`null` during the first render**. Use it in **handlers and effects**. Don't read or write refs **during render**.
 - **React 19**: `ref` is a **normal prop**. Before: **`forwardRef`**.
 
 **[Context and useContext](./hooks/use-context.mdx)**
@@ -115,7 +111,7 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 **[useReducer](./hooks/use-reducer.mdx)**
 
 - **`const [state, dispatch] = useReducer(reducer, initialState)`**.
-- Components **dispatch actions** that say **what happened**: `dispatch({ type: "added", text })`.
+- Components **dispatch actions** that say **what happened**: `dispatch({ type: "increment" })`.
 - The **reducer** `(state, action) => newState` holds all the update rules. It must be **pure**: no changing `state`, no side effects.
 - Return a **new object**. Copy the rest with **`...state`**. Throw or return `state` for unknown actions.
 - **useState** for simple values; **useReducer** for related values and many kinds of updates.
@@ -134,9 +130,7 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - A **custom hook** = a function named **`useSomething`** that **calls other hooks**, to reuse logic.
 - It returns **data and functions**, not JSX. One value → return it; two → an **array**; more → an **object**.
 - **Hooks share logic, not state.** Each component that calls `useCounter()` gets its **own** count. To share data: **lift state up** or use **context**.
-- It runs on **every render**, so it always sees the latest props and state.
 - Same **Rules of Hooks** as built-in hooks. Only use the `use` prefix if it **calls hooks**.
-- Name hooks by **purpose** (`useWindowWidth`), not by lifecycle (`useMount`).
 
 **[Rules of Hooks](./hooks/rules-of-hooks.mdx)**
 
@@ -144,7 +138,7 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - Rule 2: hooks only in **components** and **custom hooks** (`useSomething`).
 - Why: React matches hooks by **call order**, not by name. A skipped hook shifts every hook after it.
 - Errors: **"Rendered fewer hooks than expected"** / **"Rendered more hooks than during the previous render"**.
-- Fix: put the condition **inside** the hook, move hooks **above** early returns, or **split** into components.
+- Fix: put the condition **inside** the hook, or move hooks **above** early returns.
 - **`eslint-plugin-react-hooks`**: `rules-of-hooks` and `exhaustive-deps`. React 19's **`use`** can be called conditionally.
 
 **[useLayoutEffect, useId and More](./hooks/more-hooks.mdx)**
@@ -177,8 +171,7 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 - **Immer**: "mutate" the **draft** in slice reducers, and a new state is made for you. Change the draft **or** return a new object, not both.
 - **`extraReducers`** lets a slice react to **other slices' actions**, like closing the sidebar on `logout`.
 - **`useSelector`** re-renders when its result changes by **`===`**. Never return a **new object** from a selector.
-- Async → **`createAsyncThunk`** (pending / fulfilled / rejected). Server data → **RTK Query** or TanStack Query.
-- Use Redux for **lots of shared, often-changing client state**. Small apps: `useState` and context.
+- Async → **`createAsyncThunk`** (pending / fulfilled / rejected). Server data → **RTK Query** or TanStack Query. Small apps: `useState` and context.
 
 ## 7. Modern React
 
@@ -187,8 +180,7 @@ The **Remember this** box of every lesson, in the same order as the sidebar. Cli
 **[Routing with React Router](./ecosystem/routing.mdx)**
 
 - **React has no routing.** React Router does **client-side routing**: one HTML page, URL changes with the **History API**, **no reload**.
-- **`<BrowserRouter>`** → **`<Routes>`** → **`<Route path element>`**. `:id` = dynamic segment, `*` = 404.
-- **`<Link to>`**, never `<a href>`, inside the app. **`<NavLink>`** adds an **`active`** class.
+- **`<BrowserRouter>`** → **`<Routes>`** → **`<Route path element>`**. `:id` = dynamic segment, `*` = 404. Use **`<Link to>`**, never `<a href>`.
 - Hooks: **`useParams`** (path values, always **strings**), **`useSearchParams`** (query string), **`useNavigate`** (go from code; `-1` = back), **`useLocation`**, **`useMatch`**.
 - **Nested routes** render in the parent's **`<Outlet />`**. **Index route** = the default child.
 - **Protected route**: render `<Outlet />` or `<Navigate to="/login" replace />`. The **server** must still check.
